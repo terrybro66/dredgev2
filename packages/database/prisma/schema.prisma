@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// TODO: define Query model
+// Fields: id, text, category, date_from, date_to, poly, viz_hint, createdAt
+// Fields: domain String @default("crime")
+// Fields: resolved_location String?
+// Relation: results CrimeResult[]
+
+// TODO: define CrimeResult model
+// Fields: id, query_id, persistent_id, category, month
+// Fields: street, latitude (Float), longitude (Float)
+// Fields: outcome_category, outcome_date
+// Fields: location_type, context
+// Fields: raw Json?
+// Convention: every domain result table must have a raw Json? column
+
+// TODO: define SchemaVersion model
+// Fields: id, table_name, column_name, column_type, triggered_by, createdAt
+// Fields: domain String @default("crime")
