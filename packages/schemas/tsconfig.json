@@ -1,11 +1,13 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "declaration": true,
-    "outDir": "dist",
-    "strict": true,
-    "esModuleInterop": true
+    "target": "ES2020", // runtime environment (Node20+)
+    "module": "CommonJS", // same as the apps/orchestrator tsconfig
+    "declaration": true, // 🔑 emit .d.ts files
+    "outDir": "dist", // build output
+    "strict": true, // strict type‑checking
+    "esModuleInterop": true, // allow commonjs imports
+    "skipLibCheck": true, // optional, speeds up builds
+    "forceConsistentCasingInFileNames": true
   },
   "include": ["src"]
 }
