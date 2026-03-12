@@ -23,6 +23,8 @@ interface ParsedQuery {
   poly: string;
   viz_hint: VizHint;
   resolved_location: string;
+  country_code: string;
+  intent: string;
   months: string[];
 }
 
@@ -46,6 +48,7 @@ interface ExecuteResult {
   count: number;
   months_fetched: string[];
   results: CrimeResult[];
+  cache_hit: boolean;
 }
 
 interface IntentError {
@@ -167,9 +170,11 @@ function QueryInput({
 function InterpretationBanner({
   parsed,
   onRefine,
+  cacheHit,
 }: {
   parsed: ParsedQuery;
   onRefine: () => void;
+  cacheHit: boolean;
 }) {
   const { plan, viz_hint, resolved_location, months } = parsed;
   const singleMonth = plan.date_from === plan.date_to;
@@ -199,6 +204,20 @@ function InterpretationBanner({
         )}
         {" · "}
         <span className="interp-viz">{vizLabel[viz_hint]}</span>
+        {cacheHit && (
+          <span
+            style={{
+              marginLeft: 8,
+              fontSize: "0.75rem",
+              color: "#f5a623",
+              border: "1px solid #f5a623",
+              borderRadius: 3,
+              padding: "1px 5px",
+            }}
+          >
+            cached
+          </span>
+        )}
       </div>
       <button className="btn-ghost small" onClick={onRefine}>
         Refine ↩
@@ -626,7 +645,11 @@ export default function App() {
           )}
 
           {stage === "done" && parsed && (
-            <InterpretationBanner parsed={parsed} onRefine={handleRefine} />
+            <InterpretationBanner
+              parsed={parsed}
+              onRefine={handleRefine}
+              cacheHit={result?.cache_hit ?? false}
+            />
           )}
 
           {stage === "done" && result && (

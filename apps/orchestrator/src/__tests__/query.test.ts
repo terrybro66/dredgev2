@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import express from "express";
 import request from "supertest";
+import type { Router } from "express";
 
 const { mockParseIntent, mockDeriveVizHint, mockExpandDateRange } = vi.hoisted(
   () => ({
@@ -9,7 +10,9 @@ const { mockParseIntent, mockDeriveVizHint, mockExpandDateRange } = vi.hoisted(
     mockExpandDateRange: vi.fn(),
   }),
 );
-
+const { mockGetDomainForQuery } = vi.hoisted(() => ({
+  mockGetDomainForQuery: vi.fn(),
+}));
 const { mockFetchCrimes } = vi.hoisted(() => ({ mockFetchCrimes: vi.fn() }));
 const { mockStoreResults } = vi.hoisted(() => ({ mockStoreResults: vi.fn() }));
 const { mockGeocodeToPolygon } = vi.hoisted(() => ({
@@ -25,6 +28,14 @@ const { mockPrisma } = vi.hoisted(() => ({
     crimeResult: {
       findMany: vi.fn(),
     },
+    queryCache: {
+      findUnique: vi.fn(),
+      create: vi.fn(),
+    },
+    queryJob: {
+      create: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -38,6 +49,9 @@ vi.mock("../crime/store", () => ({ storeResults: mockStoreResults }));
 vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
 vi.mock("../schema", () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
+vi.mock("../domains/registry", () => ({
+  getDomainForQuery: mockGetDomainForQuery,
+}));
 
 const basePlan = {
   category: "burglary",
@@ -46,9 +60,15 @@ const basePlan = {
   location: "Cambridge, UK",
 };
 
-async function buildApp() {
-  vi.resetModules();
-  const { queryRouter } = await import("../query");
+// FIX: import queryRouter once via beforeAll — avoids top-level await
+// (banned under module:CommonJS) while still ensuring the import happens
+// after vi.mock() registrations are in place so the router sees hooked deps.
+let queryRouter: Router;
+beforeAll(async () => {
+  ({ queryRouter } = await import("../query"));
+});
+
+function buildApp() {
   const app = express();
   app.use(express.json());
   app.use("/query", queryRouter);
@@ -63,26 +83,41 @@ beforeEach(() => {
   mockGeocodeToPolygon.mockResolvedValue({
     poly: "52.3,0.0:52.3,0.3:52.1,0.3:52.1,0.0",
     display_name: "Cambridge, Cambridgeshire, England",
+    country_code: "GB",
   });
   mockFetchCrimes.mockResolvedValue([]);
   mockStoreResults.mockResolvedValue(undefined);
   mockEvolveSchema.mockResolvedValue(undefined);
+  mockGetDomainForQuery.mockReturnValue({
+    config: {
+      name: "crime-uk",
+      tableName: "crime_results",
+      prismaModel: "crimeResult",
+    },
+    fetchData: mockFetchCrimes,
+    flattenRow: (r: unknown) => r,
+    storeResults: mockStoreResults,
+  });
   mockPrisma.query.create.mockResolvedValue({ id: "test-id", ...basePlan });
   mockPrisma.query.findUnique.mockResolvedValue(null);
   mockPrisma.crimeResult.findMany.mockResolvedValue([]);
+  mockPrisma.queryCache.findUnique.mockResolvedValue(null);
+  mockPrisma.queryCache.create.mockResolvedValue({});
+  mockPrisma.queryJob.create.mockResolvedValue({ id: "job-id" });
+  mockPrisma.queryJob.update.mockResolvedValue({});
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
 
 describe("POST /query/parse", () => {
   it("returns 400 when text field is missing", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app).post("/query/parse").send({});
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when text is an empty string", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app).post("/query/parse").send({ text: "" });
     expect(res.status).toBe(400);
   });
@@ -94,7 +129,7 @@ describe("POST /query/parse", () => {
       missing: ["location"],
       message: "Could not determine location",
     });
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries last month" });
@@ -109,7 +144,7 @@ describe("POST /query/parse", () => {
       missing: ["location"],
       message: "Could not determine location",
     });
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries last month" });
@@ -124,7 +159,7 @@ describe("POST /query/parse", () => {
       missing: ["coordinates"],
       message: "Could not find location",
     });
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in nowhere" });
@@ -132,8 +167,8 @@ describe("POST /query/parse", () => {
     expect(res.body.error).toBe("geocode_failed");
   });
 
-  it("returns confirmation payload with plan, poly, viz_hint, resolved_location, months", async () => {
-    const app = await buildApp();
+  it("returns confirmation payload with plan, poly, viz_hint, resolved_location, country_code, intent, months", async () => {
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -143,12 +178,14 @@ describe("POST /query/parse", () => {
       poly: expect.any(String),
       viz_hint: "map",
       resolved_location: "Cambridge, Cambridgeshire, England",
+      country_code: "GB",
+      intent: "crime",
       months: ["2024-01"],
     });
   });
 
   it("does not write to the database", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -156,7 +193,7 @@ describe("POST /query/parse", () => {
   });
 
   it("does not call fetchCrimes", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -165,7 +202,7 @@ describe("POST /query/parse", () => {
 
   it("viz_hint is derived, not from LLM", async () => {
     mockDeriveVizHint.mockReturnValue("bar");
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -174,7 +211,7 @@ describe("POST /query/parse", () => {
   });
 
   it("resolved_location reflects geocoder display_name", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -185,7 +222,7 @@ describe("POST /query/parse", () => {
 
   it("months array is correctly expanded from date range", async () => {
     mockExpandDateRange.mockReturnValue(["2024-01", "2024-02", "2024-03"]);
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
@@ -200,27 +237,30 @@ const validExecuteBody = {
   poly: "52.3,0.0:52.3,0.3:52.1,0.3:52.1,0.0",
   viz_hint: "map",
   resolved_location: "Cambridge, Cambridgeshire, England",
+  country_code: "GB",
+  intent: "crime",
+  months: ["2024-01"],
 };
 
 describe("POST /query/execute", () => {
   it("returns 400 when body is missing required fields", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app).post("/query/execute").send({});
     expect(res.status).toBe(400);
   });
 
-  it("creates Query record with domain: crime", async () => {
-    const app = await buildApp();
+  it("creates Query record with domain: crime-uk", async () => {
+    const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockPrisma.query.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ domain: "crime" }),
+        data: expect.objectContaining({ domain: "crime-uk" }),
       }),
     );
   });
 
   it("stores resolved_location on Query record", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockPrisma.query.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -231,8 +271,18 @@ describe("POST /query/execute", () => {
     );
   });
 
+  it("stores country_code on Query record", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.query.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ country_code: "GB" }),
+      }),
+    );
+  });
+
   it("calls fetchCrimes with the poly from the request body", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockFetchCrimes).toHaveBeenCalledWith(
       basePlan,
@@ -240,30 +290,30 @@ describe("POST /query/execute", () => {
     );
   });
 
-  it("calls evolveSchema with crime_results and crime when crimes returned", async () => {
+  it("calls evolveSchema with crime_results and crime-uk when crimes returned", async () => {
     mockFetchCrimes.mockResolvedValue([
       { category: "burglary", month: "2024-01" },
     ]);
-    const app = await buildApp();
+    const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockEvolveSchema).toHaveBeenCalledWith(
       expect.anything(),
       "crime_results",
       expect.anything(),
       expect.any(String),
-      "crime",
+      "crime-uk",
     );
   });
 
   it("does not call evolveSchema when crimes array is empty", async () => {
     mockFetchCrimes.mockResolvedValue([]);
-    const app = await buildApp();
+    const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockEvolveSchema).not.toHaveBeenCalled();
   });
 
   it("response includes query_id, plan, poly, viz_hint, resolved_location, count, months_fetched, results", async () => {
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send(validExecuteBody);
@@ -286,9 +336,8 @@ describe("POST /query/execute", () => {
       category: "burglary",
     }));
     mockFetchCrimes.mockResolvedValue(crimes);
-    // crimeResult.findMany respects take: 100 — mock returns exactly 100 rows
     mockPrisma.crimeResult.findMany.mockResolvedValue(crimes.slice(0, 100));
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send(validExecuteBody);
@@ -297,7 +346,7 @@ describe("POST /query/execute", () => {
 
   it("returns 500 when fetchCrimes throws", async () => {
     mockFetchCrimes.mockRejectedValue(new Error("API down"));
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send(validExecuteBody);
@@ -307,7 +356,7 @@ describe("POST /query/execute", () => {
   it("returns 500 when storeResults throws", async () => {
     mockFetchCrimes.mockResolvedValue([{ category: "burglary" }]);
     mockStoreResults.mockRejectedValue(new Error("DB error"));
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send(validExecuteBody);
@@ -320,8 +369,7 @@ describe("POST /query/execute", () => {
 describe("GET /query/:id", () => {
   it("returns 404 for unknown id", async () => {
     mockPrisma.query.findUnique.mockResolvedValue(null);
-    mockPrisma.crimeResult.findMany.mockResolvedValue([]);
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app).get("/query/nonexistent-id");
     expect(res.status).toBe(404);
   });
@@ -332,9 +380,104 @@ describe("GET /query/:id", () => {
       ...basePlan,
       results: [{ id: "r1", category: "burglary" }],
     });
-    const app = await buildApp();
+    const app = buildApp();
     const res = await request(app).get("/query/test-id");
     expect(res.status).toBe(200);
     expect(res.body.results).toHaveLength(1);
+  });
+});
+
+// ── cache, job tracking, and routing ─────────────────────────────────────────
+
+describe("cache, job tracking, and routing", () => {
+  it("returns cached results without calling fetchCrimes on cache hit", async () => {
+    mockPrisma.queryCache.findUnique.mockResolvedValue({
+      result_count: 3,
+      results: [{ id: "r1" }, { id: "r2" }, { id: "r3" }],
+    });
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/execute")
+      .send(validExecuteBody);
+    expect(mockFetchCrimes).not.toHaveBeenCalled();
+    expect(res.body.cache_hit).toBe(true);
+    expect(res.body.results).toHaveLength(3);
+  });
+
+  it("QueryJob has cache_hit: true and status: complete on cache hit", async () => {
+    mockPrisma.queryCache.findUnique.mockResolvedValue({
+      result_count: 1,
+      results: [{ id: "r1" }],
+    });
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryJob.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ cache_hit: true, status: "complete" }),
+      }),
+    );
+  });
+
+  it("writes QueryCache row on cache miss", async () => {
+    mockFetchCrimes.mockResolvedValue([{ category: "burglary" }]);
+    mockPrisma.crimeResult.findMany.mockResolvedValue([{ id: "r1" }]);
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryCache.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ domain: "crime-uk" }),
+      }),
+    );
+  });
+
+  it("QueryJob updated to complete with timings on success", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "complete" }),
+      }),
+    );
+  });
+
+  it("QueryJob updated to error status when fetchCrimes throws", async () => {
+    mockFetchCrimes.mockRejectedValue(new Error("API down"));
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryJob.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "error" }),
+      }),
+    );
+  });
+
+  // FIX: moved out of describe("POST /query/parse") where validExecuteBody
+  // was not yet declared, and mockGetDomainForQuery override now runs before
+  // buildApp() so the handler sees undefined from the registry lookup.
+  it("returns 400 with unsupported_region when country_code has no adapter", async () => {
+    mockGetDomainForQuery.mockReturnValue(undefined);
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/execute")
+      .send({ ...validExecuteBody, country_code: "US" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("unsupported_region");
+    expect(res.body.country_code).toBe("US");
+  });
+
+  it("returns country_code from geocoder in parse payload", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.body.country_code).toBe("GB");
+  });
+
+  it("returns intent in parse payload", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.body.intent).toBe("crime");
   });
 });
