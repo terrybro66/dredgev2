@@ -2,7 +2,6 @@ import { z } from "zod";
 
 // ── Crime categories ──────────────────────────────────────────────────────────
 
-// Names taken from the Police API documentation; values are human‑readable descriptions.
 export const CRIME_CATEGORIES = {
   "all-crime": "All crime",
   "anti-social-behaviour": "Anti-social behaviour",
@@ -22,43 +21,54 @@ export const CRIME_CATEGORIES = {
 } as const;
 export type CrimeCategory = keyof typeof CRIME_CATEGORIES;
 
-// helper schema for runtime validation
+// Exported as an array so tests can assert membership
+export const CrimeCategorySlugs = Object.keys(
+  CRIME_CATEGORIES,
+) as CrimeCategory[];
+
 export const CrimeCategorySchema = z.enum(
   Object.keys(CRIME_CATEGORIES) as [CrimeCategory, ...CrimeCategory[]],
 );
 
+// Keep original name as alias so existing imports don't break
+export { CrimeCategorySchema as CrimeCategory };
+
 // ── QueryPlanSchema ───────────────────────────────────────────────────────────
 
-// TODO: define QueryPlanSchema — category, date_from (YYYY-MM), date_to (YYYY-MM), location (place name string)
+// location must be a place name string — coordinates are never allowed here
+const COORDINATE_PATTERN = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+
 export const QueryPlanSchema = z.object({
   category: CrimeCategorySchema,
-  date_from: z.string().regex(/^\d{4}-\d{2}$/, "YYYY-MM format"),
-  date_to: z.string().regex(/^\d{4}-\d{2}$/, "YYYY-MM format"),
-  location: z.string(),
+  date_from: z.string().regex(/^\d{4}-\d{2}$/, "must be YYYY-MM format"),
+  date_to: z.string().regex(/^\d{4}-\d{2}$/, "must be YYYY-MM format"),
+  location: z
+    .string()
+    .min(1)
+    .refine((s) => !COORDINATE_PATTERN.test(s.trim()), {
+      message: "location must be a place name, not coordinates",
+    }),
 });
 export type QueryPlan = z.infer<typeof QueryPlanSchema>;
 
 // ── VizHint ───────────────────────────────────────────────────────────────────
 
-// TODO: define VizHintSchema — enum of "map" | "bar" | "table"
-// Note: viz_hint is NOT a field on QueryPlanSchema — it is derived deterministically after parsing
 export const VizHintSchema = z.enum(["map", "bar", "table"]);
 export type VizHint = z.infer<typeof VizHintSchema>;
 
 // ── ParsedQuerySchema ─────────────────────────────────────────────────────────
 
-// TODO: define ParsedQuerySchema — extends QueryPlanSchema, adds viz_hint, resolved_location, months[]
 export const ParsedQuerySchema = QueryPlanSchema.extend({
   viz_hint: VizHintSchema,
-  resolved_location: z.string(),
-  months: z.array(z.string().regex(/^\d{4}-\d{2}$/, "YYYY-MM")),
+  resolved_location: z.string().min(1),
+  months: z
+    .array(z.string().regex(/^\d{4}-\d{2}$/, "must be YYYY-MM format"))
+    .min(1, "months must not be empty"),
 });
 export type ParsedQuery = z.infer<typeof ParsedQuerySchema>;
 
 // ── IntentErrorSchema ─────────────────────────────────────────────────────────
 
-// TODO: define IntentErrorSchema — error, understood (Partial<QueryPlan>), missing (string[]), message
-// error variants: "incomplete_intent" | "invalid_intent" | "geocode_failed"
 export const IntentErrorSchema = z.object({
   error: z.enum(["incomplete_intent", "invalid_intent", "geocode_failed"]),
   understood: QueryPlanSchema.partial(),
@@ -69,22 +79,32 @@ export type IntentError = z.infer<typeof IntentErrorSchema>;
 
 // ── Police API ────────────────────────────────────────────────────────────────
 
-// TODO: define PoliceCrimeSchema with .passthrough() — known fields typed, unknown fields preserved
 export const PoliceCrimeSchema = z
   .object({
     category: z.string().optional(),
     month: z.string().optional(),
     persistent_id: z.string().optional().nullable(),
     location_type: z.string().optional().nullable(),
+    location: z
+      .object({
+        latitude: z.string(),
+        longitude: z.string(),
+        street: z.object({ id: z.number(), name: z.string() }).optional(),
+      })
+      .optional(),
     context: z.string().optional().nullable(),
-    // more fields can be added as needed
+    outcome_status: z
+      .object({ category: z.string(), date: z.string() })
+      .nullable()
+      .optional(),
+    id: z.number().optional(),
+    location_subtype: z.string().optional(),
   })
   .passthrough();
 export type RawCrime = z.infer<typeof PoliceCrimeSchema>;
 
 // ── CrimeResultSchema ─────────────────────────────────────────────────────────
 
-// TODO: define CrimeResultSchema — all database fields including raw as z.unknown()
 export const CrimeResultSchema = z
   .object({
     id: z.string().optional(),
@@ -104,42 +124,123 @@ export const CrimeResultSchema = z
   .passthrough();
 export type CrimeResult = z.infer<typeof CrimeResultSchema>;
 
-// ── NominatimResponseSchema ───────────────────────────────────────────────────
+// ── Domain config ─────────────────────────────────────────────────────────────
 
-// TODO: define NominatimResponseSchema — array of hits each with boundingbox and display_name
+export const LocationStyle = z.enum(["polygon", "coordinates"]);
+export type LocationStyle = z.infer<typeof LocationStyle>;
+
+export const DomainConfigSchema = z.object({
+  name: z.string().min(1),
+  tableName: z.string().min(1),
+  // camelCase Prisma model name e.g. "crimeResult" — used for prisma[model].findMany
+  prismaModel: z.string().min(1),
+  // ISO 3166-1 alpha-2 country codes. Empty array = match any country (intent-only routing)
+  countries: z.array(z.string()),
+  // intent keys this domain handles e.g. ["crime"], ["weather"]
+  intents: z.array(z.string()).min(1, "intents must not be empty"),
+  apiUrl: z.string().url(),
+  apiKeyEnv: z.string().nullable(),
+  locationStyle: LocationStyle,
+  params: z.record(z.string()),
+  flattenRow: z.record(z.string()),
+  categoryMap: z.record(z.string()),
+  vizHintRules: z.object({
+    defaultHint: VizHintSchema,
+    multiMonthHint: VizHintSchema,
+  }),
+});
+export type DomainConfig = z.infer<typeof DomainConfigSchema>;
+
+// ── Query cache  (new in v4.1) ────────────────────────────────────────────────
+
+export const QueryCacheEntrySchema = z.object({
+  id: z.string(),
+  // SHA-256 of normalised { domain, category, date_from, date_to, resolved_location }
+  query_hash: z.string().min(1),
+  domain: z.string().min(1),
+  result_count: z.number().int().nonnegative(),
+  results: z.unknown(),
+  createdAt: z.string().or(z.date()),
+});
+export type QueryCacheEntry = z.infer<typeof QueryCacheEntrySchema>;
+
+// ── Geocoder cache  (new in v4.1) ─────────────────────────────────────────────
+
+export const GeocoderCacheEntrySchema = z.object({
+  id: z.string(),
+  // normalised lowercase input — enforced so "Cambridge" and "cambridge" share one row
+  place_name: z
+    .string()
+    .min(1)
+    .refine((s) => s === s.toLowerCase(), {
+      message: "place_name must be lowercase-normalised",
+    }),
+  display_name: z.string().min(1),
+  lat: z.number(),
+  lon: z.number(),
+  country_code: z.string().min(2),
+  // null until a polygon geocode has been performed for this place
+  poly: z.string().nullable(),
+  createdAt: z.string().or(z.date()),
+});
+export type GeocoderCacheEntry = z.infer<typeof GeocoderCacheEntrySchema>;
+
+// ── Query job  (new in v4.1) ──────────────────────────────────────────────────
+
+export const QueryJobSchema = z.object({
+  id: z.string(),
+  query_id: z.string(),
+  status: z.enum(["pending", "complete", "error"]),
+  domain: z.string().min(1),
+  cache_hit: z.boolean(),
+  rows_inserted: z.number().int().nonnegative(),
+  parse_ms: z.number().int().nullable(),
+  geocode_ms: z.number().int().nullable(),
+  fetch_ms: z.number().int().nullable(),
+  store_ms: z.number().int().nullable(),
+  error_message: z.string().nullable(),
+  createdAt: z.string().or(z.date()),
+  completedAt: z.string().or(z.date()).nullable(),
+});
+export type QueryJob = z.infer<typeof QueryJobSchema>;
+
+// ── Nominatim ─────────────────────────────────────────────────────────────────
+
 export const NominatimResponseSchema = z.array(
   z.object({
     boundingbox: z.array(z.string()),
     display_name: z.string(),
-    // other fields ignored
+    lat: z.string(),
+    lon: z.string(),
+    country_code: z.string(),
   }),
 );
 export type NominatimResponse = z.infer<typeof NominatimResponseSchema>;
 
 // ── CoordinatesSchema ─────────────────────────────────────────────────────────
 
-// TODO: define CoordinatesSchema — { lat: number, lon: number, display_name: string }
-// Forward-compatibility: used by weather/traffic/events domains, not crime
 export const CoordinatesSchema = z.object({
   lat: z.number(),
   lon: z.number(),
   display_name: z.string(),
+  country_code: z.string(),
 });
 export type Coordinates = z.infer<typeof CoordinatesSchema>;
 
 // ── PolygonSchema ─────────────────────────────────────────────────────────────
 
-// TODO: define PolygonSchema — validates "lat,lng:lat,lng" format, max 100 points
-export const PolygonSchema = z.string().refine((s) => {
-  const pts = s.split(":");
-  if (pts.length > 100) return false;
-  return pts.every((p) => /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(p));
-}, "must be lat,lng pairs separated by colon, max 100 points");
+export const PolygonSchema = z
+  .string()
+  .min(1, "polygon must not be empty")
+  .refine((s) => {
+    const pts = s.split(":");
+    if (pts.length > 100) return false;
+    return pts.every((p) => /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/.test(p));
+  }, "must be lat,lng pairs separated by colon, max 100 points");
 export type Polygon = z.infer<typeof PolygonSchema>;
 
 // ── Schema evolution ──────────────────────────────────────────────────────────
 
-// TODO: define PostgresColumnType — allowed values: text, integer, bigint, boolean, double precision, jsonb, timestamptz
 export const PostgresColumnTypeSchema = z.enum([
   "text",
   "integer",
@@ -151,13 +252,19 @@ export const PostgresColumnTypeSchema = z.enum([
 ]);
 export type PostgresColumnType = z.infer<typeof PostgresColumnTypeSchema>;
 
-// TODO: define AddColumnSchema — op, table, column, type
+// Column name regex: lowercase, starts with a letter, max 63 chars, no hyphens
+const SAFE_COLUMN_NAME = /^[a-z][a-z0-9_]{0,62}$/;
+
 export const AddColumnSchema = z.object({
-  op: z.literal("ADD_COLUMN"),
-  tableName: z.string(),
-  columnName: z.string(),
+  type: z.literal("add_column"),
+  column: z
+    .string()
+    .regex(SAFE_COLUMN_NAME, "column name must match /^[a-z][a-z0-9_]{0,62}$/"),
   columnType: PostgresColumnTypeSchema,
 });
+export type AddColumn = z.infer<typeof AddColumnSchema>;
 
-// TODO: define SchemaOp type — { op: "USE_EXISTING" } | z.infer<typeof AddColumnSchema>
 export type SchemaOp = { op: "USE_EXISTING" } | z.infer<typeof AddColumnSchema>;
+
+// ── Re-export PostgresColumnType as value for tests that import it directly ───
+export { PostgresColumnTypeSchema as PostgresColumnType };

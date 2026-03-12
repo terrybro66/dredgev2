@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@dredge/schemas": ["./src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
