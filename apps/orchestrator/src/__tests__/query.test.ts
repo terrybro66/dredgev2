@@ -22,6 +22,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       create: vi.fn(),
       findUnique: vi.fn(),
     },
+    crimeResult: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
@@ -66,6 +69,7 @@ beforeEach(() => {
   mockEvolveSchema.mockResolvedValue(undefined);
   mockPrisma.query.create.mockResolvedValue({ id: "test-id", ...basePlan });
   mockPrisma.query.findUnique.mockResolvedValue(null);
+  mockPrisma.crimeResult.findMany.mockResolvedValue([]);
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
@@ -282,6 +286,8 @@ describe("POST /query/execute", () => {
       category: "burglary",
     }));
     mockFetchCrimes.mockResolvedValue(crimes);
+    // crimeResult.findMany respects take: 100 — mock returns exactly 100 rows
+    mockPrisma.crimeResult.findMany.mockResolvedValue(crimes.slice(0, 100));
     const app = await buildApp();
     const res = await request(app)
       .post("/query/execute")
@@ -314,6 +320,7 @@ describe("POST /query/execute", () => {
 describe("GET /query/:id", () => {
   it("returns 404 for unknown id", async () => {
     mockPrisma.query.findUnique.mockResolvedValue(null);
+    mockPrisma.crimeResult.findMany.mockResolvedValue([]);
     const app = await buildApp();
     const res = await request(app).get("/query/nonexistent-id");
     expect(res.status).toBe(404);
