@@ -1,6 +1,5 @@
 import axios from "axios";
 import {
-  NominatimResponseSchema,
   CoordinatesSchema,
   PolygonSchema,
 } from "@dredge/schemas";
@@ -15,7 +14,7 @@ function normalisePlaceName(location: string): string {
 
 async function queryNominatim(location: string) {
   const response = await axios.get(NOMINATIM_URL, {
-    params: { q: location, format: "json", limit: 1 },
+    params: { q: location, format: "json", limit: 1, addressdetails: 1 },
     headers: { "User-Agent": USER_AGENT },
   });
 
@@ -30,14 +29,22 @@ async function queryNominatim(location: string) {
     };
   }
 
-  const hit = NominatimResponseSchema.parse(raw)[0];
-  const rawHit = raw[0] as { lat: string; lon: string; country_code: string };
+  const rawHit = raw[0] as {
+    lat: string;
+    lon: string;
+    display_name: string;
+    boundingbox: string[];
+    address?: { country_code?: string };
+  };
+
+  const country_code = (rawHit.address?.country_code ?? "").toUpperCase();
 
   return {
-    ...hit,
     lat: rawHit.lat,
     lon: rawHit.lon,
-    country_code: rawHit.country_code.toUpperCase(),
+    display_name: rawHit.display_name,
+    boundingbox: rawHit.boundingbox,
+    country_code,
   };
 }
 

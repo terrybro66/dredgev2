@@ -1,10 +1,29 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import type {
+  getCurrentColumns as GCC,
+  inferPostgresType as IPT,
+  evolveSchema as ES,
+  applySchemaOp as ASO,
+} from "../schema";
 
 const mockPrisma = {
   $queryRaw: vi.fn(),
   $executeRawUnsafe: vi.fn(),
   schemaVersion: { create: vi.fn() },
 } as any;
+
+// FIX: use beforeAll instead of top-level await (banned under module:CommonJS).
+// Importing once here ensures all tests share the same module instance without
+// per-test dynamic imports that can load stale cached copies.
+let getCurrentColumns: typeof GCC;
+let inferPostgresType: typeof IPT;
+let evolveSchema: typeof ES;
+let applySchemaOp: typeof ASO;
+
+beforeAll(async () => {
+  ({ getCurrentColumns, inferPostgresType, evolveSchema, applySchemaOp } =
+    await import("../schema"));
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -22,7 +41,6 @@ describe("getCurrentColumns", () => {
       { column_name: "bar" },
     ]);
 
-    const { getCurrentColumns } = await import("../schema");
     const cols = await getCurrentColumns(mockPrisma, "my_table");
 
     expect(mockPrisma.$queryRaw).toHaveBeenCalled();
@@ -31,7 +49,6 @@ describe("getCurrentColumns", () => {
 
   it("returns empty array when table has no columns", async () => {
     mockPrisma.$queryRaw.mockResolvedValue([]);
-    const { getCurrentColumns } = await import("../schema");
     const cols = await getCurrentColumns(mockPrisma, "empty_table");
     expect(cols).toEqual([]);
   });
@@ -40,11 +57,6 @@ describe("getCurrentColumns", () => {
 // ── inferPostgresType ─────────────────────────────────────────────────────────
 
 describe("inferPostgresType", () => {
-  let inferPostgresType: (v: unknown) => string;
-  beforeEach(async () => {
-    ({ inferPostgresType } = await import("../schema"));
-  });
-
   it('infers "text" for string values', () => {
     expect(inferPostgresType("hello")).toBe("text");
   });
@@ -78,7 +90,6 @@ describe("evolveSchema", () => {
       { column_name: "category" },
     ]);
 
-    const { evolveSchema } = await import("../schema");
     await evolveSchema(
       mockPrisma,
       "crime_results",
@@ -94,7 +105,6 @@ describe("evolveSchema", () => {
   it("calls applySchemaOp once per new key", async () => {
     mockPrisma.$queryRaw.mockResolvedValue([{ column_name: "id" }]);
 
-    const { evolveSchema } = await import("../schema");
     await evolveSchema(
       mockPrisma,
       "crime_results",
@@ -109,7 +119,6 @@ describe("evolveSchema", () => {
   it("writes one SchemaVersion record per new column", async () => {
     mockPrisma.$queryRaw.mockResolvedValue([{ column_name: "id" }]);
 
-    const { evolveSchema } = await import("../schema");
     await evolveSchema(
       mockPrisma,
       "crime_results",
@@ -135,7 +144,6 @@ describe("evolveSchema", () => {
   it("infers correct type for each new key", async () => {
     mockPrisma.$queryRaw.mockResolvedValue([]);
 
-    const { evolveSchema } = await import("../schema");
     await evolveSchema(
       mockPrisma,
       "weather_results",
@@ -169,7 +177,6 @@ describe("evolveSchema", () => {
 
 describe("applySchemaOp", () => {
   it("executes ALTER TABLE for a valid add_column op", async () => {
-    const { applySchemaOp } = await import("../schema");
     await applySchemaOp(
       mockPrisma,
       {
@@ -191,7 +198,6 @@ describe("applySchemaOp", () => {
   });
 
   it("writes SchemaVersion record with correct fields", async () => {
-    const { applySchemaOp } = await import("../schema");
     await applySchemaOp(
       mockPrisma,
       { type: "add_column", column: "humidity", columnType: "integer" },
@@ -214,7 +220,6 @@ describe("applySchemaOp", () => {
   });
 
   it("returns without executing when op is USE_EXISTING", async () => {
-    const { applySchemaOp } = await import("../schema");
     await applySchemaOp(
       mockPrisma,
       { op: "USE_EXISTING" } as any,
@@ -228,7 +233,6 @@ describe("applySchemaOp", () => {
   });
 
   it("throws on column name with uppercase letters", async () => {
-    const { applySchemaOp } = await import("../schema");
     await expect(
       applySchemaOp(
         mockPrisma,
@@ -241,7 +245,6 @@ describe("applySchemaOp", () => {
   });
 
   it("throws on column name starting with a number", async () => {
-    const { applySchemaOp } = await import("../schema");
     await expect(
       applySchemaOp(
         mockPrisma,
@@ -254,7 +257,6 @@ describe("applySchemaOp", () => {
   });
 
   it("throws on column name with hyphens", async () => {
-    const { applySchemaOp } = await import("../schema");
     await expect(
       applySchemaOp(
         mockPrisma,
