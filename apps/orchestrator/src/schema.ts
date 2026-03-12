@@ -6,8 +6,8 @@ export async function getCurrentColumns(
   tableName: string,
 ): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ column_name: string }[]>`
-  SELECT column_name FROM information_schema.columns WHERE table_name = ${tableName}
-`;
+    SELECT column_name FROM information_schema.columns WHERE table_name = ${tableName}
+  `;
   return rows.map((r: { column_name: string }) => r.column_name);
 }
 
@@ -41,12 +41,11 @@ export async function evolveSchema(
   if (newKeys.length === 0) return;
 
   for (const key of newKeys) {
-    const type = inferPostgresType(sampleRow[key]);
-    const op: SchemaOp = AddColumnSchema.parse({
-      op: "ADD_COLUMN",
-      tableName,
-      columnName: key,
-      columnType: type,
+    const columnType = inferPostgresType(sampleRow[key]);
+    const op = AddColumnSchema.parse({
+      type: "add_column",
+      column: key,
+      columnType,
     });
     await applySchemaOp(prisma, op, triggeredBy, tableName, domain);
   }
@@ -59,13 +58,14 @@ export async function applySchemaOp(
   tableName: string,
   domain: string,
 ): Promise<void> {
-  if (op.op === "USE_EXISTING") return;
+  if (!("type" in op) || op.type !== "add_column") return;
 
-  const { columnName, columnType } = op;
-  const sql = `ALTER TABLE "${tableName}" ADD COLUMN "${columnName}" ${columnType}`;
+  const { column, columnType } = op;
+
+  const sql = `ALTER TABLE "${tableName}" ADD COLUMN "${column}" ${columnType}`;
 
   const safePattern =
-    /^ALTER TABLE "?[a-z_][a-z0-9_]*"? ADD COLUMN "?([a-z_][a-z0-9_]*)"? (text|integer|bigint|boolean|double precision|jsonb|timestamptz)$/i;
+    /^ALTER TABLE "[a-z_][a-z0-9_]*" ADD COLUMN "[a-z][a-z0-9_]{0,62}" (text|integer|bigint|boolean|double precision|jsonb|timestamptz)$/;
 
   if (!safePattern.test(sql)) {
     throw new Error(`Unsafe or invalid SQL generated: ${sql}`);
@@ -76,7 +76,7 @@ export async function applySchemaOp(
   await (prisma as any).schemaVersion.create({
     data: {
       table_name: tableName,
-      column_name: columnName,
+      column_name: column,
       column_type: columnType,
       triggered_by: triggeredBy,
       domain,
