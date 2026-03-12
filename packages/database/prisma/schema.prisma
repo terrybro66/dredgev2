@@ -8,47 +8,95 @@ datasource db {
 }
 
 model Query {
-  id               String         @id @default(cuid())
-  text             String
-  category         String
-  date_from        String
-  date_to          String
-  poly             String
-  viz_hint         String
-  createdAt        DateTime       @default(now())
-  domain           String         @default("crime")
+  id                String        @id @default(cuid())
+  text              String
+  category          String
+  date_from         String
+  date_to           String
+  poly              String
+  viz_hint          String
+  createdAt         DateTime      @default(now())
+  domain            String        @default("crime-uk")  // changed: "crime" → "crime-uk"
   resolved_location String?
-  results          CrimeResult[]
-  @@map("query")
+  country_code      String?                             // new in v4.1
+  results           CrimeResult[]
+  jobs              QueryJob[]                          // new in v4.1
 
+  @@map("query")
 }
 
 model CrimeResult {
-  id             String   @id @default(cuid())
-  query_id       String
-  persistent_id  String?
-  category       String
-  month          String
-  street         String?
-  latitude       Float?
-  longitude      Float?
+  id               String   @id @default(cuid())
+  query_id         String
+  persistent_id    String?
+  category         String
+  month            String
+  street           String?
+  latitude         Float?
+  longitude        Float?
   outcome_category String?
-  outcome_date   String?
-  location_type  String?
-  context        String?
-  raw            Json?
-  query          Query    @relation(fields: [query_id], references: [id])
-  @@map("crime_results")
+  outcome_date     String?
+  location_type    String?
+  context          String?
+  raw              Json?
+  query            Query    @relation(fields: [query_id], references: [id])
 
+  @@map("crime_results")
 }
 
 model SchemaVersion {
-  id          String   @id @default(cuid())
-  table_name  String
-  column_name String
-  column_type String
+  id           String   @id @default(cuid())
+  table_name   String
+  column_name  String
+  column_type  String
   triggered_by String
-  createdAt   DateTime @default(now())
-  domain      String   @default("crime")
+  createdAt    DateTime @default(now())
+  domain       String   @default("crime-uk")           // changed: "crime" → "crime-uk"
+
   @@map("schema_version")
+}
+
+// ── new in v4.1 ───────────────────────────────────────────────────────────────
+
+model QueryCache {
+  id           String   @id @default(cuid())
+  query_hash   String   @unique
+  domain       String
+  result_count Int
+  results      Json
+  createdAt    DateTime @default(now())
+
+  @@map("query_cache")
+}
+
+model GeocoderCache {
+  id           String   @id @default(cuid())
+  place_name   String   @unique
+  display_name String
+  lat          Float
+  lon          Float
+  country_code String
+  poly         String?
+  createdAt    DateTime @default(now())
+
+  @@map("geocoder_cache")
+}
+
+model QueryJob {
+  id            String    @id @default(cuid())
+  query_id      String
+  status        String    @default("pending")
+  domain        String
+  cache_hit     Boolean   @default(false)
+  rows_inserted Int       @default(0)
+  parse_ms      Int?
+  geocode_ms    Int?
+  fetch_ms      Int?
+  store_ms      Int?
+  error_message String?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+  query         Query     @relation(fields: [query_id], references: [id])
+
+  @@map("query_jobs")
 }
