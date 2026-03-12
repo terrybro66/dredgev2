@@ -1,3 +1,2 @@
-export { PrismaClient } from "@prisma/client";
-
-// TODO: re-export any additional types needed across the monorepo
+import { PrismaClient } from "@prisma/client";
+export const prisma = new PrismaClient();

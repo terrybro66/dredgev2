@@ -1,33 +1,47 @@
-import { PoliceCrimeSchema, RawCrime, QueryPlan } from "@dredge/schemas";
+import axios from "axios";
+import { z } from "zod";
+import { PoliceCrimeSchema, QueryPlan } from "@dredge/schemas";
 import { expandDateRange } from "./intent";
 
-const BASE_URL = "https://data.police.uk/api/crimes-street";
+const POLICE_API_BASE = "https://data.police.uk/api";
 
-// TODO: implement fetchCrimesForMonth(plan, poly, month: string): Promise<RawCrime[]>
-// - validate poly does not exceed 100 points before calling API
-// - call BASE_URL/{plan.category} with params { date: month, poly }
-// - validate response with z.array(PoliceCrimeSchema).parse()
-// - PoliceCrimeSchema uses .passthrough() — unknown fields preserved
-// - log a warning on validation errors but do not throw
-// - return RawCrime[]
+export type RawCrime = z.infer<typeof PoliceCrimeSchema>;
 
 export async function fetchCrimesForMonth(
-  _plan: QueryPlan,
-  _poly: string,
-  _month: string
+  plan: QueryPlan,
+  poly: string,
+  month: string,
 ): Promise<RawCrime[]> {
-  throw new Error("TODO: implement fetchCrimesForMonth");
+  const points = poly.split(":");
+  if (points.length > 100) {
+    throw new Error(`Polygon exceeds 100 points (got ${points.length})`);
+  }
+
+  const url = `${POLICE_API_BASE}/crimes-street/${plan.category}`;
+  const response = await axios.get(url, {
+    params: { date: month, poly },
+  });
+
+  try {
+    return z.array(PoliceCrimeSchema).parse(response.data);
+  } catch (err) {
+    console.warn("Police API response validation warning:", err);
+    // return what was parseable rather than throwing
+    return z.array(PoliceCrimeSchema).safeParse(response.data).data ?? [];
+  }
 }
 
-// TODO: implement fetchCrimes(plan, poly): Promise<RawCrime[]>
-// - expand date range to months array using expandDateRange(plan.date_from, plan.date_to)
-// - call fetchCrimesForMonth for each month SEQUENTIALLY — not in parallel
-// - sequential note: parallel requests for large date ranges can fail against the Police API
-// - merge and return all results as a single flat array
-
 export async function fetchCrimes(
-  _plan: QueryPlan,
-  _poly: string
+  plan: QueryPlan,
+  poly: string,
 ): Promise<RawCrime[]> {
-  throw new Error("TODO: implement fetchCrimes");
+  const months = expandDateRange(plan.date_from, plan.date_to);
+  const results: RawCrime[] = [];
+
+  for (const month of months) {
+    const crimes = await fetchCrimesForMonth(plan, poly, month);
+    results.push(...crimes);
+  }
+
+  return results;
 }

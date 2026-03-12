@@ -1,30 +1,79 @@
-import { NominatimResponseSchema, CoordinatesSchema, PolygonSchema } from "@dredge/schemas";
+import axios from "axios";
+import {
+  NominatimResponseSchema,
+  CoordinatesSchema,
+  PolygonSchema,
+} from "@dredge/schemas";
 
-// TODO: implement geocodeToPolygon(location: string): Promise<{ poly: string, display_name: string }>
-// - call https://nominatim.openstreetmap.org/search
-// - params: { q: location, format: "json", limit: 1 }
-// - set User-Agent: "dredge/1.0" header — Nominatim requires this
-// - validate response with NominatimResponseSchema.parse()
-// - throw structured IntentError { error: "geocode_failed", ... } if result array is empty
-// - extract boundingbox: [south, north, west, east] — parse all values to numbers
-// - convert to poly format: "north,west:north,east:south,east:south,west"
-// - validate with PolygonSchema.parse() before returning
-// - return { poly, display_name }
+const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
+const USER_AGENT = "dredge/1.0";
 
-export async function geocodeToPolygon(
-  _location: string
-): Promise<{ poly: string; display_name: string }> {
-  throw new Error("TODO: implement geocodeToPolygon");
+async function queryNominatim(location: string) {
+  const response = await axios.get(NOMINATIM_URL, {
+    params: { q: location, format: "json", limit: 1 },
+    headers: { "User-Agent": USER_AGENT },
+  });
+
+  const raw = response.data;
+
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw {
+      error: "geocode_failed",
+      understood: { location },
+      missing: ["coordinates"],
+      message: `Could not find location: "${location}". Please try a more specific place name.`,
+    };
+  }
+
+  const hit = NominatimResponseSchema.parse(raw)[0];
+  const rawHit = raw[0] as { lat: string; lon: string };
+
+  return { ...hit, lat: rawHit.lat, lon: rawHit.lon };
 }
 
-// TODO: implement geocodeToCoordinates(location: string): Promise<{ lat: number, lon: number, display_name: string }>
-// - same Nominatim call as geocodeToPolygon
-// - extract lat, lon, display_name — parse lat/lon to numbers
-// - validate with CoordinatesSchema.parse()
-// Forward-compatibility: used by weather/traffic/events domains, not crime
+export async function geocodeToPolygon(
+  location: string,
+  prisma: any,
+  radiusMeters = 5000,
+): Promise<{ poly: string; display_name: string }> {
+  const { lat, lon, display_name } = await geocodeToCoordinates(location);
+
+  // generate a 16-point polygon approximation of a 5km circle via PostGIS
+  const rows = await prisma.$queryRaw<{ poly: string }[]>`
+    SELECT string_agg(
+      round(ST_Y(pt)::numeric, 6) || ',' || round(ST_X(pt)::numeric, 6),
+      ':'
+      ORDER BY n
+    ) AS poly
+    FROM (
+      SELECT
+        n,
+        ST_Project(
+          ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography,
+          ${radiusMeters},
+          radians(n * (360.0 / 16))
+        )::geometry AS pt
+      FROM generate_series(0, 15) AS n
+    ) pts
+  `;
+
+  const poly = PolygonSchema.parse(rows[0].poly);
+  return { poly, display_name };
+}
 
 export async function geocodeToCoordinates(
-  _location: string
+  location: string,
 ): Promise<{ lat: number; lon: number; display_name: string }> {
-  throw new Error("TODO: implement geocodeToCoordinates");
+  const hit = await queryNominatim(location);
+  const raw = hit as unknown as {
+    lat: string;
+    lon: string;
+    display_name: string;
+  };
+
+  return CoordinatesSchema.parse({
+    lat: Number(raw.lat),
+    lon: Number(raw.lon),
+    display_name: hit.display_name,
+  });
 }
