@@ -1,6 +1,7 @@
 {
   "name": "dredge",
   "private": true,
+  "packageManager": "npm@10.9.2",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -14,6 +15,7 @@
     "db:studio": "npm run db:studio --workspace=packages/database"
   },
   "devDependencies": {
+    "@types/supertest": "^7.2.0",
     "turbo": "latest"
   }
 }

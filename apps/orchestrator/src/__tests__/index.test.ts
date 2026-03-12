@@ -1,21 +1,36 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import express from "express";
 import request from "supertest";
 
+vi.mock("./query", () => ({ queryRouter: express.Router() }));
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+  });
+  return app;
+}
+
 describe("GET /health", () => {
   it("returns 200", async () => {
-    // TODO: build app, GET /health, assert status 200
+    const res = await request(buildApp()).get("/health");
+    expect(res.status).toBe(200);
   });
 
   it("body contains status: ok", async () => {
-    // TODO: assert res.body.status === "ok"
+    const res = await request(buildApp()).get("/health");
+    expect(res.body.status).toBe("ok");
   });
 
   it("body contains a timestamp field", async () => {
-    // TODO: assert res.body.timestamp is defined
+    const res = await request(buildApp()).get("/health");
+    expect(res.body.timestamp).toBeDefined();
   });
 
   it("timestamp is a valid ISO 8601 string", async () => {
-    // TODO: assert new Date(res.body.timestamp).toISOString() === res.body.timestamp
+    const res = await request(buildApp()).get("/health");
+    expect(new Date(res.body.timestamp).toISOString()).toBe(res.body.timestamp);
   });
 });

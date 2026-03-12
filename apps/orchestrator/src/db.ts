@@ -1,10 +1,10 @@
-import { PrismaClient } from "@dredge/database";
+import { PrismaClient } from "@prisma/client";
 
-// TODO: attach to globalThis to survive hot reloads in development
-// TODO: export single prisma instance
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+export const prisma: PrismaClient =
+  globalForPrisma.prisma || new PrismaClient();
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
-
-// TODO: guard with NODE_ENV check before assigning to globalThis
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}

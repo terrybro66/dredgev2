@@ -1,21 +1,17 @@
 import "dotenv/config";
-// TODO: no console.log of key material under any circumstances
-
 import express from "express";
 import cors from "cors";
-// TODO: import { queryRouter } from "./query"; — uncomment when step 10 is complete
+import { queryRouter } from "./query";
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
 app.use(cors());
 app.use(express.json());
-
-// TODO: app.use("/query", queryRouter); — uncomment when step 10 is complete
+app.use("/query", queryRouter);
 
 app.get("/health", (_req, res) => {
-  // TODO: return { status: "ok", timestamp: new Date().toISOString() }
-  res.json({ status: "TODO" });
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 app.listen(PORT, () => {
