@@ -1,6 +1,7 @@
 import { DomainAdapter } from "./registry";
 import { fetchCrimes } from "../crime/fetcher";
 import { storeResults } from "../crime/store";
+import { recoverFromEmpty } from "../crime/recovery";
 
 export const crimeUkAdapter: DomainAdapter = {
   config: {
@@ -21,4 +22,6 @@ export const crimeUkAdapter: DomainAdapter = {
   flattenRow: (row: unknown) => row as Record<string, unknown>,
   storeResults: (queryId: string, rows: unknown[], prisma: any) =>
     storeResults(queryId, rows as any[], prisma),
+  recoverFromEmpty: (plan: any, poly: string, prisma: any) =>
+    recoverFromEmpty(plan, poly, prisma),
 };
