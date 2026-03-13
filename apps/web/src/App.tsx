@@ -39,6 +39,37 @@ interface CrimeResult {
   [key: string]: unknown;
 }
 
+// v5.1 types
+interface ExecuteBody {
+  plan: QueryPlan;
+  poly: string;
+  viz_hint: VizHint;
+  resolved_location: string;
+  country_code: string;
+  intent: string;
+  months: string[];
+}
+
+interface FallbackInfo {
+  field: "date" | "location" | "category" | "radius";
+  original: string;
+  used: string;
+  explanation: string;
+}
+
+interface FollowUp {
+  label: string;
+  query: ExecuteBody;
+}
+
+interface ResultContext {
+  status: "exact" | "fallback" | "empty";
+  reason?: string;
+  fallback?: FallbackInfo;
+  followUps: FollowUp[];
+  confidence: "high" | "medium" | "low";
+}
+
 interface ExecuteResult {
   query_id: string;
   plan: QueryPlan;
@@ -49,6 +80,7 @@ interface ExecuteResult {
   months_fetched: string[];
   results: CrimeResult[];
   cache_hit: boolean;
+  resultContext?: ResultContext;
 }
 
 interface IntentError {
@@ -226,6 +258,44 @@ function InterpretationBanner({
   );
 }
 
+// ── FallbackBanner ────────────────────────────────────────────────────────────
+
+export function FallbackBanner({ fallback }: { fallback?: FallbackInfo }) {
+  if (!fallback) return null;
+  return (
+    <div className="fallback-banner">
+      <span className="fallback-icon">⚠</span>
+      <span className="fallback-text">{fallback.explanation}</span>
+    </div>
+  );
+}
+
+// ── FollowUpChips ─────────────────────────────────────────────────────────────
+
+export function FollowUpChips({
+  followUps,
+  onSelect,
+}: {
+  followUps: FollowUp[];
+  onSelect: (query: ExecuteBody) => void;
+}) {
+  if (followUps.length === 0) return null;
+  const capped = followUps.slice(0, 4);
+  return (
+    <div className="followup-chips">
+      {capped.map((f) => (
+        <button
+          key={f.label}
+          className="followup-chip"
+          onClick={() => onSelect(f.query)}
+        >
+          {f.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── IntentError ───────────────────────────────────────────────────────────────
 
 function IntentErrorPanel({
@@ -278,12 +348,16 @@ function IntentErrorPanel({
 
 // ── EmptyResults ──────────────────────────────────────────────────────────────
 
-function EmptyResults({
+export function EmptyResults({
   plan,
   onRefine,
+  resultContext,
+  onFollowUp,
 }: {
   plan: QueryPlan;
   onRefine: () => void;
+  resultContext: ResultContext;
+  onFollowUp: (query: ExecuteBody) => void;
 }) {
   return (
     <div className="empty-panel">
@@ -297,9 +371,16 @@ function EmptyResults({
           : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
         .
       </p>
+      {resultContext.reason && (
+        <p className="empty-reason">{resultContext.reason}</p>
+      )}
       <p className="empty-hint">
         Police data typically lags by 2–3 months. Try an earlier date range.
       </p>
+      <FollowUpChips
+        followUps={resultContext.followUps}
+        onSelect={onFollowUp}
+      />
       <button className="btn-ghost" onClick={onRefine}>
         Refine query
       </button>
@@ -494,12 +575,22 @@ function TableView({ results }: { results: CrimeResult[] }) {
 function ResultRenderer({
   result,
   onRefine,
+  onFollowUp,
 }: {
   result: ExecuteResult;
   onRefine: () => void;
+  onFollowUp: (query: ExecuteBody) => void;
 }) {
-  const { plan, viz_hint, resolved_location, count, months_fetched, results } =
+  const { plan, viz_hint, count, months_fetched, results, resultContext } =
     result;
+
+  const safeContext: ResultContext = resultContext ?? {
+    status: "exact",
+    followUps: [],
+    confidence: "high",
+  };
+
+  const followUps = safeContext.followUps ?? [];
 
   return (
     <div className="result-panel">
@@ -514,14 +605,28 @@ function ResultRenderer({
           New query
         </button>
       </div>
+
+      {safeContext.fallback && (
+        <FallbackBanner fallback={safeContext.fallback} />
+      )}
+
       {count === 0 ? (
-        <EmptyResults plan={plan} onRefine={onRefine} />
+        <EmptyResults
+          plan={plan}
+          onRefine={onRefine}
+          resultContext={safeContext}
+          onFollowUp={onFollowUp}
+        />
       ) : viz_hint === "map" ? (
         <MapView results={results} />
       ) : viz_hint === "bar" ? (
         <BarChart results={results} months_fetched={months_fetched} />
       ) : (
         <TableView results={results} />
+      )}
+
+      {count > 0 && followUps.length > 0 && (
+        <FollowUpChips followUps={followUps} onSelect={onFollowUp} />
       )}
     </div>
   );
@@ -576,7 +681,7 @@ export default function App() {
       return;
     }
 
-    // Step 2 — execute immediately
+    // Step 2 — execute
     setLoadingStage("fetching");
     try {
       const res = await fetch(`${API}/query/execute`, {
@@ -608,6 +713,45 @@ export default function App() {
         understood: {},
         missing: [],
         message: "Lost connection during data fetch.",
+      });
+      setStage("error");
+    }
+    setLoadingStage(null);
+  };
+
+  // Follow-up chips call /execute directly — no /parse round-trip
+  const handleFollowUp = async (query: ExecuteBody) => {
+    setStage("loading");
+    setLoadingStage("fetching");
+    setResult(null);
+
+    try {
+      const res = await fetch(`${API}/query/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(query),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setIntentError({
+          error: "execute_error",
+          understood: {},
+          missing: [],
+          message: data.message ?? "Execution failed.",
+        });
+        setStage("error");
+        setLoadingStage(null);
+        return;
+      }
+      setParsed(query);
+      setResult(data);
+      setStage("done");
+    } catch (err: any) {
+      setIntentError({
+        error: "network_error",
+        understood: {},
+        missing: [],
+        message: err?.message ?? "Lost connection.",
       });
       setStage("error");
     }
@@ -653,7 +797,11 @@ export default function App() {
           )}
 
           {stage === "done" && result && (
-            <ResultRenderer result={result} onRefine={handleRefine} />
+            <ResultRenderer
+              result={result}
+              onRefine={handleRefine}
+              onFollowUp={handleFollowUp}
+            />
           )}
         </main>
 
@@ -863,6 +1011,58 @@ const CSS = `
   .interp-label { color: var(--text-dim); }
   .interp-viz { color: var(--amber); font-size: 11px; letter-spacing: 0.04em; }
 
+  /* ── Fallback Banner ── */
+
+  .fallback-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 16px;
+    background: rgba(245, 166, 35, 0.06);
+    border: 1px solid var(--amber-dim);
+    border-left: 3px solid var(--amber);
+    animation: fadeIn 0.2s ease;
+  }
+
+  .fallback-icon {
+    color: var(--amber);
+    font-size: 14px;
+    flex-shrink: 0;
+    line-height: 1.6;
+  }
+
+  .fallback-text {
+    font-size: 12px;
+    color: var(--text-mid);
+    line-height: 1.6;
+  }
+
+  /* ── Follow-up Chips ── */
+
+  .followup-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .followup-chip {
+    background: rgba(245, 166, 35, 0.08);
+    border: 1px solid var(--amber-dim);
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 6px 14px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  .followup-chip:hover {
+    background: rgba(245, 166, 35, 0.18);
+    color: var(--text);
+  }
+
   /* ── Buttons ── */
 
   .btn-ghost {
@@ -938,6 +1138,7 @@ const CSS = `
   .empty-icon { font-size: 32px; color: var(--text-dim); }
   .empty-title { font-family: var(--display); font-size: 18px; color: var(--text); }
   .empty-message { color: var(--text-mid); font-size: 13px; max-width: 400px; }
+  .empty-reason { color: var(--text-mid); font-size: 12px; max-width: 400px; font-style: italic; }
   .empty-hint { color: var(--text-dim); font-size: 12px; max-width: 400px; }
 
   /* ── Result ── */

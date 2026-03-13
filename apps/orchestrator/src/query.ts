@@ -32,7 +32,7 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
       .status(400)
       .json({ error: "validation_error", details: bodyResult.error.errors });
   }
-
+  console.log("[execute] body:", JSON.stringify(bodyResult.data, null, 2));
   const { text } = bodyResult.data;
 
   let plan;
