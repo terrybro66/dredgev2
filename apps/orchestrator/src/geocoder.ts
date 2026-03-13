@@ -1,182 +1,223 @@
 import axios from "axios";
-import {
-  CoordinatesSchema,
-  PolygonSchema,
-} from "@dredge/schemas";
+import { Prisma } from "@prisma/client";
 
-const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
-const USER_AGENT = "dredge/1.0";
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// normalise a place name to a consistent cache key
-function normalisePlaceName(location: string): string {
-  return location.trim().toLowerCase();
+interface GeocoderPrisma {
+  geocoderCache: {
+    findUnique: (args: {
+      where: { place_name: string };
+    }) => Promise<CacheRow | null>;
+    create: (args: { data: CacheRow }) => Promise<unknown>;
+    update: (args: {
+      where: { place_name: string };
+      data: Partial<CacheRow>;
+    }) => Promise<unknown>;
+  };
+  $queryRaw: (...args: unknown[]) => Promise<{ poly: string }[]>;
 }
 
-async function queryNominatim(location: string) {
-  const response = await axios.get(NOMINATIM_URL, {
-    params: { q: location, format: "json", limit: 1, addressdetails: 1 },
-    headers: { "User-Agent": USER_AGENT },
-  });
+interface CacheRow {
+  place_name: string;
+  display_name: string;
+  lat: number;
+  lon: number;
+  country_code: string;
+  poly: string | null;
+}
 
-  const raw = response.data;
+interface CoordinateResult {
+  lat: number;
+  lon: number;
+  display_name: string;
+  country_code: string;
+}
 
-  if (!Array.isArray(raw) || raw.length === 0) {
-    throw {
-      error: "geocode_failed",
-      understood: { location },
-      missing: ["coordinates"],
-      message: `Could not find location: "${location}". Please try a more specific place name.`,
-    };
+interface PolygonResult extends CoordinateResult {
+  poly: string;
+}
+
+interface NominatimHit {
+  display_name: string;
+  boundingbox: string[];
+  lat: string;
+  lon: string;
+  country_code: string;
+}
+
+// ── IntentError ───────────────────────────────────────────────────────────────
+
+function geocodeFailed(missing: string[]): never {
+  throw { error: "geocode_failed", missing, message: "Geocoding failed" };
+}
+
+// ── Nominatim fetch ───────────────────────────────────────────────────────────
+
+async function fetchNominatim(placeName: string): Promise<NominatimHit> {
+  const response = await axios.get(
+    "https://nominatim.openstreetmap.org/search",
+    {
+      params: { q: placeName, format: "json", limit: 1 },
+      headers: { "User-Agent": "dredge/1.0" },
+    },
+  );
+
+  const hits: NominatimHit[] = response.data;
+  if (!hits || hits.length === 0) {
+    geocodeFailed(["coordinates"]);
   }
-
-  const rawHit = raw[0] as {
-    lat: string;
-    lon: string;
-    display_name: string;
-    boundingbox: string[];
-    address?: { country_code?: string };
-  };
-
-  const country_code = (rawHit.address?.country_code ?? "").toUpperCase();
-
-  return {
-    lat: rawHit.lat,
-    lon: rawHit.lon,
-    display_name: rawHit.display_name,
-    boundingbox: rawHit.boundingbox,
-    country_code,
-  };
+  return hits[0];
 }
 
-export async function geocodeToPolygon(
-  location: string,
-  prisma: any,
-  radiusMeters = 5000,
-): Promise<{ poly: string; display_name: string; country_code: string }> {
-  const place_name = normalisePlaceName(location);
+// ── PostGIS polygon fetch ─────────────────────────────────────────────────────
 
-  // ── cache lookup ────────────────────────────────────────────────────────────
+async function fetchPolygon(
+  prisma: GeocoderPrisma,
+  lat: number,
+  lon: number,
+): Promise<string> {
+  const rows = await prisma.$queryRaw(
+    Prisma.sql`
+      SELECT string_agg(
+        ST_Y(geom)::text || ',' || ST_X(geom)::text,
+        ':'
+        ORDER BY ord
+      ) AS poly
+      FROM (
+        SELECT
+          ST_Project(
+            ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography,
+            5000,
+            radians(ord * (360.0 / 16))
+          )::geometry AS geom,
+          ord
+        FROM generate_series(0, 15) AS ord
+      ) pts
+    `,
+  );
+  return rows[0].poly;
+}
+
+// ── geocodeToCoordinates ──────────────────────────────────────────────────────
+
+export async function geocodeToCoordinates(
+  placeName: string,
+  prisma: GeocoderPrisma,
+): Promise<CoordinateResult> {
+  const key = placeName.toLowerCase();
+
+  // Cache hit
   const cached = await prisma.geocoderCache.findUnique({
-    where: { place_name },
+    where: { place_name: key },
   });
-
-  if (cached?.poly) {
-    // full hit — centroid and polygon both cached, skip Nominatim and PostGIS
-    console.log(`[geocoder] cache hit (full): ${place_name}`);
+  if (cached) {
     return {
-      poly: cached.poly,
+      lat: cached.lat,
+      lon: cached.lon,
       display_name: cached.display_name,
       country_code: cached.country_code,
     };
   }
 
-  // ── resolve centroid ────────────────────────────────────────────────────────
+  // Cache miss — call Nominatim
+  const hit = await fetchNominatim(placeName);
+  const lat = parseFloat(hit.lat);
+  const lon = parseFloat(hit.lon);
+  const country_code = hit.country_code.toUpperCase();
+
+  await prisma.geocoderCache.create({
+    data: {
+      place_name: key,
+      display_name: hit.display_name,
+      lat,
+      lon,
+      country_code,
+      poly: null,
+    },
+  });
+
+  return { lat, lon, display_name: hit.display_name, country_code };
+}
+
+// ── geocodeToPolygon ──────────────────────────────────────────────────────────
+
+export async function geocodeToPolygon(
+  placeName: string,
+  prisma: GeocoderPrisma,
+): Promise<PolygonResult> {
+  const key = placeName.toLowerCase();
+
+  // Full cache hit (poly already stored)
+  const cached = await prisma.geocoderCache.findUnique({
+    where: { place_name: key },
+  });
+  if (cached?.poly) {
+    return {
+      lat: cached.lat,
+      lon: cached.lon,
+      display_name: cached.display_name,
+      country_code: cached.country_code,
+      poly: cached.poly,
+    };
+  }
+
   let lat: number;
   let lon: number;
   let display_name: string;
   let country_code: string;
 
   if (cached) {
-    // partial hit — centroid cached, polygon not yet generated, skip Nominatim
-    console.log(`[geocoder] cache hit (partial): ${place_name}`);
+    // Partial hit — centroid cached, poly missing
     lat = cached.lat;
     lon = cached.lon;
     display_name = cached.display_name;
     country_code = cached.country_code;
   } else {
-    // cold miss — call Nominatim
-    const hit = await queryNominatim(location);
-    lat = Number(hit.lat);
-    lon = Number(hit.lon);
+    // Cold miss — call Nominatim
+    // Cold miss — call Nominatim first
+    const hit = await fetchNominatim(placeName);
+    lat = parseFloat(hit.lat);
+    lon = parseFloat(hit.lon);
     display_name = hit.display_name;
-    country_code = hit.country_code;
+    country_code = hit.country_code.toUpperCase();
+
+    // Fetch poly BEFORE create, so create gets the complete row
+    const poly = await fetchPolygon(prisma, lat, lon);
+    await prisma.geocoderCache.create({
+      data: { place_name: key, display_name, lat, lon, country_code, poly },
+    });
+
+    return { lat, lon, display_name, country_code, poly };
+
+    // Write centroid row first, then update with poly below
+    await prisma.geocoderCache.create({
+      data: {
+        place_name: key,
+        display_name,
+        lat,
+        lon,
+        country_code,
+        poly: null,
+      },
+    });
   }
 
-  // ── generate polygon via PostGIS ────────────────────────────────────────────
-  const rows = await prisma.$queryRaw<{ poly: string }[]>`
-    SELECT string_agg(
-      round(ST_Y(pt)::numeric, 6) || ',' || round(ST_X(pt)::numeric, 6),
-      ':'
-      ORDER BY n
-    ) AS poly
-    FROM (
-      SELECT
-        n,
-        ST_Project(
-          ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography,
-          ${radiusMeters},
-          radians(n * (360.0 / 16))
-        )::geometry AS pt
-      FROM generate_series(0, 15) AS n
-    ) pts
-  `;
+  // Fetch polygon via PostGIS
+  const poly = await fetchPolygon(prisma, lat, lon);
 
-  const poly = PolygonSchema.parse(rows[0].poly);
-
-  // ── cache write ─────────────────────────────────────────────────────────────
   if (cached) {
-    // update existing row with the generated polygon
+    // Partial hit: update existing row with the new poly
     await prisma.geocoderCache.update({
-      where: { place_name },
+      where: { place_name: key },
       data: { poly },
     });
   } else {
-    // write new row with centroid and polygon
-    await prisma.geocoderCache.create({
-      data: { place_name, display_name, lat, lon, country_code, poly },
+    // Cold miss: update the row we just created to add the poly
+    await prisma.geocoderCache.update({
+      where: { place_name: key },
+      data: { poly },
     });
   }
 
-  return { poly, display_name, country_code };
-}
-
-export async function geocodeToCoordinates(
-  location: string,
-  prisma: any,
-): Promise<{
-  lat: number;
-  lon: number;
-  display_name: string;
-  country_code: string;
-}> {
-  const place_name = normalisePlaceName(location);
-
-  // ── cache lookup ────────────────────────────────────────────────────────────
-  const cached = await prisma.geocoderCache.findUnique({
-    where: { place_name },
-  });
-
-  if (cached) {
-    console.log(`[geocoder] cache hit: ${place_name}`);
-    return CoordinatesSchema.parse({
-      lat: cached.lat,
-      lon: cached.lon,
-      display_name: cached.display_name,
-      country_code: cached.country_code,
-    });
-  }
-
-  // ── cold miss — call Nominatim ──────────────────────────────────────────────
-  const hit = await queryNominatim(location);
-
-  const result = CoordinatesSchema.parse({
-    lat: Number(hit.lat),
-    lon: Number(hit.lon),
-    display_name: hit.display_name,
-    country_code: hit.country_code,
-  });
-
-  // ── cache write (poly null — not needed for coordinate domains) ─────────────
-  await prisma.geocoderCache.create({
-    data: {
-      place_name,
-      display_name: result.display_name,
-      lat: result.lat,
-      lon: result.lon,
-      country_code: result.country_code,
-      poly: null,
-    },
-  });
-
-  return result;
+  return { lat, lon, display_name, country_code, poly };
 }

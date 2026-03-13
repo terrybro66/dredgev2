@@ -3,6 +3,13 @@ import express from "express";
 import cors from "cors";
 import { queryRouter } from "./query";
 import { loadDomains } from "./domains/registry";
+import { loadAvailability } from "./availability";
+
+loadAvailability(
+  "police-uk",
+  "https://data.police.uk/api/crimes-street-dates",
+  (data) => (data as { date: string }[]).map((e) => e.date),
+);
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
