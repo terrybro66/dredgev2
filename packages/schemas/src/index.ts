@@ -268,3 +268,40 @@ export type SchemaOp = { op: "USE_EXISTING" } | z.infer<typeof AddColumnSchema>;
 
 // ── Re-export PostgresColumnType as value for tests that import it directly ───
 export { PostgresColumnTypeSchema as PostgresColumnType };
+
+// ── Follow-up chip  (new in v5.1) ─────────────────────────────────────────────
+
+export const FollowUpSchema = z.object({
+  label: z.string(),
+  query: z.object({
+    plan: QueryPlanSchema,
+    poly: z.string(),
+    viz_hint: VizHintSchema,
+    resolved_location: z.string(),
+    country_code: z.string(),
+    intent: z.string(),
+    months: z.array(z.string()),
+  }),
+});
+export type FollowUp = z.infer<typeof FollowUpSchema>;
+
+// ── Fallback info  (new in v5.1) ──────────────────────────────────────────────
+
+export const FallbackInfoSchema = z.object({
+  field: z.enum(["date", "location", "category", "radius"]),
+  original: z.string(),
+  used: z.string(),
+  explanation: z.string(),
+});
+export type FallbackInfo = z.infer<typeof FallbackInfoSchema>;
+
+// ── Result context  (new in v5.1) ─────────────────────────────────────────────
+
+export const ResultContextSchema = z.object({
+  status: z.enum(["exact", "fallback", "empty"]),
+  reason: z.string().optional(),
+  fallback: FallbackInfoSchema.optional(),
+  followUps: z.array(FollowUpSchema),
+  confidence: z.enum(["high", "medium", "low"]),
+});
+export type ResultContext = z.infer<typeof ResultContextSchema>;
