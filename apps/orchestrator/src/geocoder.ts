@@ -66,6 +66,7 @@ async function fetchNominatim(placeName: string): Promise<NominatimHit> {
   if (!hits || hits.length === 0) {
     geocodeFailed(["coordinates"]);
   }
+  console.log("nominatim hit:", JSON.stringify(hits[0]));
   return hits[0];
 }
 
@@ -123,7 +124,7 @@ export async function geocodeToCoordinates(
   const hit = await fetchNominatim(placeName);
   const lat = parseFloat(hit.lat);
   const lon = parseFloat(hit.lon);
-  const country_code = hit.country_code.toUpperCase();
+  const country_code = (hit.country_code ?? "").toUpperCase();
 
   await prisma.geocoderCache.create({
     data: {
@@ -188,7 +189,7 @@ export async function geocodeToPolygon(
   lat = parseFloat(hit.lat);
   lon = parseFloat(hit.lon);
   display_name = hit.display_name;
-  country_code = hit.country_code.toUpperCase();
+  country_code = (hit.country_code ?? "").toUpperCase();
 
   // Fetch poly from PostGIS, then write a single complete cache row
   const poly = await fetchPolygon(prisma, lat, lon);
