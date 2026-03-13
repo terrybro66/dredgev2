@@ -1,4 +1,4 @@
-import { DomainConfig } from "@dredge/schemas";
+import { DomainConfig, FallbackInfo } from "@dredge/schemas";
 
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
@@ -11,6 +11,11 @@ export interface DomainAdapter {
     rows: unknown[],
     prisma: any,
   ) => Promise<void>;
+  recoverFromEmpty?: (
+    plan: any,
+    locationArg: string,
+    prisma: any,
+  ) => Promise<{ data: unknown[]; fallback: FallbackInfo } | null>;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
