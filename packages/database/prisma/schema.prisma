@@ -83,20 +83,31 @@ model GeocoderCache {
 }
 
 model QueryJob {
-  id            String    @id @default(cuid())
-  query_id      String
-  status        String    @default("pending")
-  domain        String
-  cache_hit     Boolean   @default(false)
-  rows_inserted Int       @default(0)
-  parse_ms      Int?
-  geocode_ms    Int?
-  fetch_ms      Int?
-  store_ms      Int?
-  error_message String?
-  createdAt     DateTime  @default(now())
-  completedAt   DateTime?
-  query         Query     @relation(fields: [query_id], references: [id])
+  id               String    @id @default(cuid())
+  query_id         String
+  status           String    @default("pending")
+  domain           String
+  cache_hit        Boolean   @default(false)
+  rows_inserted    Int       @default(0)
+  parse_ms         Int?
+  geocode_ms       Int?
+  fetch_ms         Int?
+  store_ms         Int?
+  error_message    String?
+  createdAt        DateTime  @default(now())
+  completedAt      DateTime?
+  fallback_applied String?
+  fallback_success Boolean?
+  query            Query     @relation(fields: [query_id], references: [id])
 
   @@map("query_jobs")
+}
+
+model ApiAvailability {
+  id        String   @id @default(cuid())
+  source    String   @unique
+  months    String[]
+  fetchedAt DateTime @default(now())
+
+  @@map("api_availability")
 }
