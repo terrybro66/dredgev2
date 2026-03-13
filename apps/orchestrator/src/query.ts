@@ -1,14 +1,13 @@
 import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { QueryPlanSchema } from "@dredge/schemas";
+import { QueryPlanSchema, ResultContext, FallbackInfo } from "@dredge/schemas";
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { evolveSchema } from "./schema";
 import { parseIntent, deriveVizHint, expandDateRange } from "./crime/intent";
-import { fetchCrimes } from "./crime/fetcher";
-import { storeResults } from "./crime/store";
 import { getDomainForQuery } from "./domains/registry";
+import { generateFollowUps } from "./followups";
 
 export const queryRouter = Router();
 
@@ -54,15 +53,15 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
 
   const viz_hint = deriveVizHint(plan, text);
   const months = expandDateRange(plan.date_from, plan.date_to);
-  const intent = "crime"; // hardcoded for now; extensible when further domains are added
+  const intent = "crime";
 
   return res.json({
     plan,
     poly: geocoded.poly,
     viz_hint,
     resolved_location: geocoded.display_name,
-    country_code: geocoded.country_code, // ← from geocoder result
-    intent, // ← new
+    country_code: geocoded.country_code,
+    intent,
     months,
   });
 });
@@ -145,6 +144,25 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         result_count: cached.result_count,
       }),
     );
+
+    const followUps = generateFollowUps({
+      domain: adapter.config.name,
+      plan,
+      poly,
+      viz_hint,
+      resolved_location,
+      country_code,
+      intent,
+      months,
+      resultCount: cached.result_count,
+    });
+
+    const resultContext: ResultContext = {
+      status: "exact",
+      followUps,
+      confidence: "high",
+    };
+
     return res.json({
       query_id: queryRecord.id,
       plan,
@@ -155,6 +173,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       months_fetched: months,
       results: cached.results,
       cache_hit: true,
+      resultContext,
     });
   }
 
@@ -190,20 +209,36 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   try {
     const fetch_start = Date.now();
-    const crimes = await fetchCrimes(plan, poly);
+    let rows = await adapter.fetchData(plan, poly);
     const fetch_ms = Date.now() - fetch_start;
 
+    // 5. Recovery — attempt fallback strategies when fetch returned nothing
+    let fallback: FallbackInfo | undefined;
+    let effectiveMonths = months;
+
+    if (rows.length === 0 && adapter.recoverFromEmpty) {
+      const recovery = await adapter.recoverFromEmpty(plan, poly, prisma);
+      if (recovery) {
+        rows = recovery.data;
+        fallback = recovery.fallback;
+        // If date was substituted, reflect the used month in months_fetched
+        if (fallback.field === "date") {
+          effectiveMonths = [fallback.used];
+        }
+      }
+    }
+
     const store_start = Date.now();
-    if (crimes.length > 0) {
+    if (rows.length > 0) {
       await evolveSchema(
         prisma,
         adapter.config.tableName,
-        crimes[0],
+        rows[0] as Record<string, unknown>,
         queryRecord.id,
         adapter.config.name,
       );
     }
-    await storeResults(queryRecord.id, crimes, prisma);
+    await adapter.storeResults(queryRecord.id, rows, prisma);
     const store_ms = Date.now() - store_start;
 
     const storedResults = await (prisma as any)[
@@ -230,6 +265,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         fetch_ms,
         store_ms,
         completedAt: new Date(),
+        fallback_applied: fallback?.field ?? null,
+        fallback_success: fallback ? storedResults.length > 0 : null,
       },
     });
 
@@ -242,8 +279,29 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         fetch_ms,
         store_ms,
         rows_inserted: storedResults.length,
+        fallback_applied: fallback?.field ?? null,
       }),
     );
+
+    // 6. Build resultContext
+    const followUps = generateFollowUps({
+      domain: adapter.config.name,
+      plan,
+      poly,
+      viz_hint,
+      resolved_location,
+      country_code,
+      intent,
+      months: effectiveMonths,
+      resultCount: storedResults.length,
+    });
+
+    const resultContext: ResultContext =
+      storedResults.length === 0
+        ? { status: "empty", followUps, confidence: "low" }
+        : fallback
+          ? { status: "fallback", fallback, followUps, confidence: "medium" }
+          : { status: "exact", followUps, confidence: "high" };
 
     return res.json({
       query_id: queryRecord.id,
@@ -252,9 +310,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       viz_hint,
       resolved_location,
       count: storedResults.length,
-      months_fetched: months,
+      months_fetched: effectiveMonths,
       results: storedResults,
       cache_hit: false,
+      resultContext,
     });
   } catch (err: any) {
     await prisma.queryJob.update({
