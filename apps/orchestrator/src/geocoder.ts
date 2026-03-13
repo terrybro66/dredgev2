@@ -14,7 +14,7 @@ interface GeocoderPrisma {
       data: Partial<CacheRow>;
     }) => Promise<unknown>;
   };
-  $queryRaw: (...args: unknown[]) => Promise<{ poly: string }[]>;
+  $queryRaw: (...args: any[]) => Promise<{ poly: string }[]>;
 }
 
 interface CacheRow {
@@ -147,7 +147,7 @@ export async function geocodeToPolygon(
 ): Promise<PolygonResult> {
   const key = placeName.toLowerCase();
 
-  // Full cache hit (poly already stored)
+  // Full cache hit — poly already stored, nothing to do
   const cached = await prisma.geocoderCache.findUnique({
     where: { place_name: key },
   });
@@ -167,57 +167,34 @@ export async function geocodeToPolygon(
   let country_code: string;
 
   if (cached) {
-    // Partial hit — centroid cached, poly missing
+    // Partial hit — centroid cached but poly missing; skip Nominatim
     lat = cached.lat;
     lon = cached.lon;
     display_name = cached.display_name;
     country_code = cached.country_code;
-  } else {
-    // Cold miss — call Nominatim
-    // Cold miss — call Nominatim first
-    const hit = await fetchNominatim(placeName);
-    lat = parseFloat(hit.lat);
-    lon = parseFloat(hit.lon);
-    display_name = hit.display_name;
-    country_code = hit.country_code.toUpperCase();
 
-    // Fetch poly BEFORE create, so create gets the complete row
+    // Fetch poly from PostGIS then update the existing row
     const poly = await fetchPolygon(prisma, lat, lon);
-    await prisma.geocoderCache.create({
-      data: { place_name: key, display_name, lat, lon, country_code, poly },
+    await prisma.geocoderCache.update({
+      where: { place_name: key },
+      data: { poly },
     });
 
     return { lat, lon, display_name, country_code, poly };
-
-    // Write centroid row first, then update with poly below
-    await prisma.geocoderCache.create({
-      data: {
-        place_name: key,
-        display_name,
-        lat,
-        lon,
-        country_code,
-        poly: null,
-      },
-    });
   }
 
-  // Fetch polygon via PostGIS
+  // Cold miss — call Nominatim first
+  const hit = await fetchNominatim(placeName);
+  lat = parseFloat(hit.lat);
+  lon = parseFloat(hit.lon);
+  display_name = hit.display_name;
+  country_code = hit.country_code.toUpperCase();
+
+  // Fetch poly from PostGIS, then write a single complete cache row
   const poly = await fetchPolygon(prisma, lat, lon);
-
-  if (cached) {
-    // Partial hit: update existing row with the new poly
-    await prisma.geocoderCache.update({
-      where: { place_name: key },
-      data: { poly },
-    });
-  } else {
-    // Cold miss: update the row we just created to add the poly
-    await prisma.geocoderCache.update({
-      where: { place_name: key },
-      data: { poly },
-    });
-  }
+  await prisma.geocoderCache.create({
+    data: { place_name: key, display_name, lat, lon, country_code, poly },
+  });
 
   return { lat, lon, display_name, country_code, poly };
 }
