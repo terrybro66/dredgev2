@@ -1,7 +1,12 @@
 import crypto from "crypto";
 import { Router, Request, Response } from "express";
 import { z } from "zod";
-import { QueryPlanSchema, ResultContext, FallbackInfo } from "@dredge/schemas";
+import {
+  QueryPlanSchema,
+  ResultContext,
+  FallbackInfo,
+  VizHintSchema,
+} from "@dredge/schemas";
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { evolveSchema } from "./schema";
@@ -18,7 +23,7 @@ const ParseBodySchema = z.object({ text: z.string().min(1) });
 const ExecuteBodySchema = z.object({
   plan: QueryPlanSchema,
   poly: z.string(),
-  viz_hint: z.enum(["map", "bar", "table"]),
+  viz_hint: VizHintSchema,
   resolved_location: z.string(),
   country_code: z.string(),
   intent: z.string(),
@@ -180,6 +185,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       confidence: "high",
     };
 
+    const aggregated = viz_hint === "map" || viz_hint === "heatmap";
+
     return res.json({
       query_id: queryRecord.id,
       plan,
@@ -190,6 +197,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       months_fetched: months,
       results: cached.results,
       cache_hit: true,
+      aggregated,
       resultContext,
     });
   }
@@ -264,20 +272,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     if (viz_hint === "map" || viz_hint === "heatmap") {
       const bins = await prisma.$queryRaw<AggregatedBin[]>`
-    SELECT
-      ST_Y(centroid) AS lat,
-      ST_X(centroid) AS lon,
-      COUNT(*)::int AS count
-    FROM (
-      SELECT
-        ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
-        ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002) AS grid_cell
-      FROM crime_results
-      WHERE query_id = ${queryRecord.id}
-        AND latitude IS NOT NULL
-        AND longitude IS NOT NULL
-      GROUP BY grid_cell
-    ) grouped
+ SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
+FROM (
+  SELECT 
+    ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
+    COUNT(*)::int AS count
+  FROM crime_results
+  WHERE query_id = ${queryRecord.id}
+    AND latitude IS NOT NULL
+    AND longitude IS NOT NULL
+  GROUP BY ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002)
+) grouped
   `;
 
       storedResults = bins;
@@ -295,7 +300,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         query_hash,
         domain: adapter.config.name,
         result_count: storedResults.length,
-        results: storedResults,
+        results: storedResults as any,
       },
     });
 
@@ -355,6 +360,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       months_fetched: effectiveMonths,
       results: storedResults,
       cache_hit: false,
+      aggregated,
       resultContext,
     });
   } catch (err: any) {

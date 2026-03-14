@@ -53,7 +53,13 @@ export type QueryPlan = z.infer<typeof QueryPlanSchema>;
 
 // ── VizHint ───────────────────────────────────────────────────────────────────
 
-export const VizHintSchema = z.enum(["map", "bar", "table"]);
+export const VizHintSchema = z.enum([
+  "map",
+  "bar",
+  "table",
+  "heatmap",
+  "dashboard",
+]);
 export type VizHint = z.infer<typeof VizHintSchema>;
 
 // ── ParsedQuerySchema ─────────────────────────────────────────────────────────

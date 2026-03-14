@@ -18,6 +18,7 @@ export const crimeUkAdapter: DomainAdapter = {
     categoryMap: {},
     vizHintRules: { defaultHint: "map", multiMonthHint: "bar" },
     rateLimit: { requestsPerMinute: 30 },
+    cacheTtlHours: null,
   },
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),
   flattenRow: (row: unknown) => row as Record<string, unknown>,
