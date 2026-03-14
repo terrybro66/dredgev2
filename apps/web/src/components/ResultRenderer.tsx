@@ -1,4 +1,11 @@
 import { useMemo, useState } from "react";
+import Map from "react-map-gl/maplibre";
+import maplibregl from "maplibre-gl";
+import { MapboxOverlay } from "@deck.gl/mapbox";
+import { useControl } from "react-map-gl/maplibre";
+import { ScatterplotLayer } from "@deck.gl/layers";
+import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
+import "maplibre-gl/dist/maplibre-gl.css";
 import { z } from "zod";
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
@@ -57,7 +64,7 @@ const ExecuteResultSchema = z.object({
   results: z.union([z.array(AggregatedBinSchema), z.array(CrimeResultSchema)]),
   cache_hit: z.boolean(),
   resultContext: ResultContextSchema.optional(),
-  aggregated: z.boolean(),
+  aggregated: z.boolean().optional().default(false),
 });
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -131,63 +138,14 @@ function DownloadToolbar({ queryId }: { queryId: string }) {
 // Imported lazily to avoid breaking non-map paths if the map bundle is absent.
 // Falls back to a static count badge if deck.gl is unavailable.
 
+function DeckOverlay(props: any) {
+  const overlay = useControl(() => new MapboxOverlay(props));
+  overlay.setProps(props);
+  return null;
+}
+
 function AggregatedMapView({ bins }: { bins: AggregatedBin[] }) {
-  // Dynamic import of map dependencies so the module compiles cleanly
-  // even in envs where deck.gl or maplibre aren't installed.
-  const [MapComponents, setMapComponents] = useState<any>(null);
-  const [mapError, setMapError] = useState(false);
-
-  useMemo(() => {
-    Promise.all([
-      import("react-map-gl/maplibre"),
-      import("maplibre-gl"),
-      import("@deck.gl/mapbox"),
-      import("@deck.gl/aggregation-layers"),
-    ])
-      .then(([mapgl, maplibregl, deckMapbox, aggLayers]) => {
-        setMapComponents({
-          Map: mapgl.default,
-          maplibregl: maplibregl.default,
-          MapboxOverlay: deckMapbox.MapboxOverlay,
-          useControl: mapgl.useControl,
-          HeatmapLayer: aggLayers.HeatmapLayer,
-        });
-      })
-      .catch(() => setMapError(true));
-  }, []);
-
   const first = bins[0];
-  const maxCount = Math.max(...bins.map((b) => b.count), 1);
-
-  // Fallback while map loads or if deps are missing
-  if (mapError || !MapComponents) {
-    return (
-      <div className="agg-fallback">
-        <div className="agg-fallback-grid">
-          {bins.slice(0, 100).map((bin, i) => (
-            <div
-              key={i}
-              className="agg-cell"
-              style={{ opacity: 0.2 + (bin.count / maxCount) * 0.8 }}
-              title={`${bin.count} incidents at ${bin.lat.toFixed(4)}, ${bin.lon.toFixed(4)}`}
-            />
-          ))}
-        </div>
-        <p className="agg-fallback-note">
-          {bins.length} aggregated cells · map unavailable
-        </p>
-      </div>
-    );
-  }
-
-  const { Map, maplibregl, MapboxOverlay, useControl, HeatmapLayer } =
-    MapComponents;
-
-  function DeckOverlay(props: any) {
-    const overlay = useControl(() => new MapboxOverlay(props));
-    overlay.setProps(props);
-    return null;
-  }
 
   const heatLayer = new HeatmapLayer({
     id: "agg-heat",
@@ -471,21 +429,7 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
 // If your build already imports MapView from App.tsx you can delete this and
 // replace the reference above with your shared component.
 
-import Map from "react-map-gl/maplibre";
-import maplibregl from "maplibre-gl";
-import { MapboxOverlay } from "@deck.gl/mapbox";
-import { useControl } from "react-map-gl/maplibre";
-import { ScatterplotLayer } from "@deck.gl/layers";
-import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
-import "maplibre-gl/dist/maplibre-gl.css";
-
 type MapMode = "points" | "clusters" | "heatmap";
-
-function DeckGLOverlay(props: any) {
-  const overlay = useControl(() => new MapboxOverlay(props));
-  overlay.setProps(props);
-  return null;
-}
 
 function LegacyMapView({ results }: { results: CrimeResult[] }) {
   const [mode, setMode] = useState<MapMode>("points");
@@ -569,7 +513,7 @@ function LegacyMapView({ results }: { results: CrimeResult[] }) {
         style={{ width: "100%", height: "100%" }}
         mapStyle="https://tiles.openfreemap.org/styles/liberty"
       >
-        <DeckGLOverlay layers={layers} />
+        <DeckOverlay layers={layers} />
       </Map>
       {hover && (
         <div className="map-tooltip">

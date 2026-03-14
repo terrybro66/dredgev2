@@ -9,7 +9,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type VizHint = "map" | "bar" | "table";
+type VizHint = "map" | "bar" | "table" | "dashboard";
 
 interface QueryPlan {
   category: string;
@@ -221,6 +221,7 @@ function InterpretationBanner({
     map: "map",
     bar: "bar chart",
     table: "table",
+    dashboard: "dashboard",
   };
 
   return (
@@ -503,12 +504,14 @@ function MapView({
       >
         <DeckGLOverlay layers={layers} />
       </Map>
-      {hover && (
+      {hover && !aggregated && (
         <div className="map-tooltip">
-          <strong>{formatCategory(hover.category)}</strong>
-          <span>{hover.street ?? "—"}</span>
-          <span>{hover.month}</span>
-          {hover.outcome_category && <em>{hover.outcome_category}</em>}
+          <strong>{formatCategory(hover.category ?? "")}</strong>
+          <span>{(hover as any).street ?? "—"}</span>
+          <span>{(hover as any).month}</span>
+          {(hover as any).outcome_category && (
+            <em>{(hover as any).outcome_category}</em>
+          )}
         </div>
       )}
     </div>
