@@ -2,6 +2,7 @@ import axios from "axios";
 import { z } from "zod";
 import { PoliceCrimeSchema, QueryPlan } from "@dredge/schemas";
 import { expandDateRange } from "./intent";
+import pLimit from "p-limit";
 
 const POLICE_API_BASE = "https://data.police.uk/api";
 
@@ -36,12 +37,11 @@ export async function fetchCrimes(
   poly: string,
 ): Promise<RawCrime[]> {
   const months = expandDateRange(plan.date_from, plan.date_to);
-  const results: RawCrime[] = [];
+  const limit = pLimit(3);
 
-  for (const month of months) {
-    const crimes = await fetchCrimesForMonth(plan, poly, month);
-    results.push(...crimes);
-  }
+  const results = await Promise.all(
+    months.map((month) => limit(() => fetchCrimesForMonth(plan, poly, month))),
+  );
 
-  return results;
+  return results.flat();
 }
