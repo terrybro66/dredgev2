@@ -326,3 +326,16 @@ export const AggregatedBinSchema = z.object({
   count: z.number().int().positive(),
 });
 export type AggregatedBin = z.infer<typeof AggregatedBinSchema>;
+
+// ── WeatherQueryPlan  (new in v6.0) ──────────────────────────────────────────
+
+export const WeatherQueryPlanSchema = z.object({
+  location: z.string().min(1).refine(
+    (s) => !/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(s.trim()),
+    { message: "location must be a place name, not coordinates" },
+  ),
+  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD format"),
+  date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD format"),
+  metric: z.enum(["temperature", "precipitation", "wind"]).optional(),
+});
+export type WeatherQueryPlan = z.infer<typeof WeatherQueryPlanSchema>;
