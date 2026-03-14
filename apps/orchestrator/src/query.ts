@@ -8,6 +8,7 @@ import { evolveSchema } from "./schema";
 import { parseIntent, deriveVizHint, expandDateRange } from "./crime/intent";
 import { getDomainForQuery } from "./domains/registry";
 import { generateFollowUps } from "./followups";
+import { acquire } from "./rateLimiter";
 
 export const queryRouter = Router();
 
@@ -206,6 +207,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   try {
     const fetch_start = Date.now();
+    await acquire(adapter.config);
     let rows = await adapter.fetchData(plan, poly);
     const fetch_ms = Date.now() - fetch_start;
 

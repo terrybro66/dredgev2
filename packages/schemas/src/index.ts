@@ -148,6 +148,12 @@ export const DomainConfigSchema = z.object({
     defaultHint: VizHintSchema,
     multiMonthHint: VizHintSchema,
   }),
+  rateLimit: z
+    .object({
+      requestsPerMinute: z.number().int().positive(),
+    })
+    .optional(),
+  cacheTtlHours: z.number().nonnegative().nullable().optional(),
 });
 export type DomainConfig = z.infer<typeof DomainConfigSchema>;
 
