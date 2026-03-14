@@ -9,7 +9,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type VizHint = "map" | "bar" | "table";
+type VizHint = "map" | "bar" | "table" | "dashboard";
 
 interface QueryPlan {
   category: string;
@@ -78,9 +78,10 @@ interface ExecuteResult {
   resolved_location: string;
   count: number;
   months_fetched: string[];
-  results: CrimeResult[];
+  results: CrimeResult[] | AggregatedBin[];
   cache_hit: boolean;
   resultContext?: ResultContext;
+  aggregated: boolean;
 }
 
 interface IntentError {
@@ -88,6 +89,12 @@ interface IntentError {
   understood: Partial<QueryPlan>;
   missing: string[];
   message: string;
+}
+
+interface AggregatedBin {
+  lat: number;
+  lon: number;
+  count: number;
 }
 
 type Stage = "idle" | "loading" | "done" | "error";
@@ -214,6 +221,7 @@ function InterpretationBanner({
     map: "map",
     bar: "bar chart",
     table: "table",
+    dashboard: "dashboard",
   };
 
   return (
@@ -400,22 +408,34 @@ function DeckGLOverlay(props: any) {
 
 type MapMode = "points" | "clusters" | "heatmap";
 
-function MapView({ results }: { results: CrimeResult[] }) {
+function MapView({
+  results,
+  aggregated,
+}: {
+  results: CrimeResult[] | AggregatedBin[];
+  aggregated: boolean;
+}) {
   const [mode, setMode] = useState<MapMode>("points");
   const [hover, setHover] = useState<CrimeResult | null>(null);
-  console.log("sample result:", JSON.stringify(results[0], null, 2));
+
   const points = useMemo(
     () =>
-      results
-        .map((c) => ({ ...c, lng: c.longitude, lat: c.latitude }))
-        .filter(
-          (c) =>
-            c.lng != null &&
-            c.lat != null &&
-            Number.isFinite(c.lng) &&
-            Number.isFinite(c.lat),
-        ),
-    [results],
+      aggregated
+        ? (results as AggregatedBin[]).map((b) => ({
+            lng: b.lon,
+            lat: b.lat,
+            count: b.count,
+          }))
+        : (results as CrimeResult[])
+            .map((c) => ({ ...c, lng: c.longitude, lat: c.latitude }))
+            .filter(
+              (c) =>
+                c.lng != null &&
+                c.lat != null &&
+                Number.isFinite(c.lng) &&
+                Number.isFinite(c.lat),
+            ),
+    [results, aggregated],
   );
 
   const first = points[0];
@@ -484,12 +504,14 @@ function MapView({ results }: { results: CrimeResult[] }) {
       >
         <DeckGLOverlay layers={layers} />
       </Map>
-      {hover && (
+      {hover && !aggregated && (
         <div className="map-tooltip">
-          <strong>{formatCategory(hover.category)}</strong>
-          <span>{hover.street ?? "—"}</span>
-          <span>{hover.month}</span>
-          {hover.outcome_category && <em>{hover.outcome_category}</em>}
+          <strong>{formatCategory(hover.category ?? "")}</strong>
+          <span>{(hover as any).street ?? "—"}</span>
+          <span>{(hover as any).month}</span>
+          {(hover as any).outcome_category && (
+            <em>{(hover as any).outcome_category}</em>
+          )}
         </div>
       )}
     </div>
@@ -618,11 +640,33 @@ function ResultRenderer({
           onFollowUp={onFollowUp}
         />
       ) : viz_hint === "map" ? (
-        <MapView results={results} />
+        <MapView results={results} aggregated={result.aggregated} />
       ) : viz_hint === "bar" ? (
-        <BarChart results={results} months_fetched={months_fetched} />
+        <BarChart
+          results={results as CrimeResult[]}
+          months_fetched={months_fetched}
+        />
       ) : (
-        <TableView results={results} />
+        <TableView results={results as CrimeResult[]} />
+      )}
+
+      {count > 0 && viz_hint !== "dashboard" && (
+        <div className="download-toolbar">
+          <a
+            href={`${API}/query/${result.query_id}/export?format=csv`}
+            download="dredge-export.csv"
+            className="btn-ghost small"
+          >
+            Download CSV
+          </a>
+          <a
+            href={`${API}/query/${result.query_id}/export?format=geojson`}
+            download="dredge-export.geojson"
+            className="btn-ghost small"
+          >
+            Download GeoJSON
+          </a>
+        </div>
       )}
 
       {count > 0 && followUps.length > 0 && (
@@ -1302,6 +1346,17 @@ const CSS = `
     color: var(--text-dim);
     background: var(--bg3);
     border-top: 1px solid var(--border);
+  }
+
+  /* ── Download toolbar ── */
+
+  .download-toolbar {
+    display: flex;
+    gap: 8px;
+  }
+
+  .download-toolbar a.btn-ghost {
+    text-decoration: none;
   }
 
   @keyframes fadeIn {
