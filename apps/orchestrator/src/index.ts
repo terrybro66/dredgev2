@@ -4,6 +4,8 @@ import cors from "cors";
 import { queryRouter } from "./query";
 import { loadDomains } from "./domains/registry";
 import { loadAvailability } from "./availability";
+import { setDefaultResultOrder } from "dns";
+setDefaultResultOrder("ipv4first");
 
 loadAvailability(
   "police-uk",

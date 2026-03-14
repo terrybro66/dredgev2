@@ -43,6 +43,7 @@ interface NominatimHit {
   lat: string;
   lon: string;
   country_code: string;
+  address?: { country_code?: string };
 }
 
 // ── IntentError ───────────────────────────────────────────────────────────────
@@ -52,13 +53,13 @@ function geocodeFailed(missing: string[]): never {
 }
 
 // ── Nominatim fetch ───────────────────────────────────────────────────────────
-
 async function fetchNominatim(placeName: string): Promise<NominatimHit> {
   const response = await axios.get(
     "https://nominatim.openstreetmap.org/search",
     {
-      params: { q: placeName, format: "json", limit: 1 },
+      params: { q: placeName, format: "json", limit: 1, addressdetails: 1 },
       headers: { "User-Agent": "dredge/1.0" },
+      timeout: 10000,
     },
   );
 
@@ -66,11 +67,15 @@ async function fetchNominatim(placeName: string): Promise<NominatimHit> {
   if (!hits || hits.length === 0) {
     geocodeFailed(["coordinates"]);
   }
-  console.log("nominatim hit:", JSON.stringify(hits[0]));
-  return hits[0];
+  const hit = hits[0];
+  const country_code = (
+    hit.address?.country_code ??
+    hit.country_code ??
+    ""
+  ).toUpperCase();
+  return { ...hit, country_code };
 }
-
-// ── PostGIS polygon fetch ─────────────────────────────────────────────────────
+// ── Polygon generation (trig approximation, no PostGIS required) ──────────────
 
 async function fetchPolygon(
   prisma: GeocoderPrisma,
@@ -148,7 +153,6 @@ export async function geocodeToPolygon(
 ): Promise<PolygonResult> {
   const key = placeName.toLowerCase();
 
-  // Full cache hit — poly already stored, nothing to do
   const cached = await prisma.geocoderCache.findUnique({
     where: { place_name: key },
   });

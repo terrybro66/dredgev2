@@ -11,6 +11,11 @@ interface Props {
   loadingLabel?: string;
 }
 
-export function QueryInput({ onSubmit, initialValue = "", loading = false, loadingLabel = "Loading..." }: Props) {
+export function QueryInput({
+  onSubmit,
+  initialValue = "",
+  loading = false,
+  loadingLabel = "Loading...",
+}: Props) {
   return <div>TODO: QueryInput</div>;
 }

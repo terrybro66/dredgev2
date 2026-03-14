@@ -32,14 +32,12 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
       .status(400)
       .json({ error: "validation_error", details: bodyResult.error.errors });
   }
-  console.log("[execute] body:", JSON.stringify(bodyResult.data, null, 2));
   const { text } = bodyResult.data;
 
   let plan;
   try {
     plan = await parseIntent(text);
   } catch (err: any) {
-    console.error("[parse] parseIntent failed:", err);
     return res.status(400).json(err);
   }
 
@@ -47,7 +45,6 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
   try {
     geocoded = await geocodeToPolygon(plan.location, prisma);
   } catch (err: any) {
-    console.error("[parse] geocodeToPolygon failed:", err);
     return res.status(400).json(err);
   }
 
