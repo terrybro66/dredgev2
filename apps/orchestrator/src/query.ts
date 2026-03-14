@@ -107,8 +107,26 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     .update(hashInput)
     .digest("hex");
 
-  // 3. Cache check — return immediately on hit
-  const cached = await prisma.queryCache.findUnique({ where: { query_hash } });
+  let cached = await prisma.queryCache.findUnique({ where: { query_hash } });
+
+  if (cached && adapter.config.cacheTtlHours != null) {
+    const ageHours = (Date.now() - cached.createdAt.getTime()) / 3600000;
+
+    if (ageHours > adapter.config.cacheTtlHours) {
+      await prisma.queryCache.delete({ where: { query_hash } });
+
+      console.log(
+        JSON.stringify({
+          event: "cache_stale_evicted",
+          domain: adapter.config.name,
+          query_hash,
+        }),
+      );
+
+      cached = null;
+    }
+  }
+
   if (cached) {
     const queryRecord = await prisma.query.create({
       data: {
