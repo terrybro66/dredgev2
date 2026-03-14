@@ -36,6 +36,7 @@ const { mockPrisma } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -105,6 +106,7 @@ beforeEach(() => {
   mockPrisma.queryCache.create.mockResolvedValue({});
   mockPrisma.queryJob.create.mockResolvedValue({ id: "job-id" });
   mockPrisma.queryJob.update.mockResolvedValue({});
+  mockPrisma.$queryRaw.mockResolvedValue([]);
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
@@ -340,7 +342,7 @@ describe("POST /query/execute", () => {
     const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
-      .send(validExecuteBody);
+      .send({ ...validExecuteBody, viz_hint: "bar" });
     expect(res.body.results).toHaveLength(100);
   });
 

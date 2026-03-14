@@ -9,6 +9,7 @@ import { parseIntent, deriveVizHint, expandDateRange } from "./crime/intent";
 import { getDomainForQuery } from "./domains/registry";
 import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
+import { AggregatedBin } from "@dredge/schemas";
 
 export const queryRouter = Router();
 
@@ -258,13 +259,37 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     await adapter.storeResults(queryRecord.id, rows, prisma);
     const store_ms = Date.now() - store_start;
 
-    const storedResults = await (prisma as any)[
-      adapter.config.prismaModel
-    ].findMany({
-      where: { query_id: queryRecord.id },
-      take: 100,
-    });
+    let aggregated = false;
+    let storedResults: unknown[];
 
+    if (viz_hint === "map" || viz_hint === "heatmap") {
+      const bins = await prisma.$queryRaw<AggregatedBin[]>`
+    SELECT
+      ST_Y(centroid) AS lat,
+      ST_X(centroid) AS lon,
+      COUNT(*)::int AS count
+    FROM (
+      SELECT
+        ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
+        ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002) AS grid_cell
+      FROM crime_results
+      WHERE query_id = ${queryRecord.id}
+        AND latitude IS NOT NULL
+        AND longitude IS NOT NULL
+      GROUP BY grid_cell
+    ) grouped
+  `;
+
+      storedResults = bins;
+      aggregated = true;
+    } else {
+      storedResults = await (prisma as any)[
+        adapter.config.prismaModel
+      ].findMany({
+        where: { query_id: queryRecord.id },
+        take: 100,
+      });
+    }
     await prisma.queryCache.create({
       data: {
         query_hash,
