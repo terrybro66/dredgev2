@@ -49,7 +49,8 @@ export function stripFences(text: string): string {
     .trim();
 }
 
-export function deriveVizHint(plan: QueryPlan, rawText: string): VizHint {
+export function deriveVizHint(plan: QueryPlan, rawText: string, intent = "crime"): VizHint {
+  if (intent === "weather") return "dashboard";
   const lower = rawText.toLowerCase();
   if (
     lower.includes("list") ||

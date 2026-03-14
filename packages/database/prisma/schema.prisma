@@ -20,6 +20,7 @@ model Query {
   resolved_location String?
   country_code      String?                             // new in v4.1
   results           CrimeResult[]
+  weatherResults    WeatherResult[]
   jobs              QueryJob[]                          // new in v4.1
 
   @@map("query")
@@ -110,4 +111,23 @@ model ApiAvailability {
   fetchedAt DateTime @default(now())
 
   @@map("api_availability")
+}
+
+// ── new in v6.0 ───────────────────────────────────────────────────────────────
+
+model WeatherResult {
+  id              String  @id @default(cuid())
+  query_id        String
+  date            String
+  latitude        Float?
+  longitude       Float?
+  temperature_max Float?
+  temperature_min Float?
+  precipitation   Float?
+  wind_speed      Float?
+  description     String?
+  raw             Json?
+  query           Query   @relation(fields: [query_id], references: [id])
+
+  @@map("weather_results")
 }
