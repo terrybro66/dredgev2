@@ -6,6 +6,7 @@ import { loadDomains } from "./domains/registry";
 import { loadAvailability } from "./availability";
 import { setDefaultResultOrder } from "dns";
 setDefaultResultOrder("ipv4first");
+import { exportRouter } from "./export";
 
 loadAvailability(
   "police-uk",
@@ -21,6 +22,7 @@ loadDomains();
 app.use(cors());
 app.use(express.json());
 app.use("/query", queryRouter);
+app.use("/query", exportRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
