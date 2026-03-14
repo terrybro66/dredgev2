@@ -311,3 +311,12 @@ export const ResultContextSchema = z.object({
   confidence: z.enum(["high", "medium", "low"]),
 });
 export type ResultContext = z.infer<typeof ResultContextSchema>;
+
+// ── Aggregated bin  (new in v6.0) ─────────────────────────────────────────────
+
+export const AggregatedBinSchema = z.object({
+  lat: z.number(),
+  lon: z.number(),
+  count: z.number().int().positive(),
+});
+export type AggregatedBin = z.infer<typeof AggregatedBinSchema>;
