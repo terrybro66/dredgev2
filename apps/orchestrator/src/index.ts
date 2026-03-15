@@ -7,12 +7,21 @@ import { loadAvailability } from "./availability";
 import { setDefaultResultOrder } from "dns";
 setDefaultResultOrder("ipv4first");
 import { exportRouter } from "./export";
+import { getRedisClient, checkRedisHealth } from "./redis";
 
 loadAvailability(
   "police-uk",
   "https://data.police.uk/api/crimes-street-dates",
   (data) => (data as { date: string }[]).map((e) => e.date),
 );
+
+checkRedisHealth().then((healthy) => {
+  if (!healthy) {
+    console.warn(
+      "Redis unavailable — falling back to in-memory mode for rate limiter and availability cache",
+    );
+  }
+});
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;

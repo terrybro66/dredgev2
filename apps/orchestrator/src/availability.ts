@@ -1,4 +1,6 @@
 import axios from "axios";
+import Redis from "ioredis";
+import { getRedisClient } from "./redis";
 
 // ── In-memory store ───────────────────────────────────────────────────────────
 
@@ -73,4 +75,48 @@ export function isMonthAvailable(source: string, month: string): boolean {
  */
 export function getAvailableMonths(source: string): string[] {
   return store.get(source) ?? [];
+}
+
+// ── Redis-backed cache factory ────────────────────────────────────────────────
+
+const TTL = parseInt(process.env.AVAILABILITY_CACHE_TTL_SECONDS ?? "3600", 10);
+const KEY_PREFIX = "availability:";
+
+interface AvailabilityCache {
+  get: (source: string) => Promise<string[] | null>;
+  set: (source: string, months: string[]) => Promise<void>;
+}
+
+export function createAvailabilityCache(
+  redisClient?: Redis,
+): AvailabilityCache {
+  const client = redisClient ?? getRedisClient();
+  const memoryFallback = new Map<string, string[]>();
+
+  const isConnected = () =>
+    client.status === "ready" || client.status === "connecting";
+
+  return {
+    get: async (source: string) => {
+      if (isConnected()) {
+        const val = await client.get(KEY_PREFIX + source);
+        if (!val) return null;
+        return JSON.parse(val) as string[];
+      }
+      return memoryFallback.get(source) ?? null;
+    },
+
+    set: async (source: string, months: string[]) => {
+      if (isConnected()) {
+        await client.set(
+          KEY_PREFIX + source,
+          JSON.stringify(months),
+          "EX",
+          TTL,
+        );
+      } else {
+        memoryFallback.set(source, months);
+      }
+    },
+  };
 }

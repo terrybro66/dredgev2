@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import type { Mocked } from "vitest";
 import axios from "axios";
 
@@ -222,5 +222,49 @@ describe("getAvailableMonths", () => {
   it("returns [] when source has never been loaded", async () => {
     const { getAvailableMonths } = await import("../availability");
     expect(getAvailableMonths("completely-unknown")).toEqual([]);
+  });
+});
+
+import { createAvailabilityCache } from "../availability";
+
+describe("Redis-backed availability cache", () => {
+  it("stores and retrieves a value", async () => {
+    const cache = createAvailabilityCache();
+    await cache.set("police-api", ["2024-01", "2024-02"]);
+    const result = await cache.get("police-api");
+    expect(result).toEqual(["2024-01", "2024-02"]);
+  });
+
+  it("returns null for an unknown key", async () => {
+    const cache = createAvailabilityCache();
+    const result = await cache.get("nonexistent-source");
+    expect(result).toBeNull();
+  });
+
+  it("two instances share state via Redis", async () => {
+    const cacheA = createAvailabilityCache();
+    const cacheB = createAvailabilityCache();
+    await cacheA.set("shared-source", ["2024-01"]);
+    const result = await cacheB.get("shared-source");
+    expect(result).toEqual(["2024-01"]);
+  });
+
+  it("falls back to in-memory when Redis is unavailable", async () => {
+    const Redis = (await import("ioredis")).default;
+    const badClient = new Redis("redis://localhost:19999", {
+      maxRetriesPerRequest: 0,
+      connectTimeout: 500,
+      lazyConnect: true,
+    });
+    const cache = createAvailabilityCache(badClient);
+    await cache.set("fallback-source", ["2024-01"]);
+    const result = await cache.get("fallback-source");
+    expect(result).toEqual(["2024-01"]);
+    await badClient.quit();
+  });
+
+  afterAll(async () => {
+    const client = (await import("../redis")).getRedisClient();
+    await client.quit();
   });
 });
