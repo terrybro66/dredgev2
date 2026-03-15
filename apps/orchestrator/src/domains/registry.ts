@@ -1,4 +1,6 @@
 import { DomainConfig, FallbackInfo } from "@dredge/schemas";
+import { crimeUkAdapter } from "./crime-uk";
+import { weatherAdapter } from "./weather";
 
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
@@ -45,9 +47,8 @@ export function getDomainByName(name: string): DomainAdapter | undefined {
 }
 
 export function loadDomains(): void {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { crimeUkAdapter } = require("./crime-uk");
   registerDomain(crimeUkAdapter);
+  registerDomain(weatherAdapter);
 }
 
 export function clearRegistry(): void {

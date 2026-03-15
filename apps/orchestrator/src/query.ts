@@ -55,9 +55,19 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     return res.status(400).json(err);
   }
 
-  const viz_hint = deriveVizHint(plan, text);
+  const intentKeywords = [
+    "weather",
+    "temperature",
+    "forecast",
+    "rain",
+    "wind",
+    "precipitation",
+  ];
+  const intent = intentKeywords.some((k) => text.toLowerCase().includes(k))
+    ? "weather"
+    : "crime";
+  const viz_hint = deriveVizHint(plan, text, intent);
   const months = expandDateRange(plan.date_from, plan.date_to);
-  const intent = "crime";
 
   return res.json({
     plan,

@@ -592,6 +592,38 @@ function TableView({ results }: { results: CrimeResult[] }) {
   );
 }
 
+function DashboardView({ results }: { results: any[] }) {
+  return (
+    <div style={{ padding: "1rem" }}>
+      <h3>Weather Results ({results.length} days)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Max °C</th>
+            <th>Min °C</th>
+            <th>Rain mm</th>
+            <th>Wind km/h</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((r: any) => (
+            <tr key={r.id}>
+              <td>{r.date}</td>
+              <td>{r.temperature_max}</td>
+              <td>{r.temperature_min}</td>
+              <td>{r.precipitation}</td>
+              <td>{r.wind_speed}</td>
+              <td>{r.description}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ── ResultRenderer ────────────────────────────────────────────────────────────
 
 function ResultRenderer({
@@ -620,7 +652,9 @@ function ResultRenderer({
         <div className="result-summary">
           <span className="result-count">{count}</span>
           <span className="result-desc">
-            {formatCategory(plan.category).toLowerCase()} incidents
+            {plan.category
+              ? `${formatCategory(plan.category).toLowerCase()} incidents`
+              : `${count} results`}
           </span>
         </div>
         <button className="btn-ghost small" onClick={onRefine}>
@@ -639,6 +673,8 @@ function ResultRenderer({
           resultContext={safeContext}
           onFollowUp={onFollowUp}
         />
+      ) : viz_hint === "dashboard" ? (
+        <DashboardView results={results} />
       ) : viz_hint === "map" ? (
         <MapView results={results} aggregated={result.aggregated} />
       ) : viz_hint === "bar" ? (
