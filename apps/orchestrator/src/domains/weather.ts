@@ -68,8 +68,13 @@ async function fetchWeatherForDates(
   dateFrom: string,
   dateTo: string,
 ): Promise<OpenMeteoResponse> {
-  const base = "https://api.open-meteo.com/v1/forecast";
-  const url = `${base}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode&start_date=${dateFrom}&end_date=${dateTo}&timezone=auto`;
+  const today = new Date().toISOString().slice(0, 10);
+  const endpoint =
+    dateTo < today
+      ? "https://archive-api.open-meteo.com/v1/archive"
+      : "https://api.open-meteo.com/v1/forecast";
+
+  const url = `${endpoint}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode&start_date=${dateFrom}&end_date=${dateTo}&timezone=auto`;
 
   console.log("FORECAST URL:", url);
   return restGet<OpenMeteoResponse>({ url });

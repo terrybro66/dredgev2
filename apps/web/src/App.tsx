@@ -5,6 +5,10 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import { useControl } from "react-map-gl/maplibre";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
+import * as d3Scale from "d3-scale";
+import * as d3Shape from "d3-shape";
+import * as d3Axis from "d3-axis";
+import * as d3Selection from "d3-selection";
 import "maplibre-gl/dist/maplibre-gl.css";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -82,6 +86,7 @@ interface ExecuteResult {
   cache_hit: boolean;
   resultContext?: ResultContext;
   aggregated: boolean;
+  intent: string;
 }
 
 interface IntentError {
@@ -95,6 +100,16 @@ interface AggregatedBin {
   lat: number;
   lon: number;
   count: number;
+}
+
+interface WeatherRow {
+  id: string;
+  date: string;
+  temperature_max: number | null;
+  temperature_min: number | null;
+  precipitation: number | null;
+  wind_speed: number | null;
+  description: string | null;
 }
 
 type Stage = "idle" | "loading" | "done" | "error";
@@ -216,7 +231,9 @@ function InterpretationBanner({
   cacheHit: boolean;
 }) {
   const { plan, viz_hint, resolved_location, months } = parsed;
-  const singleMonth = plan.date_from === plan.date_to;
+  const dateFrom = plan.date_from.slice(0, 7);
+  const dateTo = plan.date_to.slice(0, 7);
+  const singleMonth = dateFrom === dateTo;
   const vizLabel: Record<VizHint, string> = {
     map: "map",
     bar: "bar chart",
@@ -228,7 +245,14 @@ function InterpretationBanner({
     <div className="interpretation-banner">
       <div className="interpretation-text">
         <span className="interp-label">Searched for </span>
+        // Change:
         <strong>{formatCategory(plan.category)}</strong>
+        // To:
+        <strong>
+          {parsed.intent === "weather"
+            ? "Weather"
+            : formatCategory(plan.category)}
+        </strong>{" "}
         {" in "}
         <strong>{resolved_location}</strong>
         {" · "}
@@ -592,34 +616,411 @@ function TableView({ results }: { results: CrimeResult[] }) {
   );
 }
 
-function DashboardView({ results }: { results: any[] }) {
+// ── Metric cards ──────────────────────────────────────────────────────────────
+
+function MetricCards({ rows }: { rows: WeatherRow[] }) {
+  const validRows = rows.filter(
+    (r) => r.temperature_max != null && r.temperature_min != null,
+  );
+
+  const avgTemp =
+    validRows.length > 0
+      ? validRows.reduce(
+          (sum, r) => sum + (r.temperature_max! + r.temperature_min!) / 2,
+          0,
+        ) / validRows.length
+      : null;
+
+  const totalPrecip = rows.reduce((sum, r) => sum + (r.precipitation ?? 0), 0);
+
+  const avgWind =
+    rows.filter((r) => r.wind_speed != null).length > 0
+      ? rows.reduce((sum, r) => sum + (r.wind_speed ?? 0), 0) /
+        rows.filter((r) => r.wind_speed != null).length
+      : null;
+
+  const descCounts: Record<string, number> = {};
+  rows.forEach((r) => {
+    if (r.description)
+      descCounts[r.description] = (descCounts[r.description] ?? 0) + 1;
+  });
+  const dominantDesc =
+    Object.entries(descCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
+
+  const cards = [
+    {
+      label: "Avg Temperature",
+      value: avgTemp != null ? `${avgTemp.toFixed(1)}°C` : "—",
+    },
+    { label: "Total Precipitation", value: `${totalPrecip.toFixed(1)} mm` },
+    {
+      label: "Avg Wind Speed",
+      value: avgWind != null ? `${avgWind.toFixed(1)} km/h` : "—",
+    },
+    { label: "Dominant Conditions", value: dominantDesc },
+  ];
+
   return (
-    <div style={{ padding: "1rem" }}>
-      <h3>Weather Results ({results.length} days)</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Max °C</th>
-            <th>Min °C</th>
-            <th>Rain mm</th>
-            <th>Wind km/h</th>
-            <th>Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          {results.map((r: any) => (
-            <tr key={r.id}>
-              <td>{r.date}</td>
-              <td>{r.temperature_max}</td>
-              <td>{r.temperature_min}</td>
-              <td>{r.precipitation}</td>
-              <td>{r.wind_speed}</td>
-              <td>{r.description}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(4, 1fr)",
+        gap: "0.75rem",
+        marginBottom: "1.5rem",
+      }}
+    >
+      {cards.map((c) => (
+        <div
+          key={c.label}
+          style={{
+            background: "var(--bg-card, #1a1a2e)",
+            border: "1px solid var(--border, #2a2a4a)",
+            borderRadius: "8px",
+            padding: "1rem",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--text-muted, #888)",
+              marginBottom: "0.4rem",
+            }}
+          >
+            {c.label}
+          </div>
+          <div
+            style={{
+              fontSize: "1.2rem",
+              fontWeight: 600,
+              color: "var(--text, #fff)",
+            }}
+          >
+            {c.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Temperature band chart ────────────────────────────────────────────────────
+
+function TemperatureChart({ rows }: { rows: WeatherRow[] }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const W = 800,
+    H = 240,
+    mt = 20,
+    mr = 20,
+    mb = 40,
+    ml = 50;
+  const iW = W - ml - mr;
+  const iH = H - mt - mb;
+
+  useEffect(() => {
+    if (!svgRef.current || rows.length === 0) return;
+
+    const svg = d3Selection.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const g = svg.append("g").attr("transform", `translate(${ml},${mt})`);
+
+    const dates = rows.map((r) => new Date(r.date));
+    const allTemps = rows.flatMap((r) => [
+      r.temperature_max ?? 0,
+      r.temperature_min ?? 0,
+    ]);
+    const tempMin = Math.min(...allTemps);
+    const tempMax = Math.max(...allTemps);
+    const padding = (tempMax - tempMin) * 0.1 || 2;
+
+    const xScale = d3Scale
+      .scaleTime()
+      .domain([dates[0], dates[dates.length - 1]])
+      .range([0, iW]);
+
+    const yScale = d3Scale
+      .scaleLinear()
+      .domain([tempMin - padding, tempMax + padding])
+      .range([iH, 0]);
+
+    // Gridlines
+    g.append("g")
+      .attr("class", "grid")
+      .call(
+        d3Axis
+          .axisLeft(yScale)
+          .tickSize(-iW)
+          .tickFormat(() => ""),
+      )
+      .call((g) => g.select(".domain").remove())
+      .call((g) =>
+        g
+          .selectAll(".tick line")
+          .attr("stroke", "var(--border, #2a2a4a)")
+          .attr("stroke-opacity", 0.5),
+      );
+
+    // Temperature band area
+    const area = d3Shape
+      .area<WeatherRow>()
+      .x((d) => xScale(new Date(d.date)))
+      .y0((d) => yScale(d.temperature_min ?? 0))
+      .y1((d) => yScale(d.temperature_max ?? 0))
+      .curve(d3Shape.curveCatmullRom);
+
+    g.append("path")
+      .datum(rows)
+      .attr("fill", "rgba(251, 191, 36, 0.25)")
+      .attr("stroke", "none")
+      .attr("d", area);
+
+    // Centre midpoint line
+    const midLine = d3Shape
+      .line<WeatherRow>()
+      .x((d) => xScale(new Date(d.date)))
+      .y((d) =>
+        yScale(((d.temperature_max ?? 0) + (d.temperature_min ?? 0)) / 2),
+      )
+      .curve(d3Shape.curveCatmullRom);
+
+    g.append("path")
+      .datum(rows)
+      .attr("fill", "none")
+      .attr("stroke", "rgba(251, 191, 36, 0.8)")
+      .attr("stroke-width", 1.5)
+      .attr("d", midLine);
+
+    // Axes
+    const tickCount =
+      rows.length <= 14 ? rows.length : Math.ceil(rows.length / 7);
+    g.append("g")
+      .attr("transform", `translate(0,${iH})`)
+      .call(
+        d3Axis
+          .axisBottom(xScale)
+          .ticks(tickCount)
+          .tickFormat((d) => {
+            const date = d as Date;
+            return `${date.getDate()} ${date.toLocaleString("en-GB", { month: "short" })}`;
+          }),
+      )
+      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
+      .call((g) =>
+        g
+          .selectAll("text")
+          .attr("fill", "var(--text-muted, #888)")
+          .attr("font-size", "11px"),
+      );
+
+    g.append("g")
+      .call(d3Axis.axisLeft(yScale).tickFormat((d) => `${d}°C`))
+      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
+      .call((g) =>
+        g
+          .selectAll("text")
+          .attr("fill", "var(--text-muted, #888)")
+          .attr("font-size", "11px"),
+      );
+
+    // Y axis label
+    g.append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("x", -iH / 2)
+      .attr("y", -38)
+      .attr("text-anchor", "middle")
+      .attr("fill", "var(--text-muted, #888)")
+      .attr("font-size", "11px")
+      .text("°C");
+  }, [rows]);
+
+  return (
+    <div style={{ marginBottom: "1.5rem" }}>
+      <div
+        style={{
+          fontSize: "0.8rem",
+          color: "var(--text-muted, #888)",
+          marginBottom: "0.5rem",
+          fontWeight: 500,
+        }}
+      >
+        TEMPERATURE RANGE
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        style={{ display: "block" }}
+      />
+    </div>
+  );
+}
+
+// ── Precipitation bar chart ───────────────────────────────────────────────────
+
+function PrecipitationChart({ rows }: { rows: WeatherRow[] }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const W = 800,
+    H = 240,
+    mt = 20,
+    mr = 20,
+    mb = 40,
+    ml = 50;
+  const iW = W - ml - mr;
+  const iH = H - mt - mb;
+
+  useEffect(() => {
+    if (!svgRef.current || rows.length === 0) return;
+
+    const svg = d3Selection.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const g = svg.append("g").attr("transform", `translate(${ml},${mt})`);
+
+    const xScale = d3Scale
+      .scaleBand()
+      .domain(rows.map((r) => r.date))
+      .range([0, iW])
+      .padding(0.15);
+
+    const maxPrecip = Math.max(...rows.map((r) => r.precipitation ?? 0));
+    const yScale = d3Scale
+      .scaleLinear()
+      .domain([0, maxPrecip * 1.1 || 1])
+      .range([iH, 0]);
+
+    // Bars
+    g.selectAll(".bar")
+      .data(rows)
+      .join("rect")
+      .attr("class", "bar")
+      .attr("x", (d) => xScale(d.date) ?? 0)
+      .attr("y", (d) => yScale(d.precipitation ?? 0))
+      .attr("width", xScale.bandwidth())
+      .attr("height", (d) => Math.max(1, iH - yScale(d.precipitation ?? 0)))
+      .attr("fill", "rgba(59, 130, 246, 0.7)")
+      .attr("rx", 2);
+
+    // Axes
+    const tickCount =
+      rows.length <= 14 ? rows.length : Math.ceil(rows.length / 7);
+    const tickDates = rows
+      .filter((_, i) => i % Math.ceil(rows.length / tickCount) === 0)
+      .map((r) => r.date);
+
+    g.append("g")
+      .attr("transform", `translate(0,${iH})`)
+      .call(
+        d3Axis
+          .axisBottom(xScale)
+          .tickValues(tickDates)
+          .tickFormat((d) => {
+            const date = new Date(d);
+            return `${date.getDate()} ${date.toLocaleString("en-GB", { month: "short" })}`;
+          }),
+      )
+      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
+      .call((g) =>
+        g
+          .selectAll("text")
+          .attr("fill", "var(--text-muted, #888)")
+          .attr("font-size", "11px"),
+      );
+
+    g.append("g")
+      .call(d3Axis.axisLeft(yScale).tickFormat((d) => `${d}mm`))
+      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
+      .call((g) =>
+        g
+          .selectAll("text")
+          .attr("fill", "var(--text-muted, #888)")
+          .attr("font-size", "11px"),
+      );
+
+    g.append("text")
+      .attr("transform", "rotate(-90)")
+      .attr("x", -iH / 2)
+      .attr("y", -38)
+      .attr("text-anchor", "middle")
+      .attr("fill", "var(--text-muted, #888)")
+      .attr("font-size", "11px")
+      .text("mm");
+  }, [rows]);
+
+  return (
+    <div style={{ marginBottom: "1.5rem" }}>
+      <div
+        style={{
+          fontSize: "0.8rem",
+          color: "var(--text-muted, #888)",
+          marginBottom: "0.5rem",
+          fontWeight: 500,
+        }}
+      >
+        PRECIPITATION
+      </div>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        style={{ display: "block" }}
+      />
+    </div>
+  );
+}
+
+// ── Conditions timeline ───────────────────────────────────────────────────────
+
+function ConditionsTimeline({ rows }: { rows: WeatherRow[] }) {
+  return (
+    <div style={{ marginBottom: "1rem" }}>
+      <div
+        style={{
+          fontSize: "0.8rem",
+          color: "var(--text-muted, #888)",
+          marginBottom: "0.5rem",
+          fontWeight: 500,
+        }}
+      >
+        CONDITIONS
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+        {rows.map((r) => (
+          <div
+            key={r.id}
+            style={{
+              background: "var(--bg-card, #1a1a2e)",
+              border: "1px solid var(--border, #2a2a4a)",
+              borderRadius: "6px",
+              padding: "0.35rem 0.6rem",
+              fontSize: "0.75rem",
+              color: "var(--text-muted, #888)",
+            }}
+          >
+            <span style={{ color: "var(--text, #fff)", fontWeight: 500 }}>
+              {new Date(r.date).getDate()}{" "}
+              {new Date(r.date).toLocaleString("en-GB", { month: "short" })}
+            </span>
+            {" · "}
+            {r.description ?? "—"}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── DashboardView (main export) ───────────────────────────────────────────────
+
+function DashboardView({ results }: { results: any[] }) {
+  const rows = results as WeatherRow[];
+  const isMultiDay = rows.length > 1;
+
+  return (
+    <div style={{ padding: "1rem 0" }}>
+      <MetricCards rows={rows} />
+      {isMultiDay && <TemperatureChart rows={rows} />}
+      {isMultiDay && <PrecipitationChart rows={rows} />}
+      <ConditionsTimeline rows={rows} />
     </div>
   );
 }
@@ -652,9 +1053,9 @@ function ResultRenderer({
         <div className="result-summary">
           <span className="result-count">{count}</span>
           <span className="result-desc">
-            {plan.category
-              ? `${formatCategory(plan.category).toLowerCase()} incidents`
-              : `${count} results`}
+            {result.intent === "weather"
+              ? `day${count !== 1 ? "s" : ""}`
+              : `${formatCategory(plan.category).toLowerCase()} incidents`}
           </span>
         </div>
         <button className="btn-ghost small" onClick={onRefine}>
@@ -843,6 +1244,7 @@ export default function App() {
     setResult(null);
     setParsed(null);
     setIntentError(null);
+    setRefineText("");
   };
 
   return (
