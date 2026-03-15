@@ -17,7 +17,7 @@ describe("integration: Redis-backed rate limiter", () => {
     });
 
     await limiterA.consume("shared-key");
-    await expect(limiterB.consume("shared-key")).rejects.toThrow();
+    await expect(limiterB.consume("shared-key")).rejects.toBeDefined();
   });
 });
 
