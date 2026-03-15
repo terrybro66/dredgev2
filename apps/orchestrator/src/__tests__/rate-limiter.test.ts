@@ -1,69 +1,44 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { acquire } from "../rateLimiter";
+import { acquire, createRateLimiter } from "../rateLimiter";
+import { getRedisClient } from "../redis";
 
-describe("Rate Limiter", () => {
-  beforeEach(() => {
-    // Reset the module between tests to clear bucket state
+describe("Redis-backed rate limiter", () => {
+  it("consume() succeeds when under the limit", async () => {
+    const limiter = createRateLimiter({ points: 10, duration: 60 });
+    await expect(limiter.consume("test-key")).resolves.not.toThrow();
   });
 
-  it("returns immediately when no rateLimit is configured", async () => {
-    const config = {
-      name: "test-domain",
-      rateLimit: undefined,
-    } as any;
-
-    const start = Date.now();
-    await acquire(config);
-    const elapsed = Date.now() - start;
-
-    expect(elapsed).toBeLessThan(20);
+  it("consume() throws when limit is exceeded", async () => {
+    const limiter = createRateLimiter({ points: 2, duration: 60 });
+    await limiter.consume("burst-key");
+    await limiter.consume("burst-key");
+    await expect(limiter.consume("burst-key")).rejects.toThrow();
   });
 
-  it("returns immediately when tokens are available", async () => {
-    const config = {
-      name: "test-domain-2",
-      rateLimit: { requestsPerMinute: 60 },
-    } as any;
-
-    const start = Date.now();
-    await acquire(config);
-    const elapsed = Date.now() - start;
-
-    expect(elapsed).toBeLessThan(20);
+  it("two instances share state via Redis", async () => {
+    const limiterA = createRateLimiter({
+      points: 1,
+      duration: 60,
+      keyPrefix: "shared-test",
+    });
+    const limiterB = createRateLimiter({
+      points: 1,
+      duration: 60,
+      keyPrefix: "shared-test",
+    });
+    await limiterA.consume("shared-key");
+    await expect(limiterB.consume("shared-key")).rejects.toThrow();
   });
 
-  it("delays when bucket is exhausted", async () => {
-    const config = {
-      name: "test-domain-3",
-      rateLimit: { requestsPerMinute: 60 },
-    } as any;
-
-    // Exhaust the bucket — 60 tokens, consume all of them
-    const drainOps = Array.from({ length: 60 }).map(() => acquire(config));
-    await Promise.all(drainOps);
-
-    // Next acquire should be delayed
-    const start = Date.now();
-    await acquire(config);
-    const elapsed = Date.now() - start;
-
-    // At 60 req/min one token = 1000ms — allow some tolerance
-    expect(elapsed).toBeGreaterThan(800);
-  });
-
-  it("does not delay a cached request — acquire is not called on cache hits", async () => {
-    // This test confirms the contract: acquire is only called on live execution
-    // A cache hit in query.ts returns before reaching the acquire call
-    // We verify acquire itself has no side effects when called with no rateLimit
-    const config = {
-      name: "cached-domain",
-      rateLimit: undefined,
-    } as any;
-
-    const start = Date.now();
-    await acquire(config);
-    const elapsed = Date.now() - start;
-
-    expect(elapsed).toBeLessThan(20);
+  it("falls back to in-memory when Redis client is not connected", async () => {
+    const Redis = (await import("ioredis")).default;
+    const badClient = new Redis("redis://localhost:19999", {
+      maxRetriesPerRequest: 0,
+      connectTimeout: 500,
+      lazyConnect: true,
+    });
+    const limiter = createRateLimiter({ points: 10, duration: 60 }, badClient);
+    await expect(limiter.consume("fallback-key")).resolves.not.toThrow();
+    await badClient.quit();
   });
 });
