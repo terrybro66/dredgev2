@@ -16,6 +16,7 @@ import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
 import { shadowAdapter } from "./agent/shadow-adapter";
+import { domainDiscovery } from "./agent/domain-discovery";
 
 export const queryRouter = Router();
 
@@ -102,12 +103,16 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
-  const adapter = getDomainForQuery(country_code, intent);
+  let adapter = getDomainForQuery(country_code, intent);
   if (!adapter) {
+    if (domainDiscovery.isEnabled()) {
+      await domainDiscovery.run({ intent, country_code }, prisma);
+    }
     return res.status(400).json({
       error: "unsupported_region",
-      message: `No data source available for country: ${country_code} / intent: ${intent}`,
+      message: `No data source available for country: ${country_code} / intent: ${intent}. Discovery pipeline triggered — check admin for review.`,
       country_code,
+      discovery_triggered: domainDiscovery.isEnabled(),
     });
   }
 
