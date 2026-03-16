@@ -155,3 +155,29 @@ model DomainDiscovery {
 
   @@map("domain_discovery")
 }
+
+// ── new in Phase 8.5 ──────────────────────────────────────────────────────────
+
+model QueryRun {
+  id            String           @id @default(cuid())
+  queryId       String
+  executedAt    DateTime         @default(now())
+  sourceSet     String[]
+  schemaVersion String           @default("1.0")
+  status        String           @default("pending")
+  snapshot      DatasetSnapshot?
+
+  @@map("query_runs")
+}
+
+model DatasetSnapshot {
+  id         String    @id @default(cuid())
+  queryRunId String    @unique
+  rowCount   Int
+  checksum   String
+  rows       Json
+  createdAt  DateTime  @default(now())
+  queryRun   QueryRun  @relation(fields: [queryRunId], references: [id])
+
+  @@map("dataset_snapshots")
+}
