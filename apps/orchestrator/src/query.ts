@@ -15,6 +15,7 @@ import { getDomainForQuery } from "./domains/registry";
 import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
+import { shadowAdapter } from "./agent/shadow-adapter";
 
 export const queryRouter = Router();
 
@@ -257,9 +258,47 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       if (recovery) {
         rows = recovery.data;
         fallback = recovery.fallback;
-        // If date was substituted, reflect the used month in months_fetched
         if (fallback.field === "date") {
           effectiveMonths = [fallback.used];
+        }
+      }
+    }
+
+    if (rows.length === 0 && shadowAdapter.isEnabled()) {
+      const shadow = await shadowAdapter.recover(
+        adapter.config,
+        {
+          intent,
+          location: resolved_location,
+          country_code,
+          date_range: plan.date_from,
+        },
+        prisma,
+      );
+      if (shadow) {
+        rows = shadow.data;
+        fallback = shadow.fallback;
+        if (shadow.newSource) {
+          await prisma.apiAvailability.upsert({
+            where: {
+              source: `${adapter.config.name}:shadow:${shadow.newSource.sourceUrl}`,
+            },
+            update: {
+              sourceUrl: shadow.newSource.sourceUrl,
+              providerType: shadow.newSource.providerType,
+              confidence: shadow.newSource.confidence,
+              lastUsedAt: new Date(),
+            },
+            create: {
+              source: `${adapter.config.name}:shadow:${shadow.newSource.sourceUrl}`,
+              months: [],
+              sourceUrl: shadow.newSource.sourceUrl,
+              providerType: shadow.newSource.providerType,
+              confidence: shadow.newSource.confidence,
+              shadowDiscovered: true,
+              lastUsedAt: new Date(),
+            },
+          });
         }
       }
     }

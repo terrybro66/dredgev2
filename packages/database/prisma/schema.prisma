@@ -105,10 +105,15 @@ model QueryJob {
 }
 
 model ApiAvailability {
-  id        String   @id @default(cuid())
-  source    String   @unique
-  months    String[]
-  fetchedAt DateTime @default(now())
+  id               String    @id @default(cuid())
+  source           String    @unique
+  months           String[]
+  fetchedAt        DateTime  @default(now())
+  sourceUrl        String?
+  providerType     String?
+  confidence       Float?
+  shadowDiscovered Boolean   @default(false)
+  lastUsedAt       DateTime?
 
   @@map("api_availability")
 }
