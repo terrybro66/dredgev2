@@ -17,6 +17,7 @@ import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
 import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
+import { createSnapshot } from "./execution-model";
 
 export const queryRouter = Router();
 
@@ -318,8 +319,20 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         adapter.config.name,
       );
     }
+
     await adapter.storeResults(queryRecord.id, rows, prisma);
     const store_ms = Date.now() - store_start;
+
+    // Phase 8.5 — seal an immutable snapshot for this execution
+    await createSnapshot({
+      queryId: queryRecord.id,
+      sourceSet: adapter.config.sources?.map((s) => s.url) ?? [
+        adapter.config.apiUrl,
+      ],
+      schemaVersion: "1.0",
+      rows,
+      prisma,
+    });
 
     let aggregated = false;
     let storedResults: unknown[];

@@ -36,6 +36,13 @@ const { mockPrisma } = vi.hoisted(() => ({
       create: vi.fn(),
       update: vi.fn(),
     },
+    queryRun: {
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    datasetSnapshot: {
+      create: vi.fn(),
+    },
     $queryRaw: vi.fn(),
   },
 }));
@@ -106,6 +113,9 @@ beforeEach(() => {
   mockPrisma.queryCache.create.mockResolvedValue({});
   mockPrisma.queryJob.create.mockResolvedValue({ id: "job-id" });
   mockPrisma.queryJob.update.mockResolvedValue({});
+  mockPrisma.queryRun.create.mockResolvedValue({ id: "run-id" });
+  mockPrisma.queryRun.update.mockResolvedValue({});
+  mockPrisma.datasetSnapshot.create.mockResolvedValue({ id: "snap-id" });
   mockPrisma.$queryRaw.mockResolvedValue([]);
 });
 
