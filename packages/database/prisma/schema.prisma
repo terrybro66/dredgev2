@@ -136,3 +136,22 @@ model WeatherResult {
 
   @@map("weather_results")
 }
+
+// ── new in Phase 8 ────────────────────────────────────────────────────────────
+
+model DomainDiscovery {
+  id             String   @id @default(cuid())
+  intent         String
+  country_code   String
+  status         String   @default("pending")
+  candidates     Json?
+  proposed_config Json?
+  sample_rows    Json?
+  confidence     Float?
+  approved       Boolean  @default(false)
+  error_message  String?
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  @@map("domain_discovery")
+}
