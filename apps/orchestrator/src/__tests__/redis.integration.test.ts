@@ -5,6 +5,7 @@ import { createAvailabilityCache } from "../availability";
 
 describe("integration: Redis-backed rate limiter", () => {
   it("state is shared across two instances", async () => {
+    const key = `shared-key-${Date.now()}`;
     const limiterA = createRateLimiter({
       points: 1,
       duration: 60,
@@ -15,8 +16,8 @@ describe("integration: Redis-backed rate limiter", () => {
       duration: 60,
       keyPrefix: "integration-rl-2",
     });
-    await limiterA.consume("shared-key-2");
-    await expect(limiterB.consume("shared-key-2")).rejects.toBeDefined();
+    await limiterA.consume(key);
+    await expect(limiterB.consume(key)).rejects.toBeDefined();
   });
 });
 
