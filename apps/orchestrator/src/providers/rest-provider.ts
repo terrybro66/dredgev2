@@ -1,4 +1,5 @@
 import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import { Provider } from "./types";
 
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 500;
@@ -27,37 +28,39 @@ export async function restGet<T>(options: RestProviderOptions): Promise<T> {
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response: AxiosResponse<T> = await axios.get(options.url, config);
-      console.log("RAW RESPONSE status:", response.status);
-      console.log("RAW RESPONSE data type:", typeof response.data);
-      console.log(
-        "RAW RESPONSE data:",
-        JSON.stringify(response.data).slice(0, 200),
-      );
       return response.data;
     } catch (err: any) {
       lastError = err;
-
-      // Only retry on 5xx or network errors — not 4xx
       const status = err?.response?.status;
-      if (status && status >= 400 && status < 500) {
-        throw err;
-      }
-
+      if (status && status >= 400 && status < 500) throw err;
       if (attempt < MAX_RETRIES - 1) {
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        console.log(
-          JSON.stringify({
-            event: "rest_provider_retry",
-            url: options.url,
-            attempt: attempt + 1,
-            delay_ms: delay,
-            error: err?.message,
-          }),
-        );
         await sleep(delay);
       }
     }
   }
 
   throw lastError;
+}
+
+// ── Factory ───────────────────────────────────────────────────────────────────
+
+export interface CreateRestProviderOptions {
+  url: string;
+  params?: Record<string, string | number | boolean>;
+  headers?: Record<string, string>;
+  extractRows?: (data: unknown) => unknown[];
+}
+
+export function createRestProvider(opts: CreateRestProviderOptions): Provider {
+  return {
+    fetchRows: async () => {
+      const data = await restGet<unknown>({
+        url: opts.url,
+        params: opts.params,
+        headers: opts.headers,
+      });
+      return opts.extractRows ? opts.extractRows(data) : (data as unknown[]);
+    },
+  };
 }
