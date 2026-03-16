@@ -18,6 +18,7 @@ import { AggregatedBin } from "@dredge/schemas";
 import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
+import { classifyIntent } from "./semantic/classifier";
 
 export const queryRouter = Router();
 
@@ -66,9 +67,29 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     "wind",
     "precipitation",
   ];
-  const intent = intentKeywords.some((k) => text.toLowerCase().includes(k))
+  let intent = intentKeywords.some((k) => text.toLowerCase().includes(k))
     ? "weather"
     : "crime";
+
+  // Phase 10 — use semantic classifier if enabled, fall back to keyword matching
+  if (classifyIntent !== null) {
+    try {
+      const classified = await classifyIntent(text, prisma);
+      if (classified.confidence >= 0.5 && classified.domain) {
+        intent = classified.intent;
+        console.log(
+          JSON.stringify({
+            event: "semantic_intent_classified",
+            intent,
+            domain: classified.domain,
+            confidence: classified.confidence,
+          }),
+        );
+      }
+    } catch {
+      // classifier failure is non-fatal — fall back to keyword matching
+    }
+  }
   const viz_hint = deriveVizHint(plan, text, intent);
   const months = expandDateRange(plan.date_from, plan.date_to);
 
