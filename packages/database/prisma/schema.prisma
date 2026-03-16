@@ -181,3 +181,15 @@ model DatasetSnapshot {
 
   @@map("dataset_snapshots")
 }
+
+// ── new in Phase 10 ───────────────────────────────────────────────────────────
+
+model DomainEmbedding {
+  id           String   @id @default(cuid())
+  domain       String
+  exampleQuery String
+  embedding    Unsupported("vector(1536)")
+  createdAt    DateTime @default(now())
+
+  @@map("domain_embeddings")
+}
