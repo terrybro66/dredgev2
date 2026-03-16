@@ -759,3 +759,106 @@ describe("AddColumnSchema", () => {
     ).toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// DomainConfig sources array + refreshPolicy (Phase 7)
+// ---------------------------------------------------------------------------
+describe("DomainConfigSchema — sources array", () => {
+  it("existing config without sources still parses (backwards compatible)", () => {
+    expect(() => DomainConfigSchema.parse(validDomainConfig)).not.toThrow();
+  });
+
+  it("accepts a sources array with a rest source", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [
+          {
+            type: "rest",
+            url: "https://data.police.uk/api",
+            refreshPolicy: "realtime",
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts a sources array with a csv source", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [
+          {
+            type: "csv",
+            url: "https://example.com/data.csv",
+            refreshPolicy: "weekly",
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts mixed source types in the same domain", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [
+          {
+            type: "rest",
+            url: "https://api.example.com",
+            refreshPolicy: "realtime",
+          },
+          {
+            type: "csv",
+            url: "https://example.com/data.csv",
+            refreshPolicy: "weekly",
+          },
+          {
+            type: "xlsx",
+            url: "https://example.com/data.xlsx",
+            refreshPolicy: "static",
+          },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects an invalid refreshPolicy value", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [
+          {
+            type: "rest",
+            url: "https://api.example.com",
+            refreshPolicy: "hourly",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an invalid source type", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [
+          {
+            type: "ftp",
+            url: "ftp://example.com/data",
+            refreshPolicy: "daily",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a source missing a url", () => {
+    expect(() =>
+      DomainConfigSchema.parse({
+        ...validDomainConfig,
+        sources: [{ type: "csv", refreshPolicy: "daily" }],
+      }),
+    ).toThrow();
+  });
+});
