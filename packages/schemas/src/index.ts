@@ -130,12 +130,30 @@ export const CrimeResultSchema = z
   .passthrough();
 export type CrimeResult = z.infer<typeof CrimeResultSchema>;
 
+// ── Domain source ─────────────────────────────────────────────────────────────
+
+export const RefreshPolicySchema = z.enum([
+  "realtime",
+  "daily",
+  "weekly",
+  "static",
+]);
+export type RefreshPolicy = z.infer<typeof RefreshPolicySchema>;
+
+export const DomainSourceSchema = z.object({
+  type: z.enum(["rest", "csv", "xlsx", "pdf"]),
+  url: z.string().url(),
+  refreshPolicy: RefreshPolicySchema,
+});
+export type DomainSource = z.infer<typeof DomainSourceSchema>;
+
 // ── Domain config ─────────────────────────────────────────────────────────────
 
 export const LocationStyle = z.enum(["polygon", "coordinates"]);
 export type LocationStyle = z.infer<typeof LocationStyle>;
 
 export const DomainConfigSchema = z.object({
+  sources: z.array(DomainSourceSchema).optional(),
   name: z.string().min(1),
   tableName: z.string().min(1),
   // camelCase Prisma model name e.g. "crimeResult" — used for prisma[model].findMany
@@ -330,11 +348,15 @@ export type AggregatedBin = z.infer<typeof AggregatedBinSchema>;
 // ── WeatherQueryPlan  (new in v6.0) ──────────────────────────────────────────
 
 export const WeatherQueryPlanSchema = z.object({
-  location: z.string().min(1).refine(
-    (s) => !/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(s.trim()),
-    { message: "location must be a place name, not coordinates" },
-  ),
-  date_from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD format"),
+  location: z
+    .string()
+    .min(1)
+    .refine((s) => !/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(s.trim()), {
+      message: "location must be a place name, not coordinates",
+    }),
+  date_from: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD format"),
   date_to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "must be YYYY-MM-DD format"),
   metric: z.enum(["temperature", "precipitation", "wind"]).optional(),
 });
