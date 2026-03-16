@@ -8,16 +8,15 @@ describe("integration: Redis-backed rate limiter", () => {
     const limiterA = createRateLimiter({
       points: 1,
       duration: 60,
-      keyPrefix: "integration-rl",
+      keyPrefix: "integration-rl-2",
     });
     const limiterB = createRateLimiter({
       points: 1,
       duration: 60,
-      keyPrefix: "integration-rl",
+      keyPrefix: "integration-rl-2",
     });
-
-    await limiterA.consume("shared-key");
-    await expect(limiterB.consume("shared-key")).rejects.toBeDefined();
+    await limiterA.consume("shared-key-2");
+    await expect(limiterB.consume("shared-key-2")).rejects.toBeDefined();
   });
 });
 

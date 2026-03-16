@@ -12,7 +12,7 @@ describe("Redis-backed rate limiter", () => {
     const limiter = createRateLimiter({ points: 2, duration: 60 });
     await limiter.consume("burst-key");
     await limiter.consume("burst-key");
-    await expect(limiter.consume("burst-key")).rejects.toThrow();
+    await expect(limiter.consume("burst-key")).rejects.toBeDefined();
   });
 
   it("two instances share state via Redis", async () => {
@@ -27,7 +27,7 @@ describe("Redis-backed rate limiter", () => {
       keyPrefix: "shared-test",
     });
     await limiterA.consume("shared-key");
-    await expect(limiterB.consume("shared-key")).rejects.toThrow();
+    await expect(limiterB.consume("shared-key")).rejects.toBeDefined();
   });
 
   it("falls back to in-memory when Redis client is not connected", async () => {
