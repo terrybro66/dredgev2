@@ -3,10 +3,14 @@ import { DomainAdapter } from "./registry";
 import { createCsvProvider } from "../providers/csv-provider";
 import { createXlsxProvider } from "../providers/xlsx-provider";
 import { createPdfProvider } from "../providers/pdf-provider";
-import { createRestProvider } from "../providers/rest-provider";
-import { restGet } from "../providers/rest-provider";
+import { createRestProvider, restGet } from "../providers/rest-provider";
+import { tagRows } from "../enrichment/source-tag";
+import { deduplicateRows } from "../enrichment/deduplication";
 
-export function createGenericAdapter(config: DomainConfig): DomainAdapter {
+export function createGenericAdapter(
+  config: DomainConfig,
+  dedupeKeys: string[] = [],
+): DomainAdapter {
   return {
     config,
 
@@ -16,20 +20,25 @@ export function createGenericAdapter(config: DomainConfig): DomainAdapter {
 
       const results = await Promise.all(
         sources.map(async (source) => {
+          let rows: unknown[] = [];
+
           switch (source.type) {
             case "rest": {
               const provider = createRestProvider({ url: source.url });
-              return provider.fetchRows();
+              rows = await provider.fetchRows();
+              break;
             }
             case "csv": {
               const text = await restGet<string>({ url: source.url });
               const provider = createCsvProvider({ content: text });
-              return provider.fetchRows();
+              rows = await provider.fetchRows();
+              break;
             }
             case "xlsx": {
               const buffer = await restGet<Buffer>({ url: source.url });
               const provider = createXlsxProvider({ buffer });
-              return provider.fetchRows();
+              rows = await provider.fetchRows();
+              break;
             }
             case "pdf": {
               const buffer = await restGet<Buffer>({ url: source.url });
@@ -41,15 +50,19 @@ export function createGenericAdapter(config: DomainConfig): DomainAdapter {
                     .filter(Boolean)
                     .map((line) => ({ raw: line })),
               });
-              return provider.fetchRows();
+              rows = await provider.fetchRows();
+              break;
             }
-            default:
-              return [];
           }
+
+          return tagRows(rows, source.url);
         }),
       );
 
-      return results.flat();
+      const merged = results.flat() as Record<string, unknown>[];
+      return dedupeKeys.length > 0
+        ? deduplicateRows(merged, dedupeKeys)
+        : merged;
     },
 
     flattenRow(row: unknown): Record<string, unknown> {
