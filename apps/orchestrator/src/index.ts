@@ -8,6 +8,7 @@ import { setDefaultResultOrder } from "dns";
 setDefaultResultOrder("ipv4first");
 import { exportRouter } from "./export";
 import { getRedisClient, checkRedisHealth } from "./redis";
+import { workspaceRouter } from "./workspace";
 
 loadAvailability(
   "police-uk",
@@ -32,6 +33,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/query", queryRouter);
 app.use("/query", exportRouter);
+app.use("/workspaces", workspaceRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
