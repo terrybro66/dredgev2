@@ -67,9 +67,31 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     "wind",
     "precipitation",
   ];
-  let intent = intentKeywords.some((k) => text.toLowerCase().includes(k))
-    ? "weather"
-    : "crime";
+  const weatherMatch = intentKeywords.some((k) =>
+    text.toLowerCase().includes(k),
+  );
+
+  const crimeKeywords = [
+    "crime",
+    "burglary",
+    "burglaries",
+    "theft",
+    "robbery",
+    "drug",
+    "assault",
+    "violence",
+    "violent",
+    "antisocial",
+    "anti-social",
+    "criminal",
+    "offence",
+    "offences",
+    "incident",
+    "incidents",
+  ];
+  const crimeMatch = crimeKeywords.some((k) => text.toLowerCase().includes(k));
+
+  let intent = weatherMatch ? "weather" : crimeMatch ? "crime" : undefined;
 
   // Phase 10 — use semantic classifier if enabled, fall back to keyword matching
   if (classifyIntent !== null) {
@@ -90,7 +112,7 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
       // classifier failure is non-fatal — fall back to keyword matching
     }
   }
-  const viz_hint = deriveVizHint(plan, text, intent);
+  const viz_hint = deriveVizHint(plan, text, intent ?? "crime");
   const months = expandDateRange(plan.date_from, plan.date_to);
 
   return res.json({
@@ -125,7 +147,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
-  let adapter = getDomainForQuery(country_code, intent);
+  let adapter = intent ? getDomainForQuery(country_code, intent) : undefined;
   if (!adapter) {
     if (domainDiscovery.isEnabled()) {
       await domainDiscovery.run({ intent, country_code }, prisma);
