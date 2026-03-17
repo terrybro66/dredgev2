@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+vi.mock("../agent/workflows/shadow-recovery", () => ({
+  searchAlternativeSources: vi.fn().mockResolvedValue([]),
+  sampleAndDetectFormat: vi.fn().mockResolvedValue(null),
+}));
+
 describe("ShadowAdapter", () => {
   beforeEach(() => {
     vi.resetModules();
