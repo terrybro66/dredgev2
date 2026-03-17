@@ -1,4 +1,8 @@
-// ── Types ─────────────────────────────────────────────────────────────────────
+import {
+  discoverSources,
+  sampleSource,
+  proposeDomainConfig,
+} from "./workflows/domain-discovery-workflow";
 
 export interface DiscoveryContext {
   intent: string;
@@ -9,8 +13,6 @@ export interface DiscoveryResult {
   domainName: string;
   config: unknown;
 }
-
-// ── DomainDiscovery pipeline ──────────────────────────────────────────────────
 
 export const domainDiscovery = {
   isEnabled(): boolean {
@@ -35,22 +37,79 @@ export const domainDiscovery = {
       });
       if (!record) return null;
 
-      // Phase 8 stub — real implementation wires in Mastra + Stagehand
-      // Steps: discover → sample → analyse → (human review) → register
-      // Always returns null here — registration only happens after approve()
+      console.log(
+        JSON.stringify({
+          event: "domain_discovery_started",
+          intent: context.intent,
+          country_code: context.country_code,
+          id: record.id,
+        }),
+      );
 
+      // Step 1 — discover candidate sources
+      const candidates = await discoverSources(
+        context.intent,
+        context.country_code,
+      );
+
+      if (candidates.length === 0) {
+        await prisma.domainDiscovery.update({
+          where: { id: record.id },
+          data: { status: "requires_review", completedAt: new Date() },
+        });
+        return null;
+      }
+
+      // Step 2 — sample the most confident candidate
+      const top = candidates.sort((a, b) => b.confidence - a.confidence)[0];
+      const sampled = await sampleSource(top.url);
+
+      if (!sampled) {
+        await prisma.domainDiscovery.update({
+          where: { id: record.id },
+          data: { status: "requires_review", completedAt: new Date() },
+        });
+        return null;
+      }
+
+      // Step 3 — propose domain config
+      const proposed = await proposeDomainConfig(
+        context.intent,
+        context.country_code,
+        top,
+        sampled.rows,
+      );
+
+      if (!proposed) {
+        await prisma.domainDiscovery.update({
+          where: { id: record.id },
+          data: { status: "requires_review", completedAt: new Date() },
+        });
+        return null;
+      }
+
+      // Store for human review — never auto-register
       await prisma.domainDiscovery.update({
         where: { id: record.id },
         data: {
           status: "requires_review",
-          proposed_config: null,
-          sample_rows: null,
-          confidence: null,
+          proposed_config: proposed as any,
+          sample_rows: sampled.rows as any,
+          confidence: proposed.confidence,
           completedAt: new Date(),
         },
       });
 
-      return null;
+      console.log(
+        JSON.stringify({
+          event: "domain_discovery_complete",
+          id: record.id,
+          proposed_name: proposed.name,
+          confidence: proposed.confidence,
+        }),
+      );
+
+      return null; // Always null — registration requires human approval via approve()
     } catch (err: any) {
       console.error(
         JSON.stringify({
@@ -60,22 +119,28 @@ export const domainDiscovery = {
           error: err.message,
         }),
       );
+      if (record) {
+        await prisma.domainDiscovery.update({
+          where: { id: record.id },
+          data: {
+            status: "error",
+            error_message: err.message,
+            completedAt: new Date(),
+          },
+        });
+      }
       return null;
     }
   },
 
   async approve(id: string, prisma: any): Promise<boolean> {
     const record = await prisma.domainDiscovery.findUnique({ where: { id } });
-
     if (!record) return false;
     if (record.status !== "requires_review") return false;
 
     await prisma.domainDiscovery.update({
       where: { id },
-      data: {
-        approved: true,
-        status: "approved",
-      },
+      data: { approved: true, status: "approved" },
     });
 
     return true;
