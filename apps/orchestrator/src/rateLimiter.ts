@@ -7,14 +7,22 @@ import {
 import Redis from "ioredis";
 import { getRedisClient } from "./redis";
 
-// ── Existing token bucket (unchanged) ────────────────────────────────────────
+// ── Redis‑backed rate limiter (shared across instances) ──────────────────────
 
-interface TokenBucket {
-  tokens: number;
-  lastRefill: number;
+const adapterLimiters = new Map<string, Limiter>();
+
+function getLimiter(adapter: string, requestsPerMinute: number): Limiter {
+  let limiter = adapterLimiters.get(adapter);
+  if (!limiter) {
+    limiter = createRateLimiter({
+      points: requestsPerMinute,
+      duration: 60,
+      keyPrefix: `rl:${adapter}`,
+    });
+    adapterLimiters.set(adapter, limiter);
+  }
+  return limiter;
 }
-
-const buckets = new Map<string, TokenBucket>();
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,29 +33,20 @@ export async function acquire(config: DomainConfig): Promise<void> {
 
   const adapter = config.name;
   const { requestsPerMinute } = config.rateLimit;
+  const limiter = getLimiter(adapter, requestsPerMinute);
+  const key = adapter; // use adapter as the Redis key suffix
 
-  let bucket = buckets.get(adapter);
-  const now = Date.now();
-  if (!bucket) {
-    bucket = { tokens: requestsPerMinute, lastRefill: now };
-    buckets.set(adapter, bucket);
+  while (true) {
+    try {
+      await limiter.consume(key);
+      return;
+    } catch (e: any) {
+      // e is an instance of RateLimiterRes when using rate-limiter-flexible
+      const ms = e.msBeforeNext ?? 60000 / requestsPerMinute;
+      await sleep(ms);
+      // loop will retry after waiting
+    }
   }
-
-  const elapsedMinutes = (now - bucket.lastRefill) / 60000;
-  const tokensToAdd = elapsedMinutes * requestsPerMinute;
-  bucket.tokens = Math.min(bucket.tokens + tokensToAdd, requestsPerMinute);
-  bucket.lastRefill = now;
-
-  if (bucket.tokens >= 1) {
-    bucket.tokens -= 1;
-    return;
-  }
-
-  const msPerToken = 60000 / requestsPerMinute;
-  await sleep(msPerToken);
-
-  bucket.tokens = Math.min(bucket.tokens + 1, requestsPerMinute) - 1;
-  bucket.lastRefill = Date.now();
 }
 
 // ── Redis-backed limiter factory ──────────────────────────────────────────────

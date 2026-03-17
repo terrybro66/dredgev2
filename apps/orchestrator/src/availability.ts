@@ -6,6 +6,17 @@ import { getRedisClient } from "./redis";
 
 const store = new Map<string, string[]>();
 
+// ── Redis-backed cache (shared across instances) ──────────────────────────────
+
+let availabilityCache: AvailabilityCache | undefined;
+
+function getAvailabilityCache(): AvailabilityCache {
+  if (!availabilityCache) {
+    availabilityCache = createAvailabilityCache();
+  }
+  return availabilityCache;
+}
+
 // ── loadAvailability ──────────────────────────────────────────────────────────
 
 /**
@@ -21,9 +32,23 @@ export async function loadAvailability(
   extractMonths: (data: unknown) => string[],
 ): Promise<void> {
   try {
+    const cache = getAvailabilityCache();
+    const cached = await cache.get(source);
+    if (cached) {
+      store.set(source, cached);
+      console.log(
+        JSON.stringify({
+          event: "availability_loaded_from_cache",
+          source,
+          count: cached.length,
+        }),
+      );
+      return;
+    }
     const { data } = await axios.get(url);
     const months = extractMonths(data).sort().reverse();
     store.set(source, months);
+    await cache.set(source, months);
     console.log(
       JSON.stringify({
         event: "availability_loaded",
