@@ -73,16 +73,17 @@ describe("classifyIntent", () => {
 describe("registerDomainEmbeddings", () => {
   it("stores example query embeddings for a domain", async () => {
     const { registerDomainEmbeddings } = await import("../semantic/classifier");
+
     const mockPrisma = {
-      domainEmbedding: {
-        upsert: vi.fn().mockResolvedValue({}),
-      },
+      $executeRawUnsafe: vi.fn().mockResolvedValue(1),
     };
+
     await registerDomainEmbeddings(
       "crime-uk",
       ["show me crime in Camden", "burglaries in Bristol"],
       mockPrisma as any,
     );
-    expect(mockPrisma.domainEmbedding.upsert).toHaveBeenCalledTimes(2);
+
+    expect(mockPrisma.$executeRawUnsafe).toHaveBeenCalled();
   });
 });

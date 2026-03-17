@@ -10,6 +10,7 @@ import * as d3Shape from "d3-shape";
 import * as d3Axis from "d3-axis";
 import * as d3Selection from "d3-selection";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { WorkspacesPanel } from "./components/WorkspacesPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1124,6 +1125,10 @@ export default function App() {
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
   const [refineText, setRefineText] = useState("");
+  const [showWorkspaces, setShowWorkspaces] = useState(false);
+  const [lastQueryId, setLastQueryId] = useState<string | null>(null);
+  const [lastSnapshotId, setLastSnapshotId] = useState<string | null>(null);
+  const [pinTarget, setPinTarget] = useState<string | null>(null);
 
   const handleQuery = async (text: string) => {
     setStage("loading");
@@ -1291,6 +1296,47 @@ export default function App() {
           Data: data.police.uk · Geocoding: Nominatim/OSM · Police data lags
           ~2–3 months
         </footer>
+        {showWorkspaces && (
+          <div className="ws-sidebar">
+            <div className="ws-sidebar-header">
+              <span>Workspaces</span>
+              <button
+                className="btn-ghost small"
+                onClick={() => setShowWorkspaces(false)}
+              >
+                ✕
+              </button>
+              <button
+                className="btn-ghost small"
+                onClick={() => setShowWorkspaces(true)}
+              >
+                Save to workspace
+              </button>
+            </div>
+            <WorkspacesPanel
+              userId="local-user"
+              onPinQuery={async (workspaceId) => {
+                if (!lastQueryId) return;
+                await fetch(
+                  `http://localhost:3001/workspaces/${workspaceId}/queries`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "x-user-id": "local-user",
+                    },
+                    body: JSON.stringify({
+                      queryId: lastQueryId,
+                      snapshotId: lastSnapshotId,
+                      title: "Pinned query",
+                    }),
+                  },
+                );
+                setShowWorkspaces(false);
+              }}
+            />
+          </div>
+        )}
       </div>
     </>
   );
@@ -1801,4 +1847,118 @@ const CSS = `
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  .ws-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 360px;
+  height: 100vh;
+  background: var(--bg2);
+  border-left: 1px solid var(--border);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  animation: slideIn 0.2s ease;
+}
+
+.ws-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--text-mid);
+}
+
+.workspaces-panel {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ws-title {
+  font-family: var(--display);
+  font-size: 16px;
+  color: var(--text);
+  margin: 0;
+}
+
+.ws-create {
+  display: flex;
+  gap: 8px;
+}
+
+.ws-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 7px 12px;
+  outline: none;
+}
+
+.ws-input:focus { border-color: var(--amber); }
+
+.ws-btn {
+  background: var(--amber);
+  color: #000;
+  border: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 14px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+}
+
+.ws-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ws-empty { color: var(--text-dim); font-size: 12px; }
+
+.ws-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.ws-name { font-size: 13px; color: var(--text); }
+
+.ws-pin-btn {
+  background: transparent;
+  border: 1px solid var(--amber-dim);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.ws-pin-btn:hover { background: rgba(245,166,35,0.1); }
+
+.ws-loading { color: var(--text-dim); font-size: 12px; padding: 16px 20px; }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
 `;
