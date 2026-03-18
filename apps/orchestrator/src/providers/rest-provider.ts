@@ -1,66 +1,33 @@
-import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
-import { Provider } from "./types";
+import type { Provider, ProviderResult, ProviderSource } from "./types";
+import { ProviderFetchError } from "./types";
+import axios from "axios";
 
-const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 500;
-const TIMEOUT_MS = 10_000;
+type RestProviderOptions = {
+  extractRows: (data: unknown) => Record<string, unknown>[];
+};
 
-export interface RestProviderOptions {
-  url: string;
-  params?: Record<string, string | number | boolean>;
-  headers?: Record<string, string>;
-}
-
-async function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function restGet<T>(options: RestProviderOptions): Promise<T> {
-  const config: AxiosRequestConfig = {
-    params: options.params,
-    headers: options.headers,
-    timeout: TIMEOUT_MS,
-    responseType: "json",
-  };
-
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const response: AxiosResponse<T> = await axios.get(options.url, config);
-      return response.data;
-    } catch (err: any) {
-      lastError = err;
-      const status = err?.response?.status;
-      if (status && status >= 400 && status < 500) throw err;
-      if (attempt < MAX_RETRIES - 1) {
-        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        await sleep(delay);
-      }
-    }
-  }
-
-  throw lastError;
-}
-
-// ── Factory ───────────────────────────────────────────────────────────────────
-
-export interface CreateRestProviderOptions {
-  url: string;
-  params?: Record<string, string | number | boolean>;
-  headers?: Record<string, string>;
-  extractRows?: (data: unknown) => unknown[];
-}
-
-export function createRestProvider(opts: CreateRestProviderOptions): Provider {
+export function createRestProvider(options: RestProviderOptions): Provider {
   return {
-    fetchRows: async () => {
-      const data = await restGet<unknown>({
-        url: opts.url,
-        params: opts.params,
-        headers: opts.headers,
-      });
-      return opts.extractRows ? opts.extractRows(data) : (data as unknown[]);
+    async fetchData(source: ProviderSource): Promise<ProviderResult> {
+      try {
+        const response = await axios.get(source.url);
+        const rows = options.extractRows(response.data);
+        return {
+          rows,
+          meta: {
+            url: source.url,
+            providerType: source.providerType,
+            rowCount: rows.length,
+            fetchedAt: new Date(),
+          },
+        };
+      } catch (err: unknown) {
+        const status = (err as { response?: { status: number } })?.response
+          ?.status;
+        const message =
+          (err as { message?: string })?.message ?? "Unknown error";
+        throw new ProviderFetchError(message, source.url, status);
+      }
     },
   };
 }
