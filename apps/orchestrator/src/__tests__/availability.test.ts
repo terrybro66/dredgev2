@@ -5,29 +5,24 @@ import axios from "axios";
 vi.mock("axios");
 const mockedAxios = axios as Mocked<typeof axios>;
 
-// Re-import the module fresh per test group so the module-level Map is reset.
-// Vitest re-uses the same module instance within a file, so we reset via a
-// dedicated helper that reaches into the store through the public API instead.
-// The simplest approach: call loadAvailability with an empty extractor to clear.
-
 const POLICE_URL = "https://data.police.uk/api/crimes-street-dates";
 const WEATHER_URL = "https://example.com/weather-dates";
 
 const MOCK_MONTHS_UNSORTED = ["2025-08", "2025-10", "2025-09", "2025-07"];
 const MOCK_MONTHS_SORTED = ["2025-10", "2025-09", "2025-08", "2025-07"];
 
-// Spy on console.log and console.error so we can assert structured JSON output
 const consoleSpy = {
   log: vi.spyOn(console, "log").mockImplementation(() => {}),
   error: vi.spyOn(console, "error").mockImplementation(() => {}),
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   consoleSpy.log.mockImplementation(() => {});
   consoleSpy.error.mockImplementation(() => {});
+  const { resetStore } = await import("../availability");
+  await resetStore();
 });
-
 // ── loadAvailability ──────────────────────────────────────────────────────────
 
 describe("loadAvailability", () => {
@@ -56,10 +51,10 @@ describe("loadAvailability", () => {
   it("calling loadAvailability a second time for the same source overwrites previous data", async () => {
     const { loadAvailability, getAvailableMonths } =
       await import("../availability");
-    mockedAxios.get.mockResolvedValue({ data: ["2025-01", "2025-02"] });
+    mockedAxios.get.mockResolvedValueOnce({ data: ["2025-01", "2025-02"] });
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    mockedAxios.get.mockResolvedValue({ data: ["2024-11", "2024-12"] });
+    mockedAxios.get.mockResolvedValueOnce({ data: ["2024-11", "2024-12"] });
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
     expect(getAvailableMonths("police-uk")).toEqual(["2024-12", "2024-11"]);

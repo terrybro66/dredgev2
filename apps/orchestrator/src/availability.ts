@@ -32,22 +32,10 @@ export async function loadAvailability(
   extractMonths: (data: unknown) => string[],
 ): Promise<void> {
   try {
-    const cache = getAvailabilityCache();
-    const cached = await cache.get(source);
-    if (cached) {
-      store.set(source, cached);
-      console.log(
-        JSON.stringify({
-          event: "availability_loaded_from_cache",
-          source,
-          count: cached.length,
-        }),
-      );
-      return;
-    }
     const { data } = await axios.get(url);
     const months = extractMonths(data).sort().reverse();
     store.set(source, months);
+    const cache = getAvailabilityCache();
     await cache.set(source, months);
     console.log(
       JSON.stringify({
@@ -110,6 +98,19 @@ const KEY_PREFIX = "availability:";
 interface AvailabilityCache {
   get: (source: string) => Promise<string[] | null>;
   set: (source: string, months: string[]) => Promise<void>;
+}
+
+// ── Test helpers ──────────────────────────────────────────────────────────────
+
+/** Resets all in-memory state. For use in tests only. */
+export async function resetStore(): Promise<void> {
+  store.clear();
+  if (availabilityCache) {
+    const client = getRedisClient();
+    const keys = await client.keys(`${KEY_PREFIX}*`);
+    if (keys.length > 0) await client.del(...keys);
+  }
+  availabilityCache = undefined;
 }
 
 export function createAvailabilityCache(
