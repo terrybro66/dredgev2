@@ -3,6 +3,19 @@ DREDGE v6 → v8 Migration Plan (TDD Style)
 Overview
 This plan follows strict TDD (Red → Green → Refactor) across 8 major phases, with each phase broken into test-first steps. The plan assumes you're starting from a clean v6.0 baseline and moving through v6.1 stabilisation to Phase 8 (Agentic Domain Discovery).
 
+## Current Progress (as of 2026‑03‑18)
+
+*   **Phase 0 (Pre‑Flight)** – completed.
+*   **Phase 1 (v6.1 Redis Stabilisation)** – completed and merged (commit a42e5e9). Rate‑limiter and availability cache now backed by Redis with graceful fallback.
+*   **Phase 2 (Provider Layer)** – ready to start.
+*   **Phase 3 (Shadow Adapter)** – not yet started.
+*   **Phase 4 (Domain Discovery)** – not yet started.
+*   **Phase 5 (Execution Model)** – not yet started.
+
+All subsequent phases remain as described below.
+
+---
+
 Phase 0: Pre-Flight Checks & Branch Strategy
 Branch Structure
 text
