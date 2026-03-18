@@ -1,19 +1,50 @@
 import Papa from "papaparse";
-import { Provider } from "./types";
+import type { Provider, ProviderResult, ProviderSource } from "./types";
+import { ProviderFetchError } from "./types";
+import axios from "axios";
 
-export interface CreateCsvProviderOptions {
-  content: string;
-}
-
-export function createCsvProvider(opts: CreateCsvProviderOptions): Provider {
+export function createCsvProvider(): Provider {
   return {
-    fetchRows: async () => {
-      if (!opts.content.trim()) return [];
-      const result = Papa.parse(opts.content, {
-        header: true,
-        skipEmptyLines: true,
-      });
-      return result.data as unknown[];
+    async fetchData(source: ProviderSource): Promise<ProviderResult> {
+      try {
+        const response = await axios.get(source.url);
+        const csv = response.data as string;
+
+        if (!csv || csv.trim() === "") {
+          return {
+            rows: [],
+            meta: {
+              url: source.url,
+              providerType: source.providerType,
+              rowCount: 0,
+              fetchedAt: new Date(),
+            },
+          };
+        }
+
+        const result = Papa.parse<Record<string, string>>(csv, {
+          header: true,
+          skipEmptyLines: true,
+        });
+
+        const rows = result.data;
+        return {
+          rows,
+          meta: {
+            url: source.url,
+            providerType: source.providerType,
+            rowCount: rows.length,
+            fetchedAt: new Date(),
+          },
+        };
+      } catch (err: unknown) {
+        if (err instanceof ProviderFetchError) throw err;
+        const status = (err as { response?: { status: number } })?.response
+          ?.status;
+        const message =
+          (err as { message?: string })?.message ?? "Unknown error";
+        throw new ProviderFetchError(message, source.url, status);
+      }
     },
   };
 }
