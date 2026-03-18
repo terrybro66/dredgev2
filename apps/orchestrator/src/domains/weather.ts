@@ -1,6 +1,6 @@
+import axios from "axios";
 import { DomainAdapter } from "./registry";
 import { FallbackInfo } from "@dredge/schemas";
-import { restGet } from "../providers/rest-provider";
 
 // WMO weather interpretation codes → human-readable description
 const WMO_CODES: Record<number, string> = {
@@ -50,18 +50,19 @@ interface OpenMeteoResponse {
 }
 async function geocodeLocation(location: string): Promise<GeoResult> {
   const cityName = location.split(",")[0].trim();
-  const response = await restGet<{ results?: GeoResult[] }>({
-    url: "https://geocoding-api.open-meteo.com/v1/search",
-    params: { name: cityName, count: 1, language: "en", format: "json" },
-  });
+  const response = await axios.get<{ results?: GeoResult[] }>(
+    "https://geocoding-api.open-meteo.com/v1/search",
+    { params: { name: cityName, count: 1, language: "en", format: "json" } },
+  );
 
-  const results = response.results;
+  const results = response.data.results;
   if (!results || results.length === 0) {
     throw new Error(`Could not geocode location: ${location}`);
   }
 
   return results[0];
 }
+
 async function fetchWeatherForDates(
   lat: number,
   lon: number,
@@ -76,8 +77,8 @@ async function fetchWeatherForDates(
 
   const url = `${endpoint}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,windspeed_10m_max,weathercode&start_date=${dateFrom}&end_date=${dateTo}&timezone=auto`;
 
-  console.log("FORECAST URL:", url);
-  return restGet<OpenMeteoResponse>({ url });
+  const response = await axios.get<OpenMeteoResponse>(url);
+  return response.data;
 }
 
 function rowsFromResponse(

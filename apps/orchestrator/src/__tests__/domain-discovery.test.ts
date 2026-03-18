@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// Mock the workflow module so tests never touch real Mastra/Stagehand/network calls.
+// discoverSources returns an empty candidates array by default — individual tests
+// that need a non-empty result can override with mockResolvedValueOnce.
+vi.mock("../agent/workflows/domain-discovery-workflow", () => ({
+  discoverSources: vi.fn().mockResolvedValue([]),
+  sampleSource: vi.fn().mockResolvedValue(null),
+  proposeDomainConfig: vi.fn().mockResolvedValue(null),
+}));
+
 describe("DomainDiscoveryPipeline", () => {
   beforeEach(() => {
     vi.resetModules();

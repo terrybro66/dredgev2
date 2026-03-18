@@ -43,9 +43,36 @@ const { mockPrisma } = vi.hoisted(() => ({
     datasetSnapshot: {
       create: vi.fn(),
     },
+    apiAvailability: {
+      upsert: vi.fn(),
+    },
     $queryRaw: vi.fn(),
   },
 }));
+
+// ── NEW: mocks for modules that were hitting real implementations ──────────────
+
+const { mockAcquire } = vi.hoisted(() => ({ mockAcquire: vi.fn() }));
+const { mockCreateSnapshot } = vi.hoisted(() => ({
+  mockCreateSnapshot: vi.fn(),
+}));
+const { mockShadowAdapter } = vi.hoisted(() => ({
+  mockShadowAdapter: {
+    isEnabled: vi.fn(),
+    recover: vi.fn(),
+  },
+}));
+const { mockDomainDiscovery } = vi.hoisted(() => ({
+  mockDomainDiscovery: {
+    isEnabled: vi.fn(),
+    run: vi.fn(),
+  },
+}));
+const { mockClassifyIntent } = vi.hoisted(() => ({
+  mockClassifyIntent: vi.fn(),
+}));
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 vi.mock("../crime/intent", () => ({
   parseIntent: mockParseIntent,
@@ -60,6 +87,20 @@ vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
 }));
+
+// ── NEW: mock the four unmocked imports that were causing timeouts ─────────────
+vi.mock("../rateLimiter", () => ({ acquire: mockAcquire }));
+vi.mock("../execution-model", () => ({ createSnapshot: mockCreateSnapshot }));
+vi.mock("../agent/shadow-adapter", () => ({
+  shadowAdapter: mockShadowAdapter,
+}));
+vi.mock("../agent/domain-discovery", () => ({
+  domainDiscovery: mockDomainDiscovery,
+}));
+vi.mock("../semantic/classifier", () => ({
+  classifyIntent: mockClassifyIntent,
+}));
+// ─────────────────────────────────────────────────────────────────────────────
 
 const basePlan = {
   category: "burglary",
@@ -116,7 +157,22 @@ beforeEach(() => {
   mockPrisma.queryRun.create.mockResolvedValue({ id: "run-id" });
   mockPrisma.queryRun.update.mockResolvedValue({});
   mockPrisma.datasetSnapshot.create.mockResolvedValue({ id: "snap-id" });
+  mockPrisma.apiAvailability.upsert.mockResolvedValue({});
   mockPrisma.$queryRaw.mockResolvedValue([]);
+
+  // ── NEW: defaults for the four previously-unmocked modules ──────────────────
+  mockAcquire.mockResolvedValue(undefined);
+  mockCreateSnapshot.mockResolvedValue({ id: "snap-id" });
+  mockShadowAdapter.isEnabled.mockReturnValue(false);
+  mockShadowAdapter.recover.mockResolvedValue(null);
+  mockDomainDiscovery.isEnabled.mockReturnValue(false);
+  mockDomainDiscovery.run.mockResolvedValue(undefined);
+  mockClassifyIntent.mockResolvedValue({
+    confidence: 0,
+    domain: null,
+    intent: null,
+  });
+  // ────────────────────────────────────────────────────────────────────────────
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
