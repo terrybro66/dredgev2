@@ -21,6 +21,27 @@ DREDGE is a multi-source data intelligence platform. It accepts natural language
 
 ---
 
+## Current Implementation Status (as of 2026-03-18)
+
+Based on the codebase, the following phases have been partially or fully implemented:
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| v6.1 — Redis shared state | **Completed** | Redis‑backed rate limiter and availability cache implemented (commit a42e5e9). |
+| Phase 7 — Provider layer | **In progress** | `Provider` interface exists; CSV, XLSX, PDF providers not yet implemented. |
+| Phase 7b — Shadow adapter | **Not started** | No shadow‑adapter files present. |
+| Phase 8 — Domain discovery | **In progress** | Discovery interfaces (`DiscoveryContext`, `DiscoveredSource`) are defined; Mastra workflow not yet built. |
+| Phase 8.5 — Execution model | **In progress** | `CreateSnapshotOptions` interface exists; `QueryRun` and `DatasetSnapshot` models not yet in schema. |
+| Phase 9 — Multi‑source enrichment | **Partially started** | Deduplication and source‑tagging utilities exist; background scheduler and source merging not implemented. |
+| Phase 10 — Semantic query layer | **Not started** | No embedding or pgvector integration. |
+| Phase 11 — Collaborative workspaces | **Not started** | Auth interface present; workspace models and snapshot pinning absent. |
+| Phase 12 — Public data marketplace | **Not started** | |
+| Phase 13 — Query result abstraction | **Deferred** | As planned. |
+
+The **next recommended step** is to start **Phase 7 (Provider Layer)**. Begin by installing the required dependencies (papaparse, xlsx, pdf‑parse) and creating the provider interface tests.
+
+---
+
 ## v6.1 — Stabilisation
 
 **Goal:** Address the in-memory state limitations in v6.0 before introducing new data sources or agentic features. Required before horizontal scaling is possible.
