@@ -30,10 +30,10 @@ const ExecuteBodySchema = z.object({
   viz_hint: VizHintSchema,
   resolved_location: z.string(),
   country_code: z.string(),
-  intent: z.string(),
+  intent: z.string().default("unknown"),
   months: z.array(z.string()),
+  rawText: z.string().optional(),
 });
-
 // ── POST /parse ───────────────────────────────────────────────────────────────
 
 queryRouter.post("/parse", async (req: Request, res: Response) => {
@@ -144,13 +144,22 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     country_code,
     intent,
     months,
+    rawText,
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
   let adapter = intent ? getDomainForQuery(country_code, intent) : undefined;
   if (!adapter) {
     if (domainDiscovery.isEnabled()) {
-      await domainDiscovery.run({ intent, country_code }, prisma);
+      const discoveryIntent =
+        rawText ??
+        (intent === "unknown"
+          ? `${plan.category} in ${plan.location}`
+          : intent);
+      await domainDiscovery.run(
+        { intent: discoveryIntent, country_code },
+        prisma,
+      );
     }
     return res.status(400).json({
       error: "unsupported_region",

@@ -1,5 +1,12 @@
-import { Stagehand } from "@browserbasehq/stagehand";
+import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
+import { createOpenAI } from "@ai-sdk/openai";
+
 import { z } from "zod";
+
+const openrouter = createOpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
 
 export interface DiscoveredSource {
   url: string;
@@ -27,11 +34,9 @@ export async function discoverSources(
 ): Promise<DiscoveredSource[]> {
   const stagehand = new Stagehand({
     env: "LOCAL",
-    model: {
-      modelName: "google/gemini-2.5-flash-lite",
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: "https://openrouter.ai/api/v1",
-    },
+    llmClient: new AISdkClient({
+      model: openrouter("google/gemini-2.5-flash-lite"),
+    }),
     localBrowserLaunchOptions: { headless: true },
   });
 
@@ -39,7 +44,8 @@ export async function discoverSources(
     await stagehand.init();
 
     const searchQuery = `${intent} open data ${country_code} government API CSV download site:data.gov.uk OR site:opendata.gov OR site:kaggle.com`;
-    await stagehand.page.goto(
+    const page = await (stagehand as any).resolvePage();
+    await page.goto(
       `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`,
     );
 
@@ -56,7 +62,7 @@ export async function discoverSources(
             confidence: z.number().min(0).max(1),
           }),
         ),
-      }),
+      }) as any,
     );
 
     return results.sources ?? [];

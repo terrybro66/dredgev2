@@ -1,5 +1,11 @@
-import { Stagehand } from "@browserbasehq/stagehand";
+import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
+import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
+
+const openrouter = createOpenAI({
+  apiKey: process.env.OPENROUTER_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
 
 export interface CandidateSource {
   url: string;
@@ -16,30 +22,25 @@ export async function searchAlternativeSources(
 ): Promise<CandidateSource[]> {
   const stagehand = new Stagehand({
     env: "LOCAL",
-    model: {
-      modelName: "google/gemini-2.5-flash-lite",
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: "https://openrouter.ai/api/v1",
-    },
-    localBrowserLaunchOptions: {
-      headless: true,
-    },
+    llmClient: new AISdkClient({
+      model: openrouter("google/gemini-2.5-flash-lite"),
+    }),
+    localBrowserLaunchOptions: { headless: true },
   });
 
   try {
     await stagehand.init();
-    const page = stagehand.page;
 
     const searchQuery = `${intent} data ${location} ${country_code} open data CSV API download`;
+    const page = await (stagehand as any).resolvePage();
     await page.goto(
       `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`,
     );
-
-    const results = await page.extract({
-      instruction: `Extract up to 5 public data source URLs that could provide ${intent} data for ${location}. 
-      Look for government open data portals, CSV downloads, REST APIs, or data repositories.
-      For each result extract the URL and guess the format (rest, csv, xlsx, or scrape).`,
-      schema: z.object({
+    const results = await stagehand.extract(
+      `Extract up to 5 public data source URLs that could provide ${intent} data for ${location}. 
+    Look for government open data portals, CSV downloads, REST APIs, or data repositories.
+    For each result extract the URL and guess the format (rest, csv, xlsx, or scrape).`,
+      z.object({
         sources: z.array(
           z.object({
             url: z.string(),
@@ -48,9 +49,8 @@ export async function searchAlternativeSources(
             description: z.string(),
           }),
         ),
-      }),
-    });
-
+      }) as any,
+    );
     return results.sources ?? [];
   } catch (err) {
     console.error(

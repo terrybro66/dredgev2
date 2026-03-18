@@ -1138,7 +1138,7 @@ export default function App() {
     setResult(null);
 
     // Step 1 — parse
-    let parseData: ParsedQuery;
+    let parseData: ParsedQuery | null = null;
     try {
       const res = await fetch(`${API}/query/parse`, {
         method: "POST",
@@ -1167,13 +1167,15 @@ export default function App() {
       return;
     }
 
+    if (!parseData) return; // ← move it here
+
     // Step 2 — execute
     setLoadingStage("fetching");
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parseData),
+        body: JSON.stringify({ ...(parseData as object), rawText: text }),
       });
       const data = await res.json();
       if (!res.ok) {

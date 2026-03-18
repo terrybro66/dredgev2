@@ -8,8 +8,11 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.1.0",
     "@dredge/database": "*",
     "@dredge/schemas": "^0.1.0",
+    "@mastra/core": "^1.13.2",
+    "@openrouter/ai-sdk-provider": "^2.3.3",
     "axios": "^1.6.0",
     "better-auth": "^1.5.5",
     "cors": "^2.8.5",
