@@ -49,7 +49,11 @@ export function stripFences(text: string): string {
     .trim();
 }
 
-export function deriveVizHint(plan: QueryPlan, rawText: string, intent = "crime"): VizHint {
+export function deriveVizHint(
+  plan: QueryPlan,
+  rawText: string,
+  intent = "crime",
+): VizHint {
   if (intent === "weather") return "dashboard";
   const lower = rawText.toLowerCase();
   if (
@@ -105,7 +109,7 @@ export async function parseIntent(rawText: string): Promise<QueryPlan> {
 
   const raw = response.choices[0]?.message?.content ?? "";
   const cleaned = stripFences(raw);
-
+  console.log(JSON.stringify({ event: "intent_parsed", raw: cleaned }));
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);

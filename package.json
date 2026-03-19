@@ -20,5 +20,9 @@
   },
   "overrides": {
     "zod": "3.25.76"
+  },
+  "dependencies": {
+    "@crawlee/stagehand": "^3.16.0",
+    "zod": "3.25.76"
   }
 }

@@ -411,7 +411,7 @@ FROM (
         adapter.config.prismaModel
       ].findMany({
         where: { query_id: queryRecord.id },
-        take: 100,
+        orderBy: { month: "asc" },
       });
     }
     await prisma.queryCache.create({
@@ -422,7 +422,19 @@ FROM (
         results: storedResults as any,
       },
     });
-
+    if (viz_hint === "bar") {
+      // Group by month for the bar chart — don't slice raw rows
+      const byMonth: Record<string, number> = {};
+      for (const row of storedResults as any[]) {
+        const month = row.month ?? "unknown";
+        byMonth[month] = (byMonth[month] ?? 0) + 1;
+      }
+      storedResults = Object.entries(byMonth)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, count]) => ({ month, count }));
+    } else if (viz_hint === "table") {
+      storedResults = storedResults.slice(0, 100);
+    }
     await prisma.queryJob.update({
       where: { id: job.id },
       data: {

@@ -1,12 +1,7 @@
-import { Stagehand, AISdkClient } from "@browserbasehq/stagehand";
-import { createOpenAI } from "@ai-sdk/openai";
-
+import { StagehandCrawler } from "@crawlee/stagehand";
 import { z } from "zod";
-
-const openrouter = createOpenAI({
-  apiKey: process.env.OPENROUTER_API_KEY,
-  baseURL: "https://openrouter.ai/api/v1",
-});
+import { searchWithSerp } from "../search/serp";
+import { searchCatalogue } from "../search/catalogue";
 
 export interface DiscoveredSource {
   url: string;
@@ -26,54 +21,167 @@ export interface ProposedDomainConfig {
   confidence: number;
 }
 
+// Direct file extensions that don't need browser resolution
+const DIRECT_EXTENSIONS = [".csv", ".xlsx", ".xls", ".json", ".pdf"];
+
+function isDirectUrl(url: string): boolean {
+  const lower = url.toLowerCase().split("?")[0];
+  return DIRECT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 // ── Step 1: Discover candidate sources ───────────────────────────────────────
+//
+// Priority:
+//   1. data.gov.uk catalogue API  — GB only, instant, no browser, confidence 0.8
+//   2. SerpAPI                    — structured results, no browser, confidence 0.5
+//   3. StagehandCrawler + Bing    — browser fallback, last resort
 
 export async function discoverSources(
   intent: string,
   country_code: string,
 ): Promise<DiscoveredSource[]> {
-  const stagehand = new Stagehand({
-    env: "LOCAL",
-    llmClient: new AISdkClient({
-      model: openrouter("google/gemini-2.5-flash-lite"),
+  // 1 — catalogue
+  const catalogueResults = await searchCatalogue(intent, country_code);
+  if (catalogueResults.length > 0) {
+    console.log(
+      JSON.stringify({
+        event: "discover_sources_catalogue_hit",
+        intent,
+        country_code,
+        count: catalogueResults.length,
+      }),
+    );
+    return catalogueResults;
+  }
+
+  // 2 — SerpAPI
+  const serpResults = await searchWithSerp(intent, country_code);
+  if (serpResults.length > 0) {
+    console.log(
+      JSON.stringify({
+        event: "discover_sources_serp_hit",
+        intent,
+        country_code,
+        count: serpResults.length,
+      }),
+    );
+    return serpResults;
+  }
+
+  // 3 — StagehandCrawler browser fallback
+  console.log(
+    JSON.stringify({
+      event: "discover_sources_browser_fallback",
+      intent,
+      country_code,
     }),
-    localBrowserLaunchOptions: { headless: true },
+  );
+  return discoverWithBrowser(intent, country_code);
+}
+
+async function discoverWithBrowser(
+  intent: string,
+  country_code: string,
+): Promise<DiscoveredSource[]> {
+  const sources: DiscoveredSource[] = [];
+
+  const crawler = new StagehandCrawler({
+    stagehandOptions: {
+      env: "LOCAL" as const,
+      model: "openai/gpt-4.1-mini",
+      apiKey: process.env.OPENROUTER_API_KEY,
+    },
+    maxRequestsPerCrawl: 1,
+    async requestHandler({ page, log }) {
+      log.info(`Discovering sources for: ${intent} (${country_code})`);
+      try {
+        const results = await page.extract(
+          `Find up to 5 public data sources that provide ${intent} data for country ${country_code}.
+           Look for government open data portals, CSV files, REST APIs, or statistical datasets.
+           Return the direct URL to the data, the likely format, and a brief description.`,
+          z.object({
+            sources: z.array(
+              z.object({
+                url: z.string(),
+                format: z.enum(["rest", "csv", "xlsx", "scrape"]),
+                description: z.string(),
+                confidence: z.number().min(0).max(1),
+              }),
+            ),
+          }),
+        );
+        sources.push(...(results.sources ?? []));
+      } catch (err) {
+        log.error(`Stagehand extract failed: ${String(err)}`);
+      }
+    },
+  });
+
+  const searchQuery = `${intent} open data ${country_code} government dataset filetype:csv OR filetype:json`;
+  try {
+    await crawler.run([
+      `https://www.bing.com/search?q=${encodeURIComponent(searchQuery)}`,
+    ]);
+  } catch (err) {
+    console.error(
+      JSON.stringify({ event: "browser_crawl_error", error: String(err) }),
+    );
+  }
+
+  return sources;
+}
+
+// ── resolveDirectDownloadUrl ──────────────────────────────────────────────────
+//
+// Some discovered URLs point to a dataset landing page rather than a direct
+// file. This function detects HTML pages and uses StagehandCrawler to extract
+// the actual download link, then returns it. Direct file URLs are returned
+// unchanged without launching a browser.
+
+export async function resolveDirectDownloadUrl(url: string): Promise<string> {
+  if (isDirectUrl(url)) return url;
+
+  let resolved = url;
+
+  const crawler = new StagehandCrawler({
+    stagehandOptions: {
+      env: "LOCAL" as const,
+      model: "openai/gpt-4.1-mini",
+      apiKey: process.env.OPENROUTER_API_KEY,
+    },
+    maxRequestsPerCrawl: 1,
+    async requestHandler({ page, log }) {
+      log.info(`Resolving download URL from: ${url}`);
+      try {
+        const result = await page.extract(
+          `Find the direct download URL for a data file (CSV, JSON, XLSX, or PDF) on this page.
+           Return null if no direct download link is found.`,
+          z.object({
+            downloadUrl: z.string().nullable(),
+          }),
+        );
+        if (result.downloadUrl) {
+          resolved = result.downloadUrl;
+        }
+      } catch (err) {
+        log.error(`Failed to resolve download URL: ${String(err)}`);
+      }
+    },
   });
 
   try {
-    await stagehand.init();
-
-    const searchQuery = `${intent} open data ${country_code} government API CSV download site:data.gov.uk OR site:opendata.gov OR site:kaggle.com`;
-    const page = await (stagehand as any).resolvePage();
-    await page.goto(
-      `https://www.google.com/search?q=${encodeURIComponent(searchQuery)}`,
-    );
-
-    const results = await stagehand.extract(
-      `Find up to 5 public data sources that provide ${intent} data for country ${country_code}.
-       Look for government open data portals, CSV files, REST APIs, or statistical datasets.
-       Return the direct URL to the data, the likely format, and a brief description.`,
-      z.object({
-        sources: z.array(
-          z.object({
-            url: z.string(),
-            format: z.enum(["rest", "csv", "xlsx", "scrape"]),
-            description: z.string(),
-            confidence: z.number().min(0).max(1),
-          }),
-        ),
-      }) as any,
-    );
-
-    return results.sources ?? [];
+    await crawler.run([url]);
   } catch (err) {
     console.error(
-      JSON.stringify({ event: "discover_sources_error", error: String(err) }),
+      JSON.stringify({
+        event: "resolve_url_crawl_error",
+        url,
+        error: String(err),
+      }),
     );
-    return [];
-  } finally {
-    await stagehand.close();
   }
+
+  return resolved;
 }
 
 // ── Step 2: Sample a source ───────────────────────────────────────────────────
@@ -82,8 +190,11 @@ export async function sampleSource(url: string): Promise<{
   rows: unknown[];
   format: "rest" | "csv" | "xlsx";
 } | null> {
+  // Resolve indirect URLs before attempting to fetch
+  const directUrl = await resolveDirectDownloadUrl(url);
+
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(directUrl, { signal: AbortSignal.timeout(15000) });
     if (!res.ok) return null;
 
     const contentType = res.headers.get("content-type") ?? "";
@@ -94,7 +205,7 @@ export async function sampleSource(url: string): Promise<{
       return { rows, format: "rest" };
     }
 
-    if (contentType.includes("text/csv") || url.endsWith(".csv")) {
+    if (contentType.includes("text/csv") || directUrl.endsWith(".csv")) {
       const text = await res.text();
       const lines = text.split("\n").filter(Boolean).slice(0, 6);
       if (lines.length < 2) return null;

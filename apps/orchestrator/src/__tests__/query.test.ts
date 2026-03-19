@@ -398,18 +398,26 @@ describe("POST /query/execute", () => {
     });
   });
 
-  it("caps results at 100 items", async () => {
+  it("bar chart results are grouped by month not raw rows", async () => {
+    // The bar chart path groups rows by month and returns { month, count }
+    // entries — not raw rows capped at 100.
     const crimes = Array.from({ length: 150 }, (_, i) => ({
       id: i,
       category: "burglary",
+      month: i < 75 ? "2024-01" : "2024-02",
     }));
     mockFetchCrimes.mockResolvedValue(crimes);
-    mockPrisma.crimeResult.findMany.mockResolvedValue(crimes.slice(0, 100));
+    mockPrisma.crimeResult.findMany.mockResolvedValue(crimes);
     const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send({ ...validExecuteBody, viz_hint: "bar" });
-    expect(res.body.results).toHaveLength(100);
+    // Should return one entry per month, not 150 raw rows
+    expect(res.body.results).toHaveLength(2);
+    expect(res.body.results[0]).toMatchObject({
+      month: expect.any(String),
+      count: expect.any(Number),
+    });
   });
 
   it("returns 500 when fetchCrimes throws", async () => {
