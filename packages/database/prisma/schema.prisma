@@ -152,6 +152,9 @@ model DomainDiscovery {
   error_message  String?
   createdAt      DateTime @default(now())
   completedAt    DateTime?
+  store_results      Boolean?
+  refresh_policy     String?
+  ephemeral_rationale String?   
 
   @@map("domain_discovery")
 }

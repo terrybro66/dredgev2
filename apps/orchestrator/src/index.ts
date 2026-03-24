@@ -10,6 +10,7 @@ import { getRedisClient, checkRedisHealth } from "./redis";
 import { workspaceRouter } from "./workspace";
 import { registerDomainEmbeddings } from "./semantic/classifier";
 import { prisma } from "./db";
+import { adminRouter } from "./admin/discovery";
 
 loadDomains();
 checkRedisHealth().then((healthy) => {
@@ -73,6 +74,7 @@ app.use(express.json());
 app.use("/query", queryRouter);
 app.use("/query", exportRouter);
 app.use("/workspaces", workspaceRouter);
+app.use("/admin", adminRouter);
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

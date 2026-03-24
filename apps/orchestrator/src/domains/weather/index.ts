@@ -137,6 +137,7 @@ export const weatherAdapter: DomainAdapter = {
     categoryMap: {},
     vizHintRules: { defaultHint: "dashboard", multiMonthHint: "dashboard" },
     rateLimit: { requestsPerMinute: 60 },
+    defaultOrderBy: { date: "asc" },
     cacheTtlHours: 1,
   },
 

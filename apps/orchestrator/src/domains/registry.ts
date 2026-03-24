@@ -1,6 +1,7 @@
 import { DomainConfig, FallbackInfo } from "@dredge/schemas";
 import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
+import { prisma } from "../db";
 
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
@@ -51,6 +52,32 @@ export async function loadDomains(): Promise<void> {
   const adapters = [crimeUkAdapter, weatherAdapter];
   for (const adapter of adapters) {
     registerDomain(adapter);
+
+    // Seed a DataSource record for each built-in adapter so the DB
+    // reflects the static config from day one. Upsert is idempotent —
+    // calling loadDomains() twice never creates duplicate records.
+    await prisma.dataSource.upsert({
+      where: {
+        domainName_url: {
+          domainName: adapter.config.name,
+          url: adapter.config.apiUrl,
+        },
+      },
+      update: {}, // no updates — static adapters don't change at runtime
+      create: {
+        domainName: adapter.config.name,
+        name: adapter.config.name,
+        url: adapter.config.apiUrl,
+        type: "rest",
+        fieldMap: (adapter.config.flattenRow as object) ?? {},
+        refreshPolicy:
+          adapter.config.cacheTtlHours === 0 ? "realtime" : "weekly",
+        storeResults: true,
+        discoveredBy: "manual",
+        enabled: true,
+      },
+    });
+
     if (adapter.onLoad) {
       await adapter.onLoad();
     }
