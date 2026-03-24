@@ -8,6 +8,7 @@ export const crimeUkAdapter: DomainAdapter = {
     name: "crime-uk",
     tableName: "crime_results",
     prismaModel: "crimeResult",
+    defaultOrderBy: { month: "asc" },
     countries: ["GB"],
     intents: ["crime"],
     apiUrl: "https://data.police.uk/api",
