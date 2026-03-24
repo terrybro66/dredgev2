@@ -11,7 +11,6 @@ import { workspaceRouter } from "./workspace";
 import { registerDomainEmbeddings } from "./semantic/classifier";
 import { prisma } from "./db";
 
-
 loadDomains();
 checkRedisHealth().then((healthy) => {
   if (!healthy) {
@@ -23,8 +22,6 @@ checkRedisHealth().then((healthy) => {
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
-
-
 
 if (process.env.DEEPSEEK_API_KEY) {
   Promise.all([
@@ -83,7 +80,9 @@ app.get("/health", (_req, res) => {
 
 async function start() {
   await loadDomains();
-  checkRedisHealth().then(...);
+  checkRedisHealth().catch((err) =>
+    console.warn("Redis health check failed:", err),
+  );
   app.listen(PORT, () => {
     console.log(`dredge orchestrator running on http://localhost:${PORT}`);
   });

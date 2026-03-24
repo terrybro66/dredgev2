@@ -254,3 +254,26 @@ model Annotation {
 
   @@map("annotations")
 }
+
+enum SourceType        { rest csv xlsx pdf scrape }
+enum RefreshPolicy     { realtime daily weekly static }
+enum DiscoveredBy      { manual catalogue serp browser }
+
+model DataSource {
+  id               String       @id @default(cuid())
+  domainName       String
+  name             String
+  url              String
+  type             SourceType
+  extractionPrompt String?
+  fieldMap         Json
+  refreshPolicy    RefreshPolicy
+  storeResults     Boolean      @default(true)
+  confidence       Float        @default(1.0)
+  enabled          Boolean      @default(true)
+  discoveredBy     DiscoveredBy @default(manual)
+  approvedAt       DateTime?
+  lastFetchedAt    DateTime?
+  lastRowCount     Int?
+  createdAt        DateTime     @default(now())
+}

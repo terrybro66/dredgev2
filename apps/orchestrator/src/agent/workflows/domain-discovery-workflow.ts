@@ -19,6 +19,9 @@ export interface ProposedDomainConfig {
   sampleRows: unknown[];
   fieldMap: Record<string, string>;
   confidence: number;
+  storeResults: boolean;
+  refreshPolicy: "realtime" | "daily" | "weekly" | "static";
+  ephemeralRationale: string;
 }
 
 // Direct file extensions that don't need browser resolution
@@ -246,12 +249,21 @@ Propose:
 1. A domain name (kebab-case, e.g. "flood-risk-uk")
 2. A field mapping from source field names to standard names (date, location, value, description, lat, lon)
 3. A confidence score 0-1
+4. Whether results should be stored persistently (storeResults: true) or discarded after delivery (storeResults: false).
+   Set storeResults: false for live or time-sensitive data that changes constantly and has no value being stored
+   (e.g. cinema showtimes, live transport, current prices). Set storeResults: true for stable civic or reference
+   data that benefits from caching and history (e.g. crime statistics, flood risk, planning applications).
+5. A refresh policy: "realtime" (fetch live, never cache), "daily", "weekly", or "static" (never changes).
+6. A brief rationale explaining the storeResults decision (ephemeralRationale).
 
 Return only JSON in this exact shape:
 {
   "name": "domain-name",
   "fieldMap": { "source_field": "standard_field" },
-  "confidence": 0.8
+  "confidence": 0.8,
+  "storeResults": true,
+  "refreshPolicy": "weekly",
+  "ephemeralRationale": "Crime statistics are stable reference data that benefit from caching."
 }`;
 
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -284,6 +296,9 @@ Return only JSON in this exact shape:
       sampleRows,
       fieldMap: parsed.fieldMap ?? {},
       confidence: parsed.confidence ?? 0.5,
+      storeResults: parsed.storeResults ?? true,
+      refreshPolicy: parsed.refreshPolicy ?? "weekly",
+      ephemeralRationale: parsed.ephemeralRationale ?? "",
     };
   } catch (err) {
     console.error(

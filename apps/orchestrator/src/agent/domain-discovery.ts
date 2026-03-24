@@ -65,6 +65,9 @@ export const domainDiscovery = {
       const sampled = await sampleSource(top.url);
 
       if (!sampled) {
+        console.log(
+          JSON.stringify({ event: "discovery_sample_failed", url: top.url }),
+        );
         await prisma.domainDiscovery.update({
           where: { id: record.id },
           data: { status: "requires_review", completedAt: new Date() },
@@ -81,6 +84,10 @@ export const domainDiscovery = {
       );
 
       if (!proposed) {
+        console.log(
+          JSON.stringify({ event: "discovery_propose_failed", url: top.url }),
+        );
+
         await prisma.domainDiscovery.update({
           where: { id: record.id },
           data: { status: "requires_review", completedAt: new Date() },
@@ -96,6 +103,9 @@ export const domainDiscovery = {
           proposed_config: proposed as any,
           sample_rows: sampled.rows as any,
           confidence: proposed.confidence,
+          store_results: proposed.storeResults,
+          refresh_policy: proposed.refreshPolicy,
+          ephemeral_rationale: proposed.ephemeralRationale,
           completedAt: new Date(),
         },
       });
@@ -106,6 +116,8 @@ export const domainDiscovery = {
           id: record.id,
           proposed_name: proposed.name,
           confidence: proposed.confidence,
+          store_results: proposed.storeResults,
+          refresh_policy: proposed.refreshPolicy,
         }),
       );
 

@@ -125,6 +125,65 @@ describe("DomainDiscoveryPipeline", () => {
     });
   });
 
+  it("stores storeResults and ephemeralRationale on the record when proposeDomainConfig returns them", async () => {
+    process.env.DOMAIN_DISCOVERY_ENABLED = "true";
+
+    const { discoverSources, sampleSource, proposeDomainConfig } =
+      await import("../agent/workflows/domain-discovery-workflow");
+
+    (discoverSources as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        url: "https://example.com/data.csv",
+        format: "csv",
+        description: "Test source",
+        confidence: 0.8,
+      },
+    ]);
+    (sampleSource as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      rows: [{ date: "2024-01", value: 42 }],
+      format: "csv",
+    });
+    (proposeDomainConfig as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      name: "cinema-listings-gb",
+      intent: "cinema listings",
+      country_code: "GB",
+      apiUrl: "https://example.com/data.csv",
+      providerType: "csv",
+      sampleRows: [],
+      fieldMap: {},
+      confidence: 0.85,
+      storeResults: false,
+      refreshPolicy: "realtime",
+      ephemeralRationale:
+        "Cinema showtimes change daily and have no value being stored.",
+    });
+
+    const { domainDiscovery } = await import("../agent/domain-discovery");
+
+    const mockPrisma = {
+      domainDiscovery: {
+        create: vi.fn().mockResolvedValue({ id: "disc-1", status: "pending" }),
+        update: vi.fn().mockResolvedValue({}),
+      },
+    };
+
+    await domainDiscovery.run(
+      { intent: "cinema listings", country_code: "GB" },
+      mockPrisma as any,
+    );
+
+    const updateCall = mockPrisma.domainDiscovery.update.mock.calls.find(
+      (call: any[]) => call[0].data.status === "requires_review",
+    );
+
+    expect(updateCall).toBeDefined();
+    expect(updateCall[0].data.store_results).toBe(false);
+    expect(updateCall[0].data.refresh_policy).toBe("realtime");
+    expect(updateCall[0].data.ephemeral_rationale).toContain(
+      "Cinema showtimes",
+    );
+  });
+
   describe("approve()", () => {
     it("returns false when record does not exist", async () => {
       process.env.DOMAIN_DISCOVERY_ENABLED = "true";
