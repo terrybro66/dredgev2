@@ -168,6 +168,7 @@ export const DomainConfigSchema = z.object({
   params: z.record(z.string()),
   flattenRow: z.record(z.string()),
   categoryMap: z.record(z.string()),
+  defaultOrderBy: z.record(z.enum(["asc", "desc"])).optional(),
   vizHintRules: z.object({
     defaultHint: VizHintSchema,
     multiMonthHint: VizHintSchema,

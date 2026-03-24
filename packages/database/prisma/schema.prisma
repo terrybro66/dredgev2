@@ -255,9 +255,27 @@ model Annotation {
   @@map("annotations")
 }
 
-enum SourceType        { rest csv xlsx pdf scrape }
-enum RefreshPolicy     { realtime daily weekly static }
-enum DiscoveredBy      { manual catalogue serp browser }
+enum SourceType {
+  rest
+  csv
+  xlsx
+  pdf
+  scrape
+}
+
+enum RefreshPolicy {
+  realtime
+  daily
+  weekly
+  static
+}
+
+enum DiscoveredBy {
+  manual
+  catalogue
+  serp
+  browser
+}
 
 model DataSource {
   id               String       @id @default(cuid())
@@ -276,4 +294,23 @@ model DataSource {
   lastFetchedAt    DateTime?
   lastRowCount     Int?
   createdAt        DateTime     @default(now())
+}
+
+model QueryResult {
+  id          String    @id @default(cuid())
+  domain_name String
+  source_tag  String
+  date        DateTime?
+  lat         Float?
+  lon         Float?
+  location    String?
+  description String?
+  category    String?
+  value       Float?
+  raw         Json?
+  extras      Json?
+  snapshot_id String?
+  created_at  DateTime  @default(now())
+
+  @@map("query_results")
 }

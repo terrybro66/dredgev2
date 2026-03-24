@@ -363,7 +363,7 @@ FROM (
   SELECT 
     ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
     COUNT(*)::int AS count
-  FROM crime_results
+  FROM query_results
   WHERE query_id = ${queryRecord.id}
     AND latitude IS NOT NULL
     AND longitude IS NOT NULL
@@ -378,7 +378,9 @@ FROM (
         adapter.config.prismaModel
       ].findMany({
         where: { query_id: queryRecord.id },
-        orderBy: { month: "asc" },
+        ...(adapter.config.defaultOrderBy
+          ? { orderBy: adapter.config.defaultOrderBy }
+          : {}),
       });
     }
     await prisma.queryCache.create({
