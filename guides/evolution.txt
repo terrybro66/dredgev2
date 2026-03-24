@@ -1,0 +1,857 @@
+Current State Assessment (Phase 0)
+What Works Today
+Capability	Status	Notes
+Intent parsing	✅ Complete	LLM extracts category, date range, location
+Geocoding	✅ Complete	Nominatim with caching
+Domain routing	✅ Complete	Registry lookup by (country, intent)
+Data fetching	✅ Complete	REST, CSV, XLSX, PDF providers
+Result storage	✅ Partial	Per-domain tables; hybrid query_results planned
+Semantic classification	✅ Complete	Embedding-based with fallback to discovery
+Discovery pipeline	✅ Partial	Finds sources, proposes configs, requires human approval
+Shadow adapter	✅ Partial	Finds alternative sources for empty results
+Workspaces	✅ Complete	Snapshots, pins, collaboration
+Output visualization	✅ Partial	Map, chart, table, dashboard
+Critical Gaps
+Registration step does nothing — approved domains are never registered
+
+Hybrid query_results table not yet migrated — per-domain tables still required
+
+No ephemeral enforcement — cinema showtimes would be stored if added
+
+No output type beyond tabular data — video, audio, 3D not supported
+
+No reasoning/planning layer — itineraries, travel calculations not possible
+
+No cross-domain queries — composite intents unimplemented
+
+Phase 1: Foundation — Zero-Code Domain Addition
+Goal
+Make domain addition possible without code changes, enabling the curated registry to function.
+
+Architecture Changes
+text
+Current:
+  DomainConfig in code → registerDomain() at startup → in-memory registry
+
+Phase 1:
+  Domain + DataSource in database → loadDomains() from DB → hot-reloadable registry
+New/Modified Components
+1.1 Hybrid query_results Table (Blocking)
+sql
+-- Single table for all domains
+CREATE TABLE query_results (
+  id            uuid PRIMARY KEY,
+  domain_name   text NOT NULL,
+  source_tag    text NOT NULL,
+  date          timestamptz,
+  lat           float,
+  lon           float,
+  location      text,
+  description   text,
+  value         float,
+  category      text,           -- Sub-classification within domain
+  raw           jsonb NOT NULL,
+  extras        jsonb NOT NULL, -- Domain-specific fields
+  snapshot_id   uuid,
+  created_at    timestamptz
+);
+
+-- Per-domain, per-field indexes
+CREATE INDEX idx_cinema_date ON query_results (date) WHERE domain_name = 'cinema-listings-gb';
+1.2 Database-Backed Domain Registry
+typescript
+// packages/database/prisma/schema.prisma
+
+model Domain {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  intentPatterns String[]
+  countryCodes  String[]
+  vizHint       String?
+  defaultOrderBy Json?
+  cachedAt      DateTime?
+  dataSources   DataSource[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model DataSource {
+  id              String   @id @default(cuid())
+  domainId        String
+  domain          Domain   @relation(fields: [domainId], references: [id])
+  name            String
+  url             String
+  type            DataSourceType
+  extractionPrompt String?
+  fieldMap        Json
+  refreshPolicy   RefreshPolicy
+  storeResults    Boolean
+  confidence      Float    @default(0.5)
+  enabled         Boolean  @default(true)
+  discoveredBy    DiscoveryMethod
+  locationMapping Json?    -- For location-specific URLs
+  approvedAt      DateTime?
+  lastFetchedAt   DateTime?
+  lastRowCount    Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+1.3 Hot-Reloadable Registry
+typescript
+class DomainRegistry {
+  private domains: Map<string, DomainAdapter> = new Map();
+  
+  async loadFromDatabase() {
+    const domains = await prisma.domain.findMany({
+      include: { dataSources: { where: { enabled: true } } }
+    });
+    
+    for (const domain of domains) {
+      const adapter = this.buildAdapter(domain);
+      this.domains.set(domain.name, adapter);
+    }
+  }
+  
+  async reloadDomain(domainName: string) {
+    const domain = await prisma.domain.findUnique({
+      where: { name: domainName },
+      include: { dataSources: { where: { enabled: true } } }
+    });
+    
+    if (domain) {
+      this.domains.set(domainName, this.buildAdapter(domain));
+    } else {
+      this.domains.delete(domainName);
+    }
+  }
+  
+  private buildAdapter(domain: DomainWithSources): DomainAdapter {
+    const hasPersistent = domain.dataSources.some(ds => ds.storeResults === true);
+    
+    if (!hasPersistent) {
+      return new EphemeralAdapter(domain);
+    }
+    
+    return new GenericAdapter(domain); // Writes to query_results
+  }
+}
+1.4 Registration Step Implementation
+typescript
+// src/agent/workflows/domain-registration.ts
+
+async function registerDomain(discoveryId: string, overrides?: Overrides) {
+  const record = await prisma.domainDiscovery.findUnique({
+    where: { id: discoveryId }
+  });
+  
+  const config = { ...record.proposedConfig, ...overrides };
+  
+  if (config.storeResults === false) {
+    // Ephemeral path — no storage
+    const domain = await prisma.domain.upsert({
+      where: { name: config.name },
+      create: { name: config.name, intentPatterns: config.intents, ... },
+      update: {}
+    });
+    
+    for (const source of config.sources) {
+      await prisma.dataSource.create({
+        data: {
+          domainId: domain.id,
+          name: source.name,
+          url: source.url,
+          type: source.type,
+          fieldMap: source.fieldMap,
+          storeResults: false,
+          refreshPolicy: "realtime"
+        }
+      });
+    }
+    
+    await registry.reloadDomain(domain.name);
+    
+  } else {
+    // Persistent path — uses query_results table
+    // Same domain creation, but storeResults = true
+    // Adapter will write to query_results on fetch
+  }
+  
+  await prisma.domainDiscovery.update({
+    where: { id: discoveryId },
+    data: { status: "registered" }
+  });
+}
+Deliverables for Phase 1
+Item	Effort
+query_results migration	1-2 days
+Domain + DataSource Prisma models	1 day
+Registry loader with hot-reload	2-3 days
+Registration step (ephemeral + persistent)	3-4 days
+Admin approval endpoint	2-3 days
+Migration of crime/weather to new model	2 days
+Total	11-15 days
+Prerequisites
+3.1 (hybrid table) from roadmap
+
+3.2 (DataSource model)
+
+3.3 (admin approval endpoint)
+
+3.4-3.6 (registration paths)
+
+Phase 2: Output Generators — Multi-Modal Results
+Goal
+Extend the system beyond tabular data to support video, audio, 3D scenes, and other generative outputs.
+
+Architecture Changes
+text
+Phase 1:
+  Query → Fetch Data → Store → Return Tabular Results
+
+Phase 2:
+  Query → Fetch Data → Store → Output Generator → Return Artifact
+                                    ↑
+                              (if output_type != "table")
+New Components
+2.1 Output Generator Interface
+typescript
+interface OutputGenerator {
+  type: "video" | "audio" | "scene3d" | "itinerary" | "report";
+  
+  canHandle(intent: Intent, data: QueryResult, context: GeneratorContext): boolean;
+  
+  generate(
+    intent: Intent,
+    data: QueryResult | null,
+    context: GeneratorContext
+  ): Promise<OutputArtifact>;
+}
+
+interface GeneratorContext {
+  query: string;
+  location?: GeocodeResult;
+  user?: UserPreferences;
+  uploadedFiles?: UploadedFile[];
+  constraints?: PlanningConstraints;
+}
+2.2 Output Artifact Storage
+sql
+CREATE TABLE output_artifacts (
+  id            uuid PRIMARY KEY,
+  query_run_id  uuid REFERENCES query_runs(id),
+  generator_type text,
+  artifact_type text,
+  content       jsonb,      -- Generator-specific configuration
+  url           text,       -- If rendered to file (video, audio)
+  metadata      jsonb,
+  created_at    timestamptz
+);
+
+CREATE TABLE artifact_snapshots (
+  id            uuid PRIMARY KEY,
+  artifact_id   uuid REFERENCES output_artifacts(id),
+  snapshot_id   uuid REFERENCES dataset_snapshots(id), -- nullable
+  parameters    jsonb,      -- Generation parameters
+  checksum      text,
+  created_at    timestamptz
+);
+2.3 Output Router
+typescript
+class OutputRouter {
+  private generators: OutputGenerator[] = [];
+  
+  register(generator: OutputGenerator) {
+    this.generators.push(generator);
+  }
+  
+  async route(query: ParsedIntent, data: QueryResult | null, context: GeneratorContext) {
+    // Check if user explicitly requested an output type
+    if (query.output_type) {
+      const generator = this.generators.find(g => g.type === query.output_type);
+      if (generator) return generator.generate(query, data, context);
+    }
+    
+    // Otherwise, score all generators
+    const scored = await Promise.all(
+      this.generators.map(async g => ({
+        generator: g,
+        score: await g.canHandle(query, data, context) ? 1 : 0
+      }))
+    );
+    
+    const best = scored.sort((a, b) => b.score - a.score)[0];
+    return best?.generator.generate(query, data, context);
+  }
+}
+2.4 Initial Generators
+Generator	Type	Effort
+VideoGenerator	Remotion + asset sourcing	2-3 weeks
+AudioGenerator	Magenta.js + Tone.js	1-2 weeks
+Scene3DGenerator	React Three Fiber + sentiment mapping	2-3 weeks
+ItineraryGenerator	Scheduling + travel times	2-3 weeks
+Deliverables for Phase 2
+Item	Effort
+OutputGenerator interface + router	2-3 days
+Artifact storage tables	1 day
+VideoGenerator (Remotion)	2-3 weeks
+AudioGenerator (Magenta)	1-2 weeks
+Scene3DGenerator	2-3 weeks
+Frontend artifact rendering	1-2 weeks
+Total	6-10 weeks (parallelizable)
+Dependencies
+Phase 1 complete
+
+Remotion, Magenta.js, Three.js evaluated
+
+Phase 3: Tool Library — Reusable Primitives
+Goal
+Extract the core capabilities used by output generators into reusable tools that can be composed by an LLM agent.
+
+Architecture Changes
+text
+Phase 2:
+  Query → Output Generator (hardcoded per type)
+
+Phase 3:
+  Query → Reasoning Agent → Tool Composition → Output Artifact
+New Components
+3.1 Tool Library
+typescript
+// src/tools/index.ts
+
+export const tools = {
+  // Data tools
+  fetchData: new Tool({
+    name: "fetch_data",
+    description: "Fetch data from any registered domain",
+    parameters: z.object({
+      domain: z.string(),
+      filters: z.object({
+        date: z.string().optional(),
+        location: z.string().optional(),
+        category: z.string().optional()
+      })
+    }),
+    execute: async ({ domain, filters }) => {
+      return await domainRegistry.fetch(domain, filters);
+    }
+  }),
+  
+  // Spatial tools
+  calculateTravel: new Tool({
+    name: "calculate_travel",
+    description: "Calculate travel time/distance between locations",
+    parameters: z.object({
+      origin: z.string(),
+      destination: z.string(),
+      mode: z.enum(["walking", "transit", "driving", "train"])
+    }),
+    execute: async ({ origin, destination, mode }) => {
+      return await travelService.calculate(origin, destination, mode);
+    }
+  }),
+  
+  calculateReachableArea: new Tool({
+    name: "calculate_reachable_area",
+    description: "Find all locations reachable within time limit",
+    parameters: z.object({
+      origin: z.string(),
+      timeLimit: z.number(),
+      mode: z.enum(["walking", "transit", "driving", "train"])
+    }),
+    execute: async ({ origin, timeLimit, mode }) => {
+      if (mode === "train") {
+        return await railService.reachableStations(origin, timeLimit);
+      }
+      return await isochroneService.calculate(origin, timeLimit, mode);
+    }
+  }),
+  
+  // Optimization tools
+  optimizeSchedule: new Tool({
+    name: "optimize_schedule",
+    description: "Find optimal sequence of items with durations and locations",
+    parameters: z.object({
+      items: z.array(z.object({
+        id: z.string(),
+        duration: z.number(),
+        location: z.string(),
+        priority: z.number().optional(),
+        startTime: z.number().optional()
+      })),
+      timeWindow: z.object({ start: z.number(), end: z.number() }),
+      travelMode: z.enum(["walking", "transit"])
+    }),
+    execute: async ({ items, timeWindow, travelMode }) => {
+      return await schedulingOptimizer.solve(items, timeWindow, travelMode);
+    }
+  }),
+  
+  // Filtering tools
+  filterByConstraints: new Tool({
+    name: "filter_by_constraints",
+    description: "Filter items by user criteria",
+    parameters: z.object({
+      items: z.array(z.any()),
+      constraints: z.record(z.any())
+    }),
+    execute: async ({ items, constraints }) => {
+      return items.filter(item => 
+        Object.entries(constraints).every(([key, value]) => item[key] === value)
+      );
+    }
+  }),
+  
+  rankByPreference: new Tool({
+    name: "rank_by_preference",
+    description: "Score and rank items by weighted criteria",
+    parameters: z.object({
+      items: z.array(z.any()),
+      weights: z.record(z.number())
+    }),
+    execute: async ({ items, weights }) => {
+      return items.map(item => ({
+        item,
+        score: Object.entries(weights).reduce(
+          (sum, [key, weight]) => sum + (item[key] || 0) * weight,
+          0
+        )
+      })).sort((a, b) => b.score - a.score);
+    }
+  }),
+  
+  groupByLocation: new Tool({
+    name: "group_by_location",
+    description: "Group items by geographic proximity",
+    parameters: z.object({
+      items: z.array(z.object({ id: z.string(), location: z.string() })),
+      radiusKm: z.number()
+    }),
+    execute: async ({ items, radiusKm }) => {
+      const groups: Record<string, typeof items> = {};
+      // Cluster by location within radius
+      return groups;
+    }
+  })
+};
+3.2 Travel Time Service with Caching
+typescript
+class TravelTimeService {
+  private cache: Map<string, TravelTimeCache> = new Map();
+  
+  async calculate(origin: string, destination: string, mode: string) {
+    const key = `${origin}:${destination}:${mode}`;
+    
+    if (this.cache.has(key)) {
+      const cached = this.cache.get(key);
+      if (cached && cached.expiresAt > new Date()) {
+        return cached;
+      }
+    }
+    
+    const result = await googleMaps.distanceMatrix({
+      origins: [origin],
+      destinations: [destination],
+      mode
+    });
+    
+    this.cache.set(key, {
+      duration: result.duration,
+      distance: result.distance,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) // 30 days
+    });
+    
+    return result;
+  }
+  
+  // Precompute for known domains (Edinburgh Fringe venues, etc.)
+  async precomputeForDomain(domainName: string) {
+    const venues = await prisma.queryResults.findMany({
+      where: { domain_name: domainName },
+      distinct: ['location'],
+      select: { location: true }
+    });
+    
+    for (const v1 of venues) {
+      for (const v2 of venues) {
+        await this.calculate(v1.location, v2.location, 'walking');
+      }
+    }
+  }
+}
+Deliverables for Phase 3
+Item	Effort
+Tool definitions (8 primitives)	3-4 days
+TravelTimeService with caching	2-3 days
+Isochrone service integration	2-3 days
+Scheduling optimizer (greedy + DP)	3-4 days
+Tool testing suite	2 days
+Total	12-16 days
+Dependencies
+Phase 1 complete (data fetching works)
+
+Google Maps API key configured
+
+Phase 4: Reasoning Agent — Mastra Integration
+Goal
+Replace hardcoded output generators with an LLM agent that composes tools to solve arbitrary planning and reasoning tasks.
+
+Architecture Changes
+text
+Phase 3:
+  Query → Output Generator (still per-type)
+
+Phase 4:
+  Query → Reasoning Agent → Tool Composition → Output Artifact
+New Components
+4.1 Mastra Agent Configuration
+typescript
+// src/agent/reasoning-agent.ts
+
+import { Agent, Tool, Memory } from 'mastra';
+
+const reasoningAgent = new Agent({
+  name: 'DREDGE Reasoning Engine',
+  model: 'openrouter/anthropic/claude-3.5-sonnet',
+  
+  instructions: `
+    You are a reasoning engine for data analysis, planning, and optimization.
+    
+    You have access to tools that can:
+    - Fetch data from registered domains (fetch_data)
+    - Calculate travel times between locations (calculate_travel)
+    - Find reachable areas within time limits (calculate_reachable_area)
+    - Optimize schedules (optimize_schedule)
+    - Filter and rank items (filter_by_constraints, rank_by_preference)
+    
+    When given a query:
+    1. Understand what the user wants to achieve
+    2. Break it down into steps
+    3. Use tools to fetch and process data
+    4. Present results clearly, explaining your reasoning
+    
+    If the query is ambiguous, ask for clarification.
+    Remember previous interactions to personalize responses.
+  `,
+  
+  tools: Object.values(tools),
+  
+  memory: new Memory({
+    storage: redis,
+    ttl: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxTokens: 10000
+  })
+});
+4.2 Agent Execution Loop
+typescript
+// src/agent/execution.ts
+
+async function executeWithAgent(query: string, context: AgentContext) {
+  const sessionId = context.sessionId || crypto.randomUUID();
+  
+  const response = await reasoningAgent.run({
+    messages: [
+      { role: 'system', content: reasoningAgent.instructions },
+      { role: 'user', content: query }
+    ],
+    sessionId,
+    tools: Object.values(tools),
+    toolChoice: 'auto'
+  });
+  
+  // Parse tool calls from response
+  const toolCalls = extractToolCalls(response);
+  
+  for (const call of toolCalls) {
+    const tool = tools[call.name];
+    if (tool) {
+      const result = await tool.execute(call.parameters);
+      response.addToolResult(call.id, result);
+    }
+  }
+  
+  // Continue if more tool calls
+  if (response.needsMoreTools()) {
+    return reasoningAgent.continue(response);
+  }
+  
+  // Determine output type from response
+  const outputType = detectOutputType(response.content);
+  
+  return {
+    type: outputType,
+    content: response.content,
+    artifacts: response.artifacts,
+    sessionId
+  };
+}
+4.3 Agent Memory for Personalization
+typescript
+// Learning from user feedback
+async function recordFeedback(sessionId: string, feedback: UserFeedback) {
+  const session = await reasoningAgent.getMemory(sessionId);
+  
+  // Store preference in memory
+  await session.remember({
+    key: 'user_preferences',
+    value: {
+      preferredGenres: feedback.preferredGenres,
+      travelMode: feedback.travelMode,
+      timePreferences: feedback.timePreferences
+    }
+  });
+  
+  // Update agent memory for future interactions
+  await reasoningAgent.updateMemory(sessionId, {
+    preferences: feedback.preferences,
+    successfulPatterns: feedback.patterns
+  });
+}
+4.4 Workflow Templates for Common Patterns
+typescript
+// Pre-defined workflows for efficiency
+const workflowTemplates = {
+  itinerary: new Workflow({
+    name: 'Itinerary Planner',
+    steps: [
+      { tool: 'fetch_data', purpose: 'get events' },
+      { tool: 'filter_by_constraints', purpose: 'apply user filters' },
+      { tool: 'calculate_travel', purpose: 'get venue distances' },
+      { tool: 'optimize_schedule', purpose: 'create itinerary' }
+    ]
+  }),
+  
+  reachableArea: new Workflow({
+    name: 'Reachable Area Explorer',
+    steps: [
+      { tool: 'calculate_reachable_area', purpose: 'find reachable locations' },
+      { tool: 'fetch_data', purpose: 'get points of interest' },
+      { tool: 'group_by_location', purpose: 'cluster results' }
+    ]
+  }),
+  
+  crossDomain: new Workflow({
+    name: 'Cross-Domain Query',
+    steps: [
+      { tool: 'fetch_data', purpose: 'get data from domain A' },
+      { tool: 'fetch_data', purpose: 'get data from domain B' },
+      { tool: 'rank_by_preference', purpose: 'combine and rank' }
+    ]
+  })
+};
+
+// Agent can use templates or compose tools directly
+Deliverables for Phase 4
+Item	Effort
+Mastra agent setup	2-3 days
+Tool integration with agent	2-3 days
+Agent memory implementation	2-3 days
+Workflow templates	3-4 days
+Feedback collection	2 days
+Testing and refinement	5-7 days
+Total	16-22 days
+Dependencies
+Phase 3 complete (tools exist)
+
+Mastra AI evaluation completed
+
+Phase 5: Intelligent Reasoning — Autonomous Discovery
+Goal
+Enable the agent to autonomously discover new data sources, propose new tools, and learn from user interactions without human intervention for low-risk cases.
+
+Architecture Changes
+text
+Phase 4:
+  User Query → Reasoning Agent → Tool Composition → Output
+
+Phase 5:
+  User Query → Reasoning Agent → Tool Composition → Output
+                    ↓
+              (if missing capability)
+                    ↓
+              Autonomous Discovery → New Tool/Source → Register
+New Components
+5.1 Autonomous Discovery Agent
+typescript
+class DiscoveryAgent {
+  async discoverForQuery(query: string, context: AgentContext) {
+    // Agent identifies that no existing tool/data source can answer
+    if (await this.capabilityGapDetected(query)) {
+      // Use existing discovery pipeline
+      const sources = await discoveryPipeline.run(query);
+      
+      // Propose new data source or tool
+      const proposal = await this.proposeCapability(sources);
+      
+      if (proposal.confidence > 0.9 && proposal.risk === 'low') {
+        // Auto-approve for low-risk cases
+        await this.autoRegister(proposal);
+      } else {
+        // Flag for human review
+        await this.createReviewRecord(proposal);
+      }
+    }
+  }
+  
+  async proposeCapability(sources: DiscoveredSource[]) {
+    // LLM analyzes samples to propose new tool or data source
+    const response = await llm.complete({
+      prompt: `
+        Based on these sample rows, propose a new capability:
+        - Should this be a new data source for an existing domain?
+        - Should this be a new tool for the reasoning engine?
+        - What would the tool do?
+        
+        Sample rows: ${JSON.stringify(sources.sampleRows)}
+      `
+    });
+    
+    return {
+      type: response.type, // 'data_source' or 'tool'
+      domain: response.domain,
+      toolDefinition: response.toolDefinition,
+      confidence: response.confidence,
+      risk: response.risk
+    };
+  }
+}
+5.2 Tool Discovery and Registration
+typescript
+// New tool proposed by discovery
+const proposedTool = {
+  name: "calculate_carbon_footprint",
+  description: "Calculate carbon footprint for a journey",
+  parameters: {
+    origin: "string",
+    destination: "string",
+    mode: "train|car|flight"
+  },
+  implementation: {
+    type: "api",
+    url: "https://api.carbonfootprint.com/calculate",
+    apiKey: "${CARBON_API_KEY}" // Placeholder
+  }
+};
+
+// Auto-registration for high-confidence, low-risk tools
+async function autoRegisterTool(proposal: ToolProposal) {
+  if (proposal.confidence > 0.9 && proposal.risk === 'low') {
+    const tool = new Tool({
+      name: proposal.name,
+      description: proposal.description,
+      parameters: proposal.parameters,
+      execute: async (params) => {
+        // Implementation from proposal
+        return await callExternalAPI(proposal.implementation, params);
+      }
+    });
+    
+    tools[proposal.name] = tool;
+    reasoningAgent.addTool(tool);
+    
+    await prisma.toolRegistry.create({
+      data: {
+        name: proposal.name,
+        definition: proposal,
+        autoApproved: true,
+        approvedAt: new Date()
+      }
+    });
+  }
+}
+5.3 Learning and Adaptation Loop
+typescript
+class LearningLoop {
+  async processFeedback() {
+    // Analyze successful and failed interactions
+    const successful = await this.getSuccessfulQueries();
+    const failed = await this.getFailedQueries();
+    
+    // Identify patterns
+    const patterns = await this.identifyPatterns(successful, failed);
+    
+    // Update agent memory
+    await reasoningAgent.updateSystemInstructions(
+      this.incorporatePatterns(patterns)
+    );
+    
+    // Suggest new tools based on repeated patterns
+    for (const pattern of patterns) {
+      if (pattern.frequency > 10 && !this.hasToolFor(pattern)) {
+        await this.suggestNewTool(pattern);
+      }
+    }
+  }
+  
+  async identifyPatterns(successful: Query[], failed: Query[]) {
+    // Use LLM to cluster queries by intent and approach
+    const clusters = await llm.embedAndCluster([
+      ...successful.map(q => q.intent),
+      ...failed.map(q => q.intent)
+    ]);
+    
+    return clusters.map(cluster => ({
+      intent: cluster.intent,
+      frequency: cluster.count,
+      successRate: cluster.successCount / cluster.totalCount,
+      commonTools: cluster.toolsUsed,
+      suggestedTool: cluster.missingCapability
+    }));
+  }
+}
+Deliverables for Phase 5
+Item	Effort
+Autonomous discovery agent	5-7 days
+Tool auto-registration	3-4 days
+Learning loop implementation	5-7 days
+Risk assessment framework	3-4 days
+Monitoring and observability	3-4 days
+Total	19-26 days
+Dependencies
+Phase 4 complete (reasoning agent works)
+
+Discovery pipeline mature
+
+Monitoring infrastructure in place
+
+Evolution Timeline Summary
+Phase	Name	Duration	Cumulative
+Phase 0	Current State	—	—
+Phase 1	Zero-Code Domain Addition	2-3 weeks	2-3 weeks
+Phase 2	Multi-Modal Output Generators	6-10 weeks	8-13 weeks
+Phase 3	Tool Library	2-3 weeks	10-16 weeks
+Phase 4	Reasoning Agent (Mastra)	3-4 weeks	13-20 weeks
+Phase 5	Autonomous Discovery	3-4 weeks	16-24 weeks
+Risk Assessment
+Risk	Phase	Likelihood	Mitigation
+Hybrid table migration fails	1	Low	Test on staging, have rollback plan
+Registration complexity	1	Medium	Build ephemeral path first
+Remotion rendering costs	2	Medium	Implement caching, set quotas
+Magenta model latency	2	Medium	Pre-render common compositions
+Google Maps API costs	3	High	Aggressive caching, precomputation
+Agent hallucination	4	Medium	Tool output validation, human review for critical outputs
+Auto-approval security	5	High	Conservative thresholds, audit trail
+Success Metrics
+Metric	Phase 1	Phase 2	Phase 3	Phase 4	Phase 5
+Domains added without code	100%	100%	100%	100%	100%
+New output types	0	4+	4+	Unlimited	Unlimited
+Cross-domain queries	0	0	0	Supported	Optimized
+User refinement steps	0	Manual	Manual	Agent-assisted	Autonomous
+New tool creation	Manual	Manual	Manual	Manual	Auto-suggested
+Human review required	100%	100%	100%	High-risk only	Exception only
+Conclusion
+This evolution path transforms DREDGE from a domain-specific data retrieval system into a general-purpose intelligent reasoning engine. Each phase is independently valuable:
+
+Phase 1 delivers the zero-code domain addition that's currently missing
+
+Phase 2 enables rich multi-modal outputs
+
+Phase 3 creates reusable primitives that unlock future capabilities
+
+Phase 4 adds true intelligence with Mastra agents
+
+Phase 5 achieves autonomous capability discovery
+
+The architecture is designed for incremental adoption—you can stop at any phase and have a working system. The reasoning agent in Phase 4 can use tools from Phase 3 without requiring Phase 5. The output generators from Phase 2 continue to work alongside the agent.
+
+The key architectural insight is that intelligence emerges from composition, not special-case code. By building a rich tool library and an agent that can compose them, you solve not just the immediate use cases (Fringe itineraries, train travel) but all future reasoning tasks without additional development.
