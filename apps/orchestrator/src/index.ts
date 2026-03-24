@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import { queryRouter } from "./query";
 import { loadDomains } from "./domains/registry";
-import { loadAvailability } from "./availability";
 import { setDefaultResultOrder } from "dns";
 setDefaultResultOrder("ipv4first");
 import { exportRouter } from "./export";
@@ -12,12 +11,8 @@ import { workspaceRouter } from "./workspace";
 import { registerDomainEmbeddings } from "./semantic/classifier";
 import { prisma } from "./db";
 
-loadAvailability(
-  "police-uk",
-  "https://data.police.uk/api/crimes-street-dates",
-  (data) => (data as { date: string }[]).map((e) => e.date),
-);
 
+loadDomains();
 checkRedisHealth().then((healthy) => {
   if (!healthy) {
     console.warn(
@@ -29,7 +24,7 @@ checkRedisHealth().then((healthy) => {
 const app = express();
 const PORT = process.env.PORT ?? 3001;
 
-loadDomains();
+
 
 if (process.env.DEEPSEEK_API_KEY) {
   Promise.all([
@@ -86,6 +81,11 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`dredge orchestrator running on http://localhost:${PORT}`);
-});
+async function start() {
+  await loadDomains();
+  checkRedisHealth().then(...);
+  app.listen(PORT, () => {
+    console.log(`dredge orchestrator running on http://localhost:${PORT}`);
+  });
+}
+start().catch(console.error);

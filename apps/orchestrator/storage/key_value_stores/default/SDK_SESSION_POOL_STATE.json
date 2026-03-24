@@ -1,0 +1,146 @@
+{
+  "usableSessionsCount": 2,
+  "retiredSessionsCount": 0,
+  "sessions": [
+    {
+      "id": "session_l3br3A3QHn",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.1",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-03-23T15:55:28.407Z",
+      "createdAt": "2026-03-23T15:05:28.407Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_jTnmsd7Qnt",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.1",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": [
+          {
+            "key": "MUID",
+            "value": "1F62DD9943B8637A0746CABC426B6266",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.106Z",
+            "lastAccessed": "2026-03-23T15:05:37.106Z"
+          },
+          {
+            "key": "MUIDB",
+            "value": "1F62DD9943B8637A0746CABC426B6266",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "www.bing.com",
+            "path": "/",
+            "httpOnly": true,
+            "hostOnly": true,
+            "creation": "2026-03-23T15:05:37.109Z",
+            "lastAccessed": "2026-03-23T15:05:37.109Z"
+          },
+          {
+            "key": "_EDGE_S",
+            "value": "F=1&SID=0CE180962B746F9102B997B32AA76E88",
+            "expires": "2026-03-23T15:55:37.104Z",
+            "domain": "bing.com",
+            "path": "/",
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.109Z",
+            "lastAccessed": "2026-03-23T15:05:37.109Z"
+          },
+          {
+            "key": "_EDGE_V",
+            "value": "1",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "bing.com",
+            "path": "/",
+            "httpOnly": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          },
+          {
+            "key": "SRCHD",
+            "value": "AF=NOFORM",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          },
+          {
+            "key": "SRCHUID",
+            "value": "V=2&GUID=38ABF14EEF7340A086B9DEBEEBD17F05&dmnchg=1",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          },
+          {
+            "key": "SRCHUSR",
+            "value": "DOB=20260323",
+            "expires": "2027-04-17T15:05:36.651Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          },
+          {
+            "key": "_SS",
+            "value": "SID=0CE180962B746F9102B997B32AA76E88",
+            "expires": "2026-03-23T15:55:37.104Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          },
+          {
+            "key": "SRCHHPGUSR",
+            "value": "V=CfDJ8HAK7eZCYw5BifHFeUHnkJE0S9FY0W8xFdmPNP9XlFxNeA5bHtn248xIkFDqdyTBGUeD4XZrS-uBp3bgv4D7z8FTdkBZrXOLMjqlrzaL-_LHYOdHG9XjBdEEq8rYdhvBNYyeAfliRgr0a31viYfR-OI&SRCHLANG=en&HV=1774278337&HVE=CfDJ8HAK7eZCYw5BifHFeUHnkJHaFGUhO-T-rt5eGTReyuqcgPE7wNyxJ7aYiOu0yGhIPhTyMhw-DdriTyA1hsGwZeGT4YwUvJAs078VVi0Z_pHZnmAEu01zgE0Qf2HrMV5L1zPde-cy2O_3h7Zl2m4GUrxFcQeNUQl3CvJzEv5MKAeTb0-AIsDkvad4sgT1Y-FsFg",
+            "expires": "2026-03-23T15:55:37.104Z",
+            "domain": "bing.com",
+            "path": "/",
+            "secure": true,
+            "hostOnly": false,
+            "creation": "2026-03-23T15:05:37.111Z",
+            "lastAccessed": "2026-03-23T15:05:37.111Z"
+          }
+        ]
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-03-23T15:55:28.409Z",
+      "createdAt": "2026-03-23T15:05:28.409Z",
+      "usageCount": 1,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    }
+  ]
+}

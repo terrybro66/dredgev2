@@ -59,41 +59,8 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     return res.status(400).json(err);
   }
 
-  const intentKeywords = [
-    "weather",
-    "temperature",
-    "forecast",
-    "rain",
-    "wind",
-    "precipitation",
-  ];
-  const weatherMatch = intentKeywords.some((k) =>
-    text.toLowerCase().includes(k),
-  );
+  let intent: string | undefined;
 
-  const crimeKeywords = [
-    "crime",
-    "burglary",
-    "burglaries",
-    "theft",
-    "robbery",
-    "drug",
-    "assault",
-    "violence",
-    "violent",
-    "antisocial",
-    "anti-social",
-    "criminal",
-    "offence",
-    "offences",
-    "incident",
-    "incidents",
-  ];
-  const crimeMatch = crimeKeywords.some((k) => text.toLowerCase().includes(k));
-
-  let intent = weatherMatch ? "weather" : crimeMatch ? "crime" : undefined;
-
-  // Phase 10 — use semantic classifier if enabled, fall back to keyword matching
   if (classifyIntent !== null) {
     try {
       const classified = await classifyIntent(text, prisma);
@@ -109,10 +76,10 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
         );
       }
     } catch {
-      // classifier failure is non-fatal — fall back to keyword matching
+      // classifier failure is non-fatal — intent remains undefined, triggering discovery
     }
   }
-  const viz_hint = deriveVizHint(plan, text, intent ?? "crime");
+  const viz_hint = deriveVizHint(plan, text, intent ?? "unknown");
   const months = expandDateRange(plan.date_from, plan.date_to);
 
   return res.json({

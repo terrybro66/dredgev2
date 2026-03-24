@@ -247,9 +247,12 @@ describe("POST /query/parse", () => {
       viz_hint: "map",
       resolved_location: "Cambridge, Cambridgeshire, England",
       country_code: "GB",
-      intent: "crime",
+      // intent is undefined when classifier confidence is below threshold
+      // and keyword matching has been removed — the execute endpoint receives
+      // it as undefined and triggers domain lookup or discovery accordingly
       months: ["2024-01"],
     });
+    expect(res.body.intent).toBeUndefined();
   });
 
   it("does not write to the database", async () => {
@@ -549,7 +552,22 @@ describe("cache, job tracking, and routing", () => {
     expect(res.body.country_code).toBe("GB");
   });
 
-  it("returns intent in parse payload", async () => {
+  it("returns undefined intent when classifier confidence is below threshold", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    // keyword matching removed — classifier mock returns confidence: 0
+    // so intent falls through to undefined rather than defaulting to "crime"
+    expect(res.body.intent).toBeUndefined();
+  });
+
+  it("returns classified intent when classifier confidence meets threshold", async () => {
+    mockClassifyIntent.mockResolvedValue({
+      confidence: 0.9,
+      domain: "crime-uk",
+      intent: "crime",
+    });
     const app = buildApp();
     const res = await request(app)
       .post("/query/parse")

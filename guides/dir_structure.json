@@ -1,0 +1,810 @@
+{
+  "name": "dredgev2",
+  "path": "/Users/terrybroughton/work/dredgev2",
+  "type": "directory",
+  "children": [
+    {
+      "name": ".turbo",
+      "type": "folder"
+    },
+    {
+      "name": "apps",
+      "type": "folder",
+      "children": [
+        {
+          "name": "orchestrator",
+          "type": "folder",
+          "children": [
+            {
+              "name": "dotenv",
+              "type": "folder"
+            },
+            {
+              "name": "src",
+              "type": "folder",
+              "children": [
+                {
+                  "name": "__mocks__",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "prisma.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "setup.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "__tests__",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "crime",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "fetcher.test.ts",
+                          "type": "file"
+                        },
+                        {
+                          "name": "intent.test.ts",
+                          "type": "file"
+                        },
+                        {
+                          "name": "store.test.ts",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "aggregation.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "availability.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "browser-discovery.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "cache-ttl.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "connection-pooling.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "database-v5.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "db.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "deduplication.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "domain-discovery.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "embedding.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "execution-model.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "export.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "followups.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "generic-adapter.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "geocoder.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "index.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "providers.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "query.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "rate-limiter.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "recovery.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "redis.integration.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "redis.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "registry.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "scheduler.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "schema.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "schemas-weather.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "search.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "semantic-classifier.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "shadow-adapter.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "source-tag.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "startup.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "weather-adapter.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "workspace.test.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "agent",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "search",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "catalogue.ts",
+                          "type": "file"
+                        },
+                        {
+                          "name": "serp.ts",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "workflows",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "domain-discovery-workflow.ts",
+                          "type": "file"
+                        },
+                        {
+                          "name": "shadow-recovery.ts",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "domain-discovery.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "shadow-adapter.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "crime",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "fetcher.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "index.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "intent.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "recovery.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "store.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "domains",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "crime-uk.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "generic-adapter.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "registry.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "weather.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "enrichment",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "deduplication.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "scheduler.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "source-tag.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "providers",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "csv-provider.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "pdf-provider.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "rest-provider.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "types.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "xlsx-provider.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "scripts",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "scrape.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "semantic",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "classifier.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "embedding.ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "availability.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "db.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "execution-model.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "export.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "followups.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "geocoder.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "index.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "query.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "rateLimiter.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "redis.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "schema.ts",
+                  "type": "file"
+                },
+                {
+                  "name": "workspace.ts",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "storage",
+              "type": "folder",
+              "children": [
+                {
+                  "name": "key_value_stores",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "default",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "SDK_CRAWLER_STATISTICS_0.json",
+                          "type": "file"
+                        },
+                        {
+                          "name": "SDK_SESSION_POOL_STATE.json",
+                          "type": "file"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "request_queues",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "default",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "uQJEmMwZ5HZhB6l.json",
+                          "type": "file"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "package.json",
+              "type": "file"
+            },
+            {
+              "name": "tsconfig.json",
+              "type": "file"
+            },
+            {
+              "name": "vitest.config.ts",
+              "type": "file"
+            }
+          ]
+        },
+        {
+          "name": "web",
+          "type": "folder",
+          "children": [
+            {
+              "name": "src",
+              "type": "folder",
+              "children": [
+                {
+                  "name": "__tests__",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "WorkspacesPanel.test.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "frontend-v5.test.tsx",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "components",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "IntentConfirmation.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "IntentError.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "QueryAutocomplete.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "QueryHistory.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "QueryInput.css",
+                      "type": "file"
+                    },
+                    {
+                      "name": "QueryInput.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "ResultRenderer.tsx",
+                      "type": "file"
+                    },
+                    {
+                      "name": "WorkspacesPanel.tsx",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "App.tsx",
+                  "type": "file"
+                },
+                {
+                  "name": "main.tsx",
+                  "type": "file"
+                },
+                {
+                  "name": "test-setup.ts",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "index.html",
+              "type": "file"
+            },
+            {
+              "name": "package.json",
+              "type": "file"
+            },
+            {
+              "name": "vite.config.ts",
+              "type": "file"
+            },
+            {
+              "name": "vitest.config.ts",
+              "type": "file"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "docker",
+      "type": "folder",
+      "children": [
+        {
+          "name": "Dockerfile.postgres",
+          "type": "file"
+        }
+      ]
+    },
+    {
+      "name": "guides",
+      "type": "folder",
+      "children": [
+        {
+          "name": "DREDGE_BLUEPRINT.md",
+          "type": "file"
+        },
+        {
+          "name": "DREDGE_DESIGN_SPEC.md",
+          "type": "file"
+        },
+        {
+          "name": "diagrams.md",
+          "type": "file"
+        },
+        {
+          "name": "dir_structure.json",
+          "type": "file"
+        }
+      ]
+    },
+    {
+      "name": "packages",
+      "type": "folder",
+      "children": [
+        {
+          "name": "database",
+          "type": "folder",
+          "children": [
+            {
+              "name": "prisma",
+              "type": "folder",
+              "children": [
+                {
+                  "name": "migrations",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "20260311201635_first",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260312161958_v4_cache_geocoder_cache_query_jobs",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260313104135_add_api_availability_and_fallback_fields",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260315013902_add_postgis",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260316094956_shadow_adapter",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260316120029_domain_discovery",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260316132002_execution_model",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260316204719_phase_10_domain_embeddings",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "20260316213619_phase_11_workspaces",
+                      "type": "folder",
+                      "children": [
+                        {
+                          "name": "migration.sql",
+                          "type": "file"
+                        }
+                      ]
+                    },
+                    {
+                      "name": "migration_lock.toml",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "schema.prisma",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "index.ts",
+              "type": "file"
+            },
+            {
+              "name": "package.json",
+              "type": "file"
+            }
+          ]
+        },
+        {
+          "name": "schemas",
+          "type": "folder",
+          "children": [
+            {
+              "name": "src",
+              "type": "folder",
+              "children": [
+                {
+                  "name": "__tests__",
+                  "type": "folder",
+                  "children": [
+                    {
+                      "name": "schemas-v5.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "schemas-weather.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "schemas.test.ts",
+                      "type": "file"
+                    },
+                    {
+                      "name": "ts",
+                      "type": "file"
+                    }
+                  ]
+                },
+                {
+                  "name": "index.ts",
+                  "type": "file"
+                }
+              ]
+            },
+            {
+              "name": "package.json",
+              "type": "file"
+            },
+            {
+              "name": "tsconfig.json",
+              "type": "file"
+            },
+            {
+              "name": "tsconfig.test.json",
+              "type": "file"
+            },
+            {
+              "name": "vitest.config.ts",
+              "type": "file"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": ".env.example",
+      "type": "file"
+    },
+    {
+      "name": ".gitignore",
+      "type": "file"
+    },
+    {
+      "name": "docker-compose.yml",
+      "type": "file"
+    },
+    {
+      "name": "dredge-scaffold.sh",
+      "type": "file"
+    },
+    {
+      "name": "package-lock.json",
+      "type": "file"
+    },
+    {
+      "name": "package.json",
+      "type": "file"
+    },
+    {
+      "name": "smoketest.sh",
+      "type": "file"
+    },
+    {
+      "name": "turbo.json",
+      "type": "file"
+    }
+  ],
+  "metadata": {
+    "generated": "2026-03-23T15:36:40.702Z",
+    "generator": "FileTree Pro Extension",
+    "version": "0.2.0",
+    "showIcons": false,
+    "maxDepth": 10
+  }
+}

@@ -1,6 +1,6 @@
 import { DomainConfig, FallbackInfo } from "@dredge/schemas";
-import { crimeUkAdapter } from "./crime-uk";
-import { weatherAdapter } from "./weather";
+import { crimeUkAdapter } from "./crime-uk/index";
+import { weatherAdapter } from "./weather/index";
 
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
@@ -18,6 +18,7 @@ export interface DomainAdapter {
     locationArg: string,
     prisma: any,
   ) => Promise<{ data: unknown[]; fallback: FallbackInfo } | null>;
+  onLoad?: () => void | Promise<void>;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -46,9 +47,14 @@ export function getDomainByName(name: string): DomainAdapter | undefined {
   return registry.get(name);
 }
 
-export function loadDomains(): void {
-  registerDomain(crimeUkAdapter);
-  registerDomain(weatherAdapter);
+export async function loadDomains(): Promise<void> {
+  const adapters = [crimeUkAdapter, weatherAdapter];
+  for (const adapter of adapters) {
+    registerDomain(adapter);
+    if (adapter.onLoad) {
+      await adapter.onLoad();
+    }
+  }
 }
 
 export function clearRegistry(): void {
