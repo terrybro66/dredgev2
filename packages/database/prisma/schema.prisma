@@ -278,7 +278,7 @@ enum DiscoveredBy {
 }
 
 model DataSource {
-  id               String       @id @default(cuid())
+  id               String        @id @default(cuid())
   domainName       String
   name             String
   url              String
@@ -286,14 +286,17 @@ model DataSource {
   extractionPrompt String?
   fieldMap         Json
   refreshPolicy    RefreshPolicy
-  storeResults     Boolean      @default(true)
-  confidence       Float        @default(1.0)
-  enabled          Boolean      @default(true)
-  discoveredBy     DiscoveredBy @default(manual)
+  storeResults     Boolean       @default(true)
+  confidence       Float         @default(1.0)
+  enabled          Boolean       @default(true)
+  discoveredBy     DiscoveredBy  @default(manual)
   approvedAt       DateTime?
   lastFetchedAt    DateTime?
   lastRowCount     Int?
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime      @default(now())
+
+  @@unique([domainName, url])
+  @@map("data_sources")
 }
 
 model QueryResult {
