@@ -329,36 +329,42 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
 
     const store_start = Date.now();
-    if (rows.length > 0) {
-      await evolveSchema(
-        prisma,
-        adapter.config.tableName,
-        rows[0] as Record<string, unknown>,
-        queryRecord.id,
-        adapter.config.name,
-      );
-    }
+    const isEphemeral = adapter.config.storeResults === false;
 
-    await adapter.storeResults(queryRecord.id, rows, prisma);
+    if (!isEphemeral) {
+      if (rows.length > 0) {
+        await evolveSchema(
+          prisma,
+          adapter.config.tableName,
+          rows[0] as Record<string, unknown>,
+          queryRecord.id,
+          adapter.config.name,
+        );
+      }
+      await adapter.storeResults(queryRecord.id, rows, prisma);
+    }
     const store_ms = Date.now() - store_start;
 
-    // Phase 8.5 — seal an immutable snapshot for this execution
-    await createSnapshot({
-      queryId: queryRecord.id,
-      sourceSet: adapter.config.sources?.map((s) => s.url) ?? [
-        adapter.config.apiUrl,
-      ],
-      schemaVersion: "1.0",
-      rows,
-      prisma,
-    });
+    if (!isEphemeral) {
+      await createSnapshot({
+        queryId: queryRecord.id,
+        sourceSet: adapter.config.sources?.map((s) => s.url) ?? [
+          adapter.config.apiUrl,
+        ],
+        schemaVersion: "1.0",
+        rows,
+        prisma,
+      });
+    }
 
     let aggregated = false;
     let storedResults: unknown[];
 
-    if (viz_hint === "map" || viz_hint === "heatmap") {
+    if (isEphemeral) {
+      storedResults = rows;
+    } else if (viz_hint === "map" || viz_hint === "heatmap") {
       const bins = await prisma.$queryRaw<AggregatedBin[]>`
- SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
+SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
   SELECT 
     ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
@@ -369,8 +375,7 @@ FROM (
     AND longitude IS NOT NULL
   GROUP BY ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002)
 ) grouped
-  `;
-
+`;
       storedResults = bins;
       aggregated = true;
     } else {
@@ -383,14 +388,17 @@ FROM (
           : {}),
       });
     }
-    await prisma.queryCache.create({
-      data: {
-        query_hash,
-        domain: adapter.config.name,
-        result_count: storedResults.length,
-        results: storedResults as any,
-      },
-    });
+
+    if (!isEphemeral) {
+      await prisma.queryCache.create({
+        data: {
+          query_hash,
+          domain: adapter.config.name,
+          result_count: storedResults.length,
+          results: storedResults as any,
+        },
+      });
+    }
     if (viz_hint === "bar") {
       // Group by month for the bar chart — don't slice raw rows
       const byMonth: Record<string, number> = {};
