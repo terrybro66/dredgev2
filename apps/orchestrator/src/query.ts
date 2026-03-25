@@ -19,7 +19,7 @@ import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
-import { findCuratedSource } from "./curated-registry";
+import { findCuratedSource, resolveLocationSlug } from "./curated-registry";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 
@@ -156,9 +156,29 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           _locationArg: string,
         ): Promise<unknown[]> {
           try {
-            const provider = createRestProvider({ url: source.url });
+            // Resolve {location} placeholder if present
+            let fetchUrl = source.url;
+            if (
+              fetchUrl.includes("{location}") &&
+              (source as any).locationSlugMap
+            ) {
+              const slug = resolveLocationSlug(
+                resolved_location,
+                (source as any).locationSlugMap,
+              );
+              if (slug) {
+                fetchUrl = fetchUrl.replace("{location}", slug);
+              } else {
+                console.warn(
+                  `[curated] no slug found for "${resolved_location}" in ${source.name}`,
+                );
+                return [];
+              }
+            }
+
+            const provider = createRestProvider({ url: fetchUrl });
             const rows = await provider.fetchRows();
-            return tagRows(rows as Record<string, unknown>[], source.url);
+            return tagRows(rows as Record<string, unknown>[], fetchUrl);
           } catch {
             return [];
           }

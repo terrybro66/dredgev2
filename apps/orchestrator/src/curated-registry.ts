@@ -36,6 +36,7 @@ export interface CuratedSource {
   refreshPolicy: "realtime" | "daily" | "weekly" | "static";
   /** Maps source-specific field names to canonical query_results column names */
   fieldMap: Record<string, string>;
+  locationSlugMap?: Record<string, string>;
 }
 
 export const CURATED_SOURCES: CuratedSource[] = [
@@ -44,15 +45,19 @@ export const CURATED_SOURCES: CuratedSource[] = [
     intent: "cinema listings",
     countryCodes: ["GB"],
     name: "Odeon UK",
-    url: "https://www.odeon.co.uk/api/showtimes",
-    type: "rest",
+    url: "https://www.odeon.co.uk/cinemas/{location}/",
+    type: "scrape" as const,
+    extractionPrompt:
+      "Extract all movie titles and showtimes currently showing.",
     storeResults: false,
     refreshPolicy: "realtime",
-    fieldMap: {
-      title: "description",
-      showtime: "date",
-      certificate: "extras.certificate",
-      runtime: "extras.runtime_mins",
+    fieldMap: { title: "description", showtime: "date" },
+    locationSlugMap: {
+      braehead: "braehead",
+      glasgow: "glasgow-fort",
+      edinburgh: "edinburgh",
+      birmingham: "birmingham",
+      london: "west-end",
     },
   },
   {
@@ -141,6 +146,18 @@ export const CURATED_SOURCES: CuratedSource[] = [
  *
  * Returns null if no match is found.
  */
+
+export function resolveLocationSlug(
+  resolvedLocation: string,
+  slugMap: Record<string, string>,
+): string | null {
+  const lower = resolvedLocation.toLowerCase();
+  for (const [key, slug] of Object.entries(slugMap)) {
+    if (lower.includes(key.toLowerCase())) return slug;
+  }
+  return null;
+}
+
 export function findCuratedSource(
   intent: string,
   countryCode: string,
