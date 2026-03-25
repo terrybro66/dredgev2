@@ -369,7 +369,7 @@ FROM (
   SELECT 
     ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
     COUNT(*)::int AS count
-  FROM query_results
+  FROM crime_results
   WHERE query_id = ${queryRecord.id}
     AND latitude IS NOT NULL
     AND longitude IS NOT NULL
