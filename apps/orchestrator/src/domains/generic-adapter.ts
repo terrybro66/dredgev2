@@ -6,6 +6,7 @@ import { createPdfProvider } from "../providers/pdf-provider";
 import { createRestProvider, restGet } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
 import { deduplicateRows } from "../enrichment/deduplication";
+import { scoreSource } from "../enrichment/source-scoring";
 import { prisma } from "../db";
 
 export function createGenericAdapter(
@@ -16,10 +17,9 @@ export function createGenericAdapter(
     config,
 
     async fetchData(_plan: unknown, _locationArg: string): Promise<unknown[]> {
-      // Load enabled sources from the DB. Fall back to the static config.sources
-      // array for adapters that predate the DataSource model.
       const dbSources = await prisma.dataSource.findMany({
         where: { domainName: config.name, enabled: true },
+        orderBy: { confidence: "desc" },
       });
 
       const sources = dbSources.length > 0 ? dbSources : (config.sources ?? []);
@@ -31,48 +31,82 @@ export function createGenericAdapter(
           let rows: unknown[] = [];
           const url = source.url;
           const type = source.type;
+          let fetchSuccess = false;
 
-          switch (type) {
-            case "rest": {
-              const provider = createRestProvider({ url });
-              rows = await provider.fetchRows();
-              break;
+          try {
+            switch (type) {
+              case "rest": {
+                const provider = createRestProvider({ url });
+                rows = await provider.fetchRows();
+                break;
+              }
+              case "csv": {
+                const text = await restGet<string>({ url });
+                const provider = createCsvProvider({ content: text });
+                rows = await provider.fetchRows();
+                break;
+              }
+              case "xlsx": {
+                const buffer = await restGet<Buffer>({ url });
+                const provider = createXlsxProvider({ buffer });
+                rows = await provider.fetchRows();
+                break;
+              }
+              case "scrape": {
+                const { createScrapeProvider } =
+                  await import("../providers/scrape-provider");
+                const extractionPrompt =
+                  (source as any).extractionPrompt ??
+                  `Extract all data items from this page at ${url}`;
+                const provider = createScrapeProvider({ extractionPrompt });
+                rows = await provider.fetchRows(url);
+                break;
+              }
+              case "pdf": {
+                const buffer = await restGet<Buffer>({ url });
+                const provider = createPdfProvider({
+                  buffer,
+                  extractRows: (text) =>
+                    text
+                      .split("\n")
+                      .filter(Boolean)
+                      .map((line) => ({ raw: line })),
+                });
+                rows = await provider.fetchRows();
+                break;
+              }
             }
-            case "csv": {
-              const text = await restGet<string>({ url });
-              const provider = createCsvProvider({ content: text });
-              rows = await provider.fetchRows();
-              break;
-            }
-            case "xlsx": {
-              const buffer = await restGet<Buffer>({ url });
-              const provider = createXlsxProvider({ buffer });
-              rows = await provider.fetchRows();
-              break;
-            }
-            case "scrape": {
-              const { createScrapeProvider } =
-                await import("../providers/scrape-provider");
-              const extractionPrompt =
-                (source as any).extractionPrompt ??
-                `Extract all data items from this page at ${url}`;
-              const provider = createScrapeProvider({ extractionPrompt });
-              rows = await provider.fetchRows(url);
-              break;
-            }
-            case "pdf": {
-              const buffer = await restGet<Buffer>({ url });
-              const provider = createPdfProvider({
-                buffer,
-                extractRows: (text) =>
-                  text
-                    .split("\n")
-                    .filter(Boolean)
-                    .map((line) => ({ raw: line })),
+            fetchSuccess = true;
+          } catch (err) {
+            console.warn(
+              `[GenericAdapter] fetch failed for ${url}:`,
+              (err as Error).message,
+            );
+            rows = [];
+            fetchSuccess = false;
+          }
+
+          if ((source as any).id) {
+            const newConfidence = scoreSource({
+              current: (source as any).confidence ?? 1.0,
+              success: fetchSuccess,
+              rowCount: rows.length,
+            });
+            prisma.dataSource
+              .update({
+                where: { id: (source as any).id },
+                data: {
+                  confidence: newConfidence,
+                  lastFetchedAt: new Date(),
+                  lastRowCount: rows.length,
+                },
+              })
+              .catch((err: Error) => {
+                console.warn(
+                  "[GenericAdapter] score update failed:",
+                  err.message,
+                );
               });
-              rows = await provider.fetchRows();
-              break;
-            }
           }
 
           return tagRows(rows, url);
@@ -95,7 +129,6 @@ export function createGenericAdapter(
       prisma: any,
     ): Promise<void> {
       if (rows.length === 0) return;
-
       await prisma.queryResult.createMany({
         data: (rows as Record<string, unknown>[]).map((row) => ({
           domain_name: config.name,

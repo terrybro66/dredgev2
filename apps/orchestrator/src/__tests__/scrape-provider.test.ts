@@ -263,6 +263,7 @@ const { mockPrismaForAdapter } = vi.hoisted(() => ({
   mockPrismaForAdapter: {
     dataSource: {
       findMany: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
     },
   },
 }));
