@@ -50,6 +50,16 @@ export function createGenericAdapter(
               rows = await provider.fetchRows();
               break;
             }
+            case "scrape": {
+              const { createScrapeProvider } =
+                await import("../providers/scrape-provider");
+              const extractionPrompt =
+                (source as any).extractionPrompt ??
+                `Extract all data items from this page at ${url}`;
+              const provider = createScrapeProvider({ extractionPrompt });
+              rows = await provider.fetchRows(url);
+              break;
+            }
             case "pdf": {
               const buffer = await restGet<Buffer>({ url });
               const provider = createPdfProvider({

@@ -1,0 +1,9 @@
+{
+	"id": "gZgK7ZslU56aoIs",
+	"json": "{\"id\":\"gZgK7ZslU56aoIs\",\"url\":\"https://www.odeon.co.uk/cinemas/braehead/\",\"uniqueKey\":\"https://www.odeon.co.uk/cinemas/braehead\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":1,\"errorMessages\":[\"Error: Stagehand browser launch failed: Connection timeout: Timed out waiting for /json/version on port 54362  (last error: Not a direct file)\\nExecutable path: default\\nModel: openai/gpt-4.1-mini\\nNote: OpenAI models require apiKey option or OPENAI_API_KEY environment variable.\\n    at StagehandPlugin._augmentLaunchError (/Users/terrybroughton/work/dredgev2/node_modules/@crawlee/stagehand/internals/stagehand-plugin.js:169:16)\\n    at StagehandPlugin._launch (/Users/terrybroughton/work/dredgev2/node_modules/@crawlee/stagehand/internals/stagehand-plugin.js:102:41)\\n    at BrowserPool._launchBrowser (/Users/terrybroughton/work/dredgev2/node_modules/@crawlee/browser-pool/browser-pool.js:496:29)\\n    at /Users/terrybroughton/work/dredgev2/node_modules/@crawlee/browser-pool/browser-pool.js:293:37\"],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":5}}}",
+	"method": "GET",
+	"orderNo": 1774402714331,
+	"retryCount": 1,
+	"uniqueKey": "https://www.odeon.co.uk/cinemas/braehead",
+	"url": "https://www.odeon.co.uk/cinemas/braehead/"
+}
