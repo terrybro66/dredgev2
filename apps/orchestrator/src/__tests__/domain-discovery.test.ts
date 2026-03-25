@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock the workflow module so tests never touch real Mastra/Stagehand/network calls.
 // discoverSources returns an empty candidates array by default — individual tests
@@ -9,6 +9,10 @@ vi.mock("../agent/workflows/domain-discovery-workflow", () => ({
   proposeDomainConfig: vi.fn().mockResolvedValue(null),
 }));
 
+afterEach(() => {
+  process.env.DOMAIN_DISCOVERY_ENABLED = "true";
+});
+
 describe("DomainDiscoveryPipeline", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -16,7 +20,7 @@ describe("DomainDiscoveryPipeline", () => {
 
   describe("isEnabled()", () => {
     it("returns false when DOMAIN_DISCOVERY_ENABLED is not set", async () => {
-      delete process.env.DOMAIN_DISCOVERY_ENABLED;
+      process.env.DOMAIN_DISCOVERY_ENABLED = "false";
       const { domainDiscovery } = await import("../agent/domain-discovery");
       expect(domainDiscovery.isEnabled()).toBe(false);
     });

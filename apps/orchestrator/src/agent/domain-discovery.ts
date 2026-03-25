@@ -3,6 +3,8 @@ import {
   sampleSource,
   proposeDomainConfig,
 } from "./workflows/domain-discovery-workflow";
+import { shouldAutoApprove, autoApprovalReason } from "./auto-approval";
+import { registerDiscoveredDomain } from "./registration";
 
 export interface DiscoveryContext {
   intent: string;
@@ -87,7 +89,6 @@ export const domainDiscovery = {
         console.log(
           JSON.stringify({ event: "discovery_propose_failed", url: top.url }),
         );
-
         await prisma.domainDiscovery.update({
           where: { id: record.id },
           data: { status: "requires_review", completedAt: new Date() },
@@ -95,7 +96,66 @@ export const domainDiscovery = {
         return null;
       }
 
-      // Store for human review — never auto-register
+      // Step 4 — check auto-approval criteria
+      const autoApprove = shouldAutoApprove({
+        confidence: proposed.confidence,
+        providerType: proposed.providerType,
+        apiUrl: top.url,
+      });
+
+      const reason = autoApprovalReason({
+        confidence: proposed.confidence,
+        providerType: proposed.providerType,
+        apiUrl: top.url,
+      });
+
+      if (autoApprove) {
+        try {
+          await registerDiscoveredDomain({
+            discoveryId: record.id,
+            proposedConfig: proposed as any,
+            prisma,
+          });
+
+          await prisma.domainDiscovery.update({
+            where: { id: record.id },
+            data: {
+              status: "registered",
+              approved: true,
+              proposed_config: proposed as any,
+              sample_rows: sampled.rows as any,
+              confidence: proposed.confidence,
+              store_results: proposed.storeResults,
+              refresh_policy: proposed.refreshPolicy,
+              ephemeral_rationale: proposed.ephemeralRationale,
+              completedAt: new Date(),
+            },
+          });
+
+          console.log(
+            JSON.stringify({
+              event: "domain_auto_approved",
+              id: record.id,
+              proposed_name: proposed.name,
+              confidence: proposed.confidence,
+              reason,
+            }),
+          );
+
+          return null;
+        } catch (err: any) {
+          console.warn(
+            JSON.stringify({
+              event: "domain_auto_approval_failed",
+              id: record.id,
+              error: err.message,
+            }),
+          );
+          // Fall through to requires_review on auto-approval failure
+        }
+      }
+
+      // Store for human review
       await prisma.domainDiscovery.update({
         where: { id: record.id },
         data: {
@@ -118,10 +178,11 @@ export const domainDiscovery = {
           confidence: proposed.confidence,
           store_results: proposed.storeResults,
           refresh_policy: proposed.refreshPolicy,
+          auto_approve_reason: reason,
         }),
       );
 
-      return null; // Always null — registration requires human approval via approve()
+      return null;
     } catch (err: any) {
       console.error(
         JSON.stringify({
