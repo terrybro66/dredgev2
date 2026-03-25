@@ -1,4 +1,4 @@
-export type ProviderType = "rest" | "csv" | "xlsx" | "pdf";
+export type ProviderType = "rest" | "csv" | "xlsx" | "pdf" | "scrape";
 
 export type RefreshPolicy = "realtime" | "daily" | "weekly" | "static";
 
