@@ -109,9 +109,17 @@ describe("QueryPlanSchema", () => {
     expect(result.location).toBe("Cambridge, UK");
   });
 
-  it("rejects an invalid category", () => {
+  it("accepts non-crime category strings for non-crime domains", () => {
+    // category is now a union of CrimeCategorySchema | z.string().min(1)
+    // to allow flood-risk, cinema-listings, etc.
     expect(() =>
       QueryPlanSchema.parse({ ...validQueryPlan, category: "jaywalking" }),
+    ).not.toThrow();
+  });
+
+  it("rejects an empty category string", () => {
+    expect(() =>
+      QueryPlanSchema.parse({ ...validQueryPlan, category: "" }),
     ).toThrow();
   });
 
