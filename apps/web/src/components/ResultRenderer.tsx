@@ -56,12 +56,17 @@ const ExecuteResultSchema = z.object({
     date_to: z.string(),
     location: z.string(),
   }),
+  ephemeral: z.boolean().optional().default(false),
   poly: z.string(),
   viz_hint: VizHintSchema,
   resolved_location: z.string(),
   count: z.number(),
   months_fetched: z.array(z.string()),
-  results: z.union([z.array(AggregatedBinSchema), z.array(CrimeResultSchema)]),
+  results: z.union([
+    z.array(AggregatedBinSchema),
+    z.array(CrimeResultSchema),
+    z.array(z.record(z.string(), z.unknown())), // catch-all for non-crime results
+  ]),
   cache_hit: z.boolean(),
   resultContext: ResultContextSchema.optional(),
   aggregated: z.boolean().optional().default(false),
@@ -184,6 +189,7 @@ function SummaryLine({ result }: { result: ExecuteResult }) {
     months_fetched,
     aggregated,
     cache_hit,
+    ephemeral,
   } = result;
 
   const dateRange =
@@ -203,6 +209,9 @@ function SummaryLine({ result }: { result: ExecuteResult }) {
       </span>
       <div className="summary-badges">
         {aggregated && <span className="badge badge-blue">aggregated</span>}
+        {ephemeral && (
+          <span className="badge badge-green">Live data · not saved</span>
+        )}
         {cache_hit && <span className="badge badge-amber">cached</span>}
       </div>
     </div>
@@ -250,26 +259,28 @@ function BarChart({
 
 // ── TableView ─────────────────────────────────────────────────────────────────
 
-function TableView({ results }: { results: CrimeResult[] }) {
+function TableView({ results }: { results: Record<string, unknown>[] }) {
   const capped = results.slice(0, 50);
+
+  // Derive columns from the first row
+  const columns = capped.length > 0 ? Object.keys(capped[0]).slice(0, 6) : [];
+
   return (
     <div className="table-wrapper">
       <table className="result-table">
         <thead>
           <tr>
-            <th>Category</th>
-            <th>Street</th>
-            <th>Month</th>
-            <th>Outcome</th>
+            {columns.map((col) => (
+              <th key={col}>{col}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {capped.map((r, i) => (
-            <tr key={r.id ?? i}>
-              <td>{formatCategory(r.category)}</td>
-              <td>{r.street ?? "—"}</td>
-              <td>{r.month}</td>
-              <td>{r.outcome_category ?? "—"}</td>
+            <tr key={(r.id as string) ?? i}>
+              {columns.map((col) => (
+                <td key={col}>{r[col] != null ? String(r[col]) : "—"}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -373,7 +384,7 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
     }
 
     // "table" (and any unrecognised hint)
-    return <TableView results={results as CrimeResult[]} />;
+    return <TableView results={results as Record<string, unknown>[]} />;
   }
 
   return (
@@ -658,6 +669,7 @@ const styles = `
     margin: 0;
     line-height: 1.7;
   }
+    .badge-green { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.06); }
 `;
 
 // Inject styles once on module load
