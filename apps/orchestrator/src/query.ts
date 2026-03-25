@@ -197,13 +197,22 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           await prismaClient.queryResult.createMany({
             data: (rows as Record<string, unknown>[]).map((row) => ({
               domain_name: source.name,
-              source_tag: (row.source_tag as string) ?? source.name,
-              date: row.date ? new Date(row.date as string) : null,
+              source_tag:
+                (row._sourceTag as string) ??
+                (row.source_tag as string) ??
+                source.name,
+              date: row.date
+                ? new Date(row.date as string)
+                : row.timeRaised
+                  ? new Date(row.timeRaised as string)
+                  : null,
               lat: ((row.lat ?? row.latitude) as number) ?? null,
               lon: ((row.lon ?? row.longitude) as number) ?? null,
-              location: (row.location as string) ?? null,
+              location:
+                (row.location as string) ?? (row.eaAreaName as string) ?? null,
               description: (row.description as string) ?? null,
-              category: (row.category as string) ?? null,
+              category:
+                (row.category as string) ?? (row.severity as string) ?? null,
               value: (row.value as number) ?? null,
               raw: (row.raw as object) ?? row,
               extras: (row.extras as object) ?? null,
@@ -437,6 +446,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           adapter.config.name,
         );
       }
+      console.log(
+        JSON.stringify({
+          event: "debug_store",
+          rowCount: rows.length,
+          sample: rows[0],
+          isEphemeral,
+        }),
+      );
       await adapter.storeResults(queryRecord.id, rows, prisma);
     }
     const store_ms = Date.now() - store_start;
@@ -459,7 +476,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     if (isEphemeral) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
-      const bins = await prisma.$queryRaw<AggregatedBin[]>`
+      if (adapter.config.tableName === "crime_results") {
+        const bins = await prisma.$queryRaw<AggregatedBin[]>`
 SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
   SELECT
@@ -472,7 +490,15 @@ FROM (
   GROUP BY ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002)
 ) grouped
 `;
-      storedResults = bins;
+        storedResults = bins;
+      } else {
+        // Generic path — reads from query_results using domain_name
+        storedResults = await prisma.queryResult.findMany({
+          where: { domain_name: adapter.config.name },
+          orderBy: { created_at: "desc" },
+          take: 500,
+        });
+      }
       aggregated = true;
     } else {
       storedResults = await (prisma as any)[

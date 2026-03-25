@@ -47,18 +47,11 @@ describe("RestProvider", () => {
     });
 
     const { createRestProvider } = await import("../providers/rest-provider");
-    const provider = createRestProvider({
-      extractRows: (data: unknown) => data as Record<string, unknown>[],
-    });
+    const provider = createRestProvider({ url: restSource.url });
+    const rows = await provider.fetchRows();
 
-    const result = await provider.fetchData(restSource);
-
-    expect(result.rows).toHaveLength(2);
-    expect(result.rows[0]).toEqual({ id: 1 });
-    expect(result.meta.providerType).toBe("rest");
-    expect(result.meta.url).toBe(restSource.url);
-    expect(result.meta.rowCount).toBe(2);
-    expect(result.meta.fetchedAt).toBeInstanceOf(Date);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ id: 1 });
   });
 
   it("throws a ProviderFetchError on HTTP error", async () => {
@@ -68,11 +61,9 @@ describe("RestProvider", () => {
     });
 
     const { createRestProvider } = await import("../providers/rest-provider");
-    const provider = createRestProvider({
-      extractRows: (data: unknown) => data as Record<string, unknown>[],
-    });
+    const provider = createRestProvider({ url: restSource.url });
 
-    await expect(provider.fetchData(restSource)).rejects.toBeInstanceOf(
+    await expect(provider.fetchRows()).rejects.toBeInstanceOf(
       ProviderFetchError,
     );
   });

@@ -6,7 +6,9 @@ export async function getCurrentColumns(
   tableName: string,
 ): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ column_name: string }[]>`
-    SELECT column_name FROM information_schema.columns WHERE table_name = ${tableName}
+    SELECT column_name FROM information_schema.columns 
+    WHERE table_name = ${tableName}
+    AND table_schema = 'public'
   `;
   return rows.map((r: { column_name: string }) => r.column_name);
 }
@@ -41,10 +43,23 @@ export async function evolveSchema(
   if (newKeys.length === 0) return;
 
   for (const key of newKeys) {
+    // Sanitise column name — replace invalid chars with _, ensure starts with letter
+    const sanitisedKey = key
+      .replace(/[^a-z0-9_]/gi, "_")
+      .toLowerCase()
+      .replace(/^[^a-z]+/, "c_")
+      .slice(0, 63);
+
+    if (!sanitisedKey || sanitisedKey === "_") continue;
+
+    // Skip if the sanitised key already exists (raw key may differ from sanitised)
+    if (existingColumns.includes(sanitisedKey)) continue;
+
     const columnType = inferPostgresType(sampleRow[key]);
+
     const op = AddColumnSchema.parse({
       type: "add_column",
-      column: key,
+      column: sanitisedKey,
       columnType,
     });
     await applySchemaOp(prisma, op, triggeredBy, tableName, domain);

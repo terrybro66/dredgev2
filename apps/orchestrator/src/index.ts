@@ -81,6 +81,34 @@ if (process.env.DEEPSEEK_API_KEY) {
       ],
       prisma,
     ),
+    registerDomainEmbeddings(
+      "transport",
+      [
+        "tube status in London",
+        "transport in London",
+        "TfL line status",
+        "is the tube running",
+        "London underground delays",
+        "bus status London",
+        "train delays London",
+        "TfL disruptions",
+      ],
+      prisma,
+    ),
+    registerDomainEmbeddings(
+      "population statistics",
+      [
+        "population of Bristol",
+        "how many people live in Manchester",
+        "UK population statistics",
+        "ONS population estimates",
+        "population data for London",
+        "census data UK",
+        "population growth in Birmingham",
+        "demographic data England",
+      ],
+      prisma,
+    ),
   ])
     .then(() => {
       console.log(JSON.stringify({ event: "embeddings_seeded" }));
