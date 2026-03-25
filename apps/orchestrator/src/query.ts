@@ -10,7 +10,7 @@ import {
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { evolveSchema } from "./schema";
-import { parseIntent, deriveVizHint, expandDateRange } from "./crime/intent";
+import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
 import { getDomainForQuery, DomainAdapter } from "./domains/registry";
 import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";

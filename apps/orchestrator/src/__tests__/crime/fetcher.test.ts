@@ -12,7 +12,7 @@ const { mockExpandDateRange } = vi.hoisted(() => ({
   mockExpandDateRange: vi.fn(),
 }));
 
-vi.mock("../../crime/intent", () => ({
+vi.mock("../../intent", () => ({
   expandDateRange: mockExpandDateRange,
 }));
 
@@ -118,7 +118,7 @@ describe("fetchCrimesForMonth", () => {
 
 describe("fetchCrimes", () => {
   async function setup(months: string[]) {
-    const { expandDateRange } = await import("../../crime/intent");
+    const { expandDateRange } = await import("../../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue(months);
     mockApiResponse();
     return import("../../crime/fetcher");
@@ -147,7 +147,7 @@ describe("fetchCrimes", () => {
   });
 
   it("merges results from all months into a single array", async () => {
-    const { expandDateRange } = await import("../../crime/intent");
+    const { expandDateRange } = await import("../../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",
@@ -162,7 +162,7 @@ describe("fetchCrimes", () => {
 
   it("calls months sequentially, not in parallel", async () => {
     const order: string[] = [];
-    const { expandDateRange } = await import("../../crime/intent");
+    const { expandDateRange } = await import("../../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",
@@ -178,7 +178,7 @@ describe("fetchCrimes", () => {
   });
 
   it("returns combined results in month-ascending order", async () => {
-    const { expandDateRange } = await import("../../crime/intent");
+    const { expandDateRange } = await import("../../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",

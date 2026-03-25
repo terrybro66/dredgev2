@@ -8,7 +8,7 @@ import {
   clearRegistry,
 } from "../domains/registry";
 
-import { deriveVizHint } from "../crime/intent";
+import { deriveVizHint } from "../intent";
 import { DomainConfigSchema } from "@dredge/schemas";
 
 vi.mock("axios");

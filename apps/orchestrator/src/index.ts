@@ -12,7 +12,6 @@ import { registerDomainEmbeddings } from "./semantic/classifier";
 import { prisma } from "./db";
 import { adminRouter } from "./admin/discovery";
 
-loadDomains();
 checkRedisHealth().then((healthy) => {
   if (!healthy) {
     console.warn(

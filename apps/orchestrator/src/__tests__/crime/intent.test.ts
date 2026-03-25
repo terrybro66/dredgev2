@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  parseIntent,
-  deriveVizHint,
-  expandDateRange,
-} from "../../crime/intent";
+import { parseIntent, deriveVizHint, expandDateRange } from "../../intent";
 
 const { mockCreate } = vi.hoisted(() => ({
   mockCreate: vi.fn(),

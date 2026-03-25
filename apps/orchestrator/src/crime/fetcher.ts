@@ -1,7 +1,7 @@
 import axios from "axios";
 import { z } from "zod";
 import { PoliceCrimeSchema, QueryPlan } from "@dredge/schemas";
-import { expandDateRange } from "./intent";
+import { expandDateRange } from "../intent";
 import pLimit from "p-limit";
 
 const POLICE_API_BASE = "https://data.police.uk/api";

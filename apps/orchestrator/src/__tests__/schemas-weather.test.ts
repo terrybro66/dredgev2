@@ -4,7 +4,7 @@ import {
   DomainConfigSchema,
   VizHintSchema,
 } from "@dredge/schemas";
-import { deriveVizHint } from "../crime/intent";
+import { deriveVizHint } from "../intent";
 
 // ── WeatherQueryPlanSchema ────────────────────────────────────────────────────
 
@@ -149,23 +149,59 @@ const CRIME_PLAN = {
 
 describe("deriveVizHint — weather intent", () => {
   it("returns 'dashboard' for a single-day weather query", () => {
-    const plan = { ...WEATHER_PLAN, date_from: "2024-03-01", date_to: "2024-03-01" };
-    expect(deriveVizHint(plan as any, "weather in Edinburgh today", "weather")).toBe("dashboard");
+    const plan = {
+      ...WEATHER_PLAN,
+      date_from: "2024-03-01",
+      date_to: "2024-03-01",
+    };
+    expect(
+      deriveVizHint(plan as any, "weather in Edinburgh today", "weather"),
+    ).toBe("dashboard");
   });
 
   it("returns 'dashboard' for a multi-day weather query", () => {
-    expect(deriveVizHint(WEATHER_PLAN as any, "weather in Edinburgh last week", "weather")).toBe("dashboard");
+    expect(
+      deriveVizHint(
+        WEATHER_PLAN as any,
+        "weather in Edinburgh last week",
+        "weather",
+      ),
+    ).toBe("dashboard");
   });
 
   it("returns 'dashboard' for a 30-day weather query", () => {
-    const plan = { ...WEATHER_PLAN, date_from: "2024-03-01", date_to: "2024-03-30" };
-    expect(deriveVizHint(plan as any, "weather in Edinburgh last month", "weather")).toBe("dashboard");
+    const plan = {
+      ...WEATHER_PLAN,
+      date_from: "2024-03-01",
+      date_to: "2024-03-30",
+    };
+    expect(
+      deriveVizHint(plan as any, "weather in Edinburgh last month", "weather"),
+    ).toBe("dashboard");
   });
 
   it("returns 'dashboard' regardless of raw text content when intent is weather", () => {
-    expect(deriveVizHint(WEATHER_PLAN as any, "list weather in Edinburgh", "weather")).toBe("dashboard");
-    expect(deriveVizHint(WEATHER_PLAN as any, "show me weather in Edinburgh", "weather")).toBe("dashboard");
-    expect(deriveVizHint(WEATHER_PLAN as any, "table of weather in Edinburgh", "weather")).toBe("dashboard");
+    expect(
+      deriveVizHint(
+        WEATHER_PLAN as any,
+        "list weather in Edinburgh",
+        "weather",
+      ),
+    ).toBe("dashboard");
+    expect(
+      deriveVizHint(
+        WEATHER_PLAN as any,
+        "show me weather in Edinburgh",
+        "weather",
+      ),
+    ).toBe("dashboard");
+    expect(
+      deriveVizHint(
+        WEATHER_PLAN as any,
+        "table of weather in Edinburgh",
+        "weather",
+      ),
+    ).toBe("dashboard");
   });
 });
 
@@ -173,26 +209,40 @@ describe("deriveVizHint — weather intent", () => {
 
 describe("deriveVizHint — crime intent (regression)", () => {
   it("returns 'map' for a single-month crime query", () => {
-    expect(deriveVizHint(CRIME_PLAN, "burglaries in Cambridge in January 2024")).toBe("map");
+    expect(
+      deriveVizHint(CRIME_PLAN, "burglaries in Cambridge in January 2024"),
+    ).toBe("map");
   });
 
   it("returns 'bar' for a multi-month crime query", () => {
     const plan = { ...CRIME_PLAN, date_from: "2023-07", date_to: "2024-01" };
-    expect(deriveVizHint(plan, "burglaries in Cambridge last 6 months")).toBe("bar");
+    expect(deriveVizHint(plan, "burglaries in Cambridge last 6 months")).toBe(
+      "bar",
+    );
   });
 
   it("returns 'table' when query contains list keywords", () => {
-    expect(deriveVizHint(CRIME_PLAN, "list burglaries in Cambridge")).toBe("table");
-    expect(deriveVizHint(CRIME_PLAN, "show me burglaries in Cambridge")).toBe("table");
-    expect(deriveVizHint(CRIME_PLAN, "what are the burglaries in Cambridge")).toBe("table");
+    expect(deriveVizHint(CRIME_PLAN, "list burglaries in Cambridge")).toBe(
+      "table",
+    );
+    expect(deriveVizHint(CRIME_PLAN, "show me burglaries in Cambridge")).toBe(
+      "table",
+    );
+    expect(
+      deriveVizHint(CRIME_PLAN, "what are the burglaries in Cambridge"),
+    ).toBe("table");
   });
 
   it("default intent parameter is 'crime' — existing call sites unaffected", () => {
     // Call without intent arg — should behave identically to before
-    expect(deriveVizHint(CRIME_PLAN, "burglaries in Cambridge in January 2024")).toBe("map");
-    expect(deriveVizHint(
-      { ...CRIME_PLAN, date_from: "2023-07", date_to: "2024-01" },
-      "burglaries last 6 months"
-    )).toBe("bar");
+    expect(
+      deriveVizHint(CRIME_PLAN, "burglaries in Cambridge in January 2024"),
+    ).toBe("map");
+    expect(
+      deriveVizHint(
+        { ...CRIME_PLAN, date_from: "2023-07", date_to: "2024-01" },
+        "burglaries last 6 months",
+      ),
+    ).toBe("bar");
   });
 });
