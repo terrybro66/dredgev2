@@ -39,7 +39,7 @@ export { CrimeCategorySchema as CrimeCategory };
 const COORDINATE_PATTERN = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
 
 export const QueryPlanSchema = z.object({
-  category: CrimeCategorySchema,
+  category: z.union([CrimeCategorySchema, z.string().min(1)]),
   date_from: z.string().regex(/^\d{4}-\d{2}$/, "must be YYYY-MM format"),
   date_to: z.string().regex(/^\d{4}-\d{2}$/, "must be YYYY-MM format"),
   location: z

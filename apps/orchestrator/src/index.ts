@@ -43,6 +43,30 @@ if (process.env.DEEPSEEK_API_KEY) {
       prisma,
     ),
     registerDomainEmbeddings(
+      "cinema listings",
+      [
+        "what's on at the cinema",
+        "cinema listings in Bristol",
+        "films showing near me",
+        "what's on at Odeon",
+        "movie times tonight",
+        "films at Vue this weekend",
+      ],
+      prisma,
+    ),
+    registerDomainEmbeddings(
+      "flood risk",
+      [
+        "flood risk in Bristol",
+        "flooding near me",
+        "is my area at risk of flooding",
+        "flood warnings in Somerset",
+        "Environment Agency flood alerts",
+        "river levels near me",
+      ],
+      prisma,
+    ),
+    registerDomainEmbeddings(
       "weather",
       [
         "weather in London",
