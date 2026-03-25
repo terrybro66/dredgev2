@@ -5,12 +5,15 @@
  * live adapter in the domain registry.
  *
  * Block D — ephemeral path (storeResults: false): implemented.
- * Block F — persistent path (storeResults: true): not yet implemented.
+ * Block F — persistent path (storeResults: true): implemented.
  */
 
 import { registerDomain, getDomainByName } from "../domains/registry";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
+import { createGenericAdapter } from "../domains/generic-adapter";
+
+// ── Public interface ──────────────────────────────────────────────────────────
 
 export interface RegisterOptions {
   discoveryId: string;
@@ -63,21 +66,28 @@ export async function registerDiscoveredDomain(
     });
   }
 
-  // Persistent path — Block F
-  throw new Error(
-    "Persistent registration (storeResults: true) not yet implemented — see Block F",
-  );
+  return registerPersistent({
+    name,
+    apiUrl,
+    proposedConfig,
+    discoveryId,
+    prisma,
+  });
 }
 
-// ── Ephemeral path ────────────────────────────────────────────────────────────
+// ── Shared internal opts type ─────────────────────────────────────────────────
 
-async function registerEphemeral(opts: {
+interface PathOpts {
   name: string;
   apiUrl: string;
   proposedConfig: Record<string, unknown>;
   discoveryId: string;
   prisma: any;
-}): Promise<RegisterResult> {
+}
+
+// ── Ephemeral path ────────────────────────────────────────────────────────────
+
+async function registerEphemeral(opts: PathOpts): Promise<RegisterResult> {
   const { name, apiUrl, proposedConfig, discoveryId, prisma } = opts;
 
   const intent = (proposedConfig.intent as string) ?? name;
@@ -86,8 +96,7 @@ async function registerEphemeral(opts: {
   const fieldMap = (proposedConfig.fieldMap as object) ?? {};
   const providerType = (proposedConfig.providerType as string) ?? "rest";
 
-  // ── 3a. Create DataSource record ─────────────────────────────────────────────
-
+  // 3a. Create DataSource record
   await prisma.dataSource.create({
     data: {
       domainName: name,
@@ -102,8 +111,7 @@ async function registerEphemeral(opts: {
     },
   });
 
-  // ── 3b. Build and register fetch-and-discard adapter ─────────────────────────
-
+  // 3b. Build and register fetch-and-discard adapter
   registerDomain({
     config: {
       name,
@@ -136,8 +144,7 @@ async function registerEphemeral(opts: {
       return row as Record<string, unknown>;
     },
 
-    // Ephemeral: storeResults is intentionally a no-op.
-    // No rows written to query_results, no cache, no snapshot.
+    // Ephemeral: no DB write, no cache, no snapshot.
     async storeResults(
       _queryId: string,
       _rows: unknown[],
@@ -147,12 +154,66 @@ async function registerEphemeral(opts: {
     },
   });
 
-  // ── 3c. Mark discovery record as registered ───────────────────────────────────
-
+  // 3c. Mark discovery record as registered
   await prisma.domainDiscovery.update({
     where: { id: discoveryId },
     data: { status: "registered" },
   });
 
   return { path: "ephemeral", domainName: name };
+}
+
+// ── Persistent path ───────────────────────────────────────────────────────────
+
+async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
+  const { name, apiUrl, proposedConfig, discoveryId, prisma } = opts;
+
+  const intent = (proposedConfig.intent as string) ?? name;
+  const country_code = (proposedConfig.country_code as string) ?? "";
+  const refreshPolicy = (proposedConfig.refreshPolicy as string) ?? "weekly";
+  const fieldMap = (proposedConfig.fieldMap as object) ?? {};
+  const providerType = (proposedConfig.providerType as string) ?? "rest";
+
+  // 3a. Create DataSource record
+  await prisma.dataSource.create({
+    data: {
+      domainName: name,
+      name,
+      url: apiUrl,
+      type: providerType,
+      fieldMap,
+      refreshPolicy,
+      storeResults: true,
+      discoveredBy: "catalogue",
+      enabled: true,
+    },
+  });
+
+  // 3b. Register a full GenericAdapter with storage
+  const adapter = createGenericAdapter({
+    name,
+    tableName: "query_results",
+    prismaModel: "queryResult",
+    storeResults: true,
+    countries: country_code ? [country_code] : [],
+    intents: [intent],
+    apiUrl,
+    apiKeyEnv: null,
+    locationStyle: "coordinates",
+    params: {},
+    flattenRow: fieldMap as Record<string, string>,
+    categoryMap: {},
+    vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
+    cacheTtlHours: null,
+  });
+
+  registerDomain(adapter);
+
+  // 3c. Mark discovery record as registered
+  await prisma.domainDiscovery.update({
+    where: { id: discoveryId },
+    data: { status: "registered" },
+  });
+
+  return { path: "persistent", domainName: name };
 }
