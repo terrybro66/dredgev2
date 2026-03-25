@@ -11,7 +11,7 @@ import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { evolveSchema } from "./schema";
 import { parseIntent, deriveVizHint, expandDateRange } from "./crime/intent";
-import { getDomainForQuery } from "./domains/registry";
+import { getDomainForQuery, DomainAdapter } from "./domains/registry";
 import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
@@ -19,6 +19,9 @@ import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
+import { findCuratedSource } from "./curated-registry";
+import { createRestProvider } from "./providers/rest-provider";
+import { tagRows } from "./enrichment/source-tag";
 
 export const queryRouter = Router();
 
@@ -34,6 +37,7 @@ const ExecuteBodySchema = z.object({
   months: z.array(z.string()),
   rawText: z.string().optional(),
 });
+
 // ── POST /parse ───────────────────────────────────────────────────────────────
 
 queryRouter.post("/parse", async (req: Request, res: Response) => {
@@ -79,6 +83,7 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
       // classifier failure is non-fatal — intent remains undefined, triggering discovery
     }
   }
+
   const viz_hint = deriveVizHint(plan, text, intent ?? "unknown");
   const months = expandDateRange(plan.date_from, plan.date_to);
 
@@ -115,25 +120,98 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
-  let adapter = intent ? getDomainForQuery(country_code, intent) : undefined;
+  let adapter: DomainAdapter | undefined = intent
+    ? getDomainForQuery(country_code, intent)
+    : undefined;
+
   if (!adapter) {
-    if (domainDiscovery.isEnabled()) {
-      const discoveryIntent =
-        rawText ??
-        (intent === "unknown"
-          ? `${plan.category} in ${plan.location}`
-          : intent);
-      await domainDiscovery.run(
-        { intent: discoveryIntent, country_code },
-        prisma,
-      );
+    // 1b. Check curated registry before falling through to discovery
+    const curatedSource = intent
+      ? findCuratedSource(intent, country_code)
+      : null;
+
+    if (curatedSource) {
+      // Build an on-the-fly adapter from the curated source
+      const source = curatedSource; // capture for closures
+      adapter = {
+        config: {
+          name: source.name,
+          tableName: "query_results",
+          prismaModel: "queryResult",
+          storeResults: source.storeResults,
+          countries: source.countryCodes,
+          intents: [source.intent],
+          apiUrl: source.url,
+          apiKeyEnv: null,
+          locationStyle: "coordinates",
+          params: {},
+          flattenRow: source.fieldMap,
+          categoryMap: {},
+          vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
+          cacheTtlHours: null,
+        },
+
+        async fetchData(
+          _plan: unknown,
+          _locationArg: string,
+        ): Promise<unknown[]> {
+          try {
+            const provider = createRestProvider({ url: source.url });
+            const rows = await provider.fetchRows();
+            return tagRows(rows as Record<string, unknown>[], source.url);
+          } catch {
+            return [];
+          }
+        },
+
+        flattenRow(row: unknown): Record<string, unknown> {
+          return row as Record<string, unknown>;
+        },
+
+        async storeResults(
+          queryId: string,
+          rows: unknown[],
+          prismaClient: any,
+        ): Promise<void> {
+          if (!source.storeResults || rows.length === 0) return;
+          await prismaClient.queryResult.createMany({
+            data: (rows as Record<string, unknown>[]).map((row) => ({
+              domain_name: source.name,
+              source_tag: (row.source_tag as string) ?? source.name,
+              date: row.date ? new Date(row.date as string) : null,
+              lat: ((row.lat ?? row.latitude) as number) ?? null,
+              lon: ((row.lon ?? row.longitude) as number) ?? null,
+              location: (row.location as string) ?? null,
+              description: (row.description as string) ?? null,
+              category: (row.category as string) ?? null,
+              value: (row.value as number) ?? null,
+              raw: (row.raw as object) ?? row,
+              extras: (row.extras as object) ?? null,
+              snapshot_id: null,
+            })),
+          });
+        },
+      };
+    } else {
+      // 1c. Fall through to discovery pipeline
+      if (domainDiscovery.isEnabled()) {
+        const discoveryIntent =
+          rawText ??
+          (intent === "unknown"
+            ? `${plan.category} in ${plan.location}`
+            : intent);
+        await domainDiscovery.run(
+          { intent: discoveryIntent, country_code },
+          prisma,
+        );
+      }
+      return res.status(400).json({
+        error: "unsupported_region",
+        message: `No data source available for country: ${country_code} / intent: ${intent}. Discovery pipeline triggered — check admin for review.`,
+        country_code,
+        discovery_triggered: domainDiscovery.isEnabled(),
+      });
     }
-    return res.status(400).json({
-      error: "unsupported_region",
-      message: `No data source available for country: ${country_code} / intent: ${intent}. Discovery pipeline triggered — check admin for review.`,
-      country_code,
-      discovery_triggered: domainDiscovery.isEnabled(),
-    });
   }
 
   // 2. Compute deterministic cache hash
@@ -156,7 +234,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     if (ageHours > adapter.config.cacheTtlHours) {
       await prisma.queryCache.delete({ where: { query_hash } });
-
       console.log(
         JSON.stringify({
           event: "cache_stale_evicted",
@@ -164,7 +241,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           query_hash,
         }),
       );
-
       cached = null;
     }
   }
@@ -366,7 +442,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       const bins = await prisma.$queryRaw<AggregatedBin[]>`
 SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
-  SELECT 
+  SELECT
     ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
     COUNT(*)::int AS count
   FROM crime_results
@@ -399,8 +475,8 @@ FROM (
         },
       });
     }
+
     if (viz_hint === "bar") {
-      // Group by month for the bar chart — don't slice raw rows
       const byMonth: Record<string, number> = {};
       for (const row of storedResults as any[]) {
         const month = row.month ?? "unknown";
@@ -412,6 +488,7 @@ FROM (
     } else if (viz_hint === "table") {
       storedResults = storedResults.slice(0, 100);
     }
+
     await prisma.queryJob.update({
       where: { id: job.id },
       data: {
@@ -438,7 +515,6 @@ FROM (
       }),
     );
 
-    // 6. Build resultContext
     const followUps = generateFollowUps({
       domain: adapter.config.name,
       plan,
