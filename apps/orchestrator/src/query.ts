@@ -176,6 +176,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               }
             }
 
+            if (source.type === "scrape") {
+              const { createScrapeProvider } =
+                await import("./providers/scrape-provider");
+              const extractionPrompt =
+                (source as any).extractionPrompt ??
+                `Extract all data items from this page at ${fetchUrl}`;
+              const provider = createScrapeProvider({ extractionPrompt });
+              const rows = await provider.fetchRows(fetchUrl);
+              return tagRows(rows as Record<string, unknown>[], fetchUrl);
+            }
+
             const provider = createRestProvider({ url: fetchUrl });
             const rows = await provider.fetchRows();
             return tagRows(rows as Record<string, unknown>[], fetchUrl);

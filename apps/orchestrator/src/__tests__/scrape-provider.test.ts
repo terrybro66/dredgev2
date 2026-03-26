@@ -32,7 +32,11 @@ const mockClose = vi.fn().mockResolvedValue(undefined);
 const mockNewPage = vi.fn();
 const mockGoto = vi.fn().mockResolvedValue(undefined);
 
-const mockPage = { goto: mockGoto };
+const mockPage = {
+  goto: mockGoto,
+  waitForSelector: vi.fn().mockResolvedValue(undefined),
+  waitForTimeout: vi.fn().mockResolvedValue(undefined),
+};
 const mockContext = {
   pages: vi.fn().mockReturnValue([mockPage]),
   newPage: mockNewPage,
@@ -81,10 +85,8 @@ beforeEach(() => {
   mockContext.pages.mockReturnValue([mockPage]);
   mockNewPage.mockResolvedValue(mockPage);
   mockExtract.mockResolvedValue({
-    movies: [
-      { title: "Dune Part Two", showtime: "2025-06-01T19:30:00Z" },
-      { title: "Gladiator II", showtime: "2025-06-01T21:00:00Z" },
-    ],
+    cinema: "Odeon Braehead",
+    movies: ["Dune Part Two", "Gladiator II"],
   });
   mockAxiosGet.mockResolvedValue({ data: [] });
 });
@@ -145,9 +147,13 @@ describe("ScrapeProvider", () => {
     // Simulate NoObjectGeneratedError with text field containing raw data
     const error = new Error("No object generated");
     error.name = "NoObjectGeneratedError";
-    (error as any).text = JSON.stringify([
-      { title: "Dune Part Two", showtime: "2025-06-01T19:30:00Z" },
-    ]);
+    (error as any).text = JSON.stringify({
+      type: "object",
+      properties: {
+        cinema: "Odeon Braehead",
+        movies: ["Dune Part Two"],
+      },
+    });
     mockExtract.mockRejectedValue(error);
 
     const provider = createScrapeProvider({
@@ -291,7 +297,8 @@ describe("GenericAdapter — scrape source routing", () => {
     ]);
 
     mockExtract.mockResolvedValue({
-      movies: [{ title: "Dune Part Two", showtime: "2025-06-01T19:30:00Z" }],
+      cinema: "Odeon",
+      movies: ["Dune Part Two", "Gladiator II"],
     });
 
     const { createGenericAdapter } = await import("../domains/generic-adapter");
@@ -370,7 +377,7 @@ describe("GenericAdapter — scrape source routing", () => {
     ]);
 
     mockExtract.mockResolvedValue({
-      movies: [{ title: "Dune Part Two" }],
+      movies: [{ cinema: "Odeon", movies: ["Dune Part Two", "Gladiator II"] }],
     });
 
     const { createGenericAdapter } = await import("../domains/generic-adapter");
@@ -418,7 +425,7 @@ describe("sampleSource — scrape path", () => {
   });
 
   it("ScrapeProvider fetchRows returns empty array when fetch is not a direct file and Stagehand extraction returns nothing", async () => {
-    mockExtract.mockResolvedValue({ items: [] });
+    mockExtract.mockResolvedValue({ cinema: null, movies: [] });
 
     const { createScrapeProvider } =
       await import("../providers/scrape-provider");

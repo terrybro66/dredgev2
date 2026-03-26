@@ -48,7 +48,7 @@ export const CURATED_SOURCES: CuratedSource[] = [
     url: "https://www.odeon.co.uk/cinemas/{location}/",
     type: "scrape" as const,
     extractionPrompt:
-      "Extract all movie titles and showtimes currently showing.",
+      "Find all movie titles currently showing on this cinema page. Look for film listings, showtimes, or posters. Return ALL titles.", // ← update this line
     storeResults: false,
     refreshPolicy: "realtime",
     fieldMap: { title: "description", showtime: "date" },

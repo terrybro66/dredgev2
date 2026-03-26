@@ -16,7 +16,7 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
           baseURL: "https://openrouter.ai/api/v1",
         },
         localBrowserLaunchOptions: {
-          headless: true,
+          headless: false,
           args: ["--no-sandbox", "--disable-setuid-sandbox"],
         },
       });
@@ -31,30 +31,41 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
 
         await page.goto(url, {
           waitUntil: "domcontentloaded",
-          timeoutMs: 30000,
+          timeoutMs: 60000,
         });
 
+        // Wait for dynamic content like the working script does
+        await page.waitForSelector("body", { timeout: 10000 });
+        await page.waitForTimeout(4000);
+
         try {
+          // Use the same schema as the working script
           const result = await stagehand.extract(
             options.extractionPrompt,
             z.object({
-              items: z
-                .array(z.record(z.string(), z.unknown().nullable()))
-                .nullable(),
+              cinema: z.string().nullable(),
+              movies: z.array(z.string()),
             }),
             { page },
           );
 
-          const items = (result as any)?.items ?? (result as any)?.movies ?? [];
-          return Array.isArray(items) ? items : [];
+          const movies = (result as any)?.movies ?? [];
+          return Array.isArray(movies)
+            ? movies.map((title: string) => ({ title }))
+            : [];
         } catch (err: any) {
-          // Fallback: parse raw text from NoObjectGeneratedError
-          if (err?.name === "NoObjectGeneratedError" && err?.text) {
+          // gpt-4o-mini via OpenRouter always wraps response in { type, properties }
+          // The data is in err.text even for non-NoObjectGeneratedError failures
+          if (err?.text) {
             try {
               const parsed = JSON.parse(err.text);
-              return Array.isArray(parsed) ? parsed : [];
+              const unwrapped = parsed?.properties ?? parsed;
+              const movies = unwrapped?.movies ?? unwrapped?.items ?? [];
+              if (Array.isArray(movies) && movies.length > 0) {
+                return movies.map((title: string) => ({ title }));
+              }
             } catch {
-              return [];
+              // fall through
             }
           }
           console.warn("[ScrapeProvider] extraction failed:", err?.message);
