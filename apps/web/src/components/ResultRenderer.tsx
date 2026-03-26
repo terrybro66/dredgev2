@@ -185,6 +185,7 @@ function SummaryLine({ result }: { result: ExecuteResult }) {
   const {
     count,
     plan,
+    viz_hint,
     resolved_location,
     months_fetched,
     aggregated,
@@ -196,6 +197,28 @@ function SummaryLine({ result }: { result: ExecuteResult }) {
     plan.date_from === plan.date_to
       ? formatMonth(plan.date_from)
       : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`;
+
+  const isDashboard = viz_hint === "dashboard";
+
+  // For dashboard (weather) — show location + date range, no count
+  if (isDashboard) {
+    return (
+      <div className="summary-line">
+        <span className="summary-desc">
+          <strong>{resolved_location}</strong>
+          {" · "}
+          {dateRange}
+          {months_fetched.length > 1 && ` · ${months_fetched.length} months`}
+        </span>
+        <div className="summary-badges">
+          {ephemeral && (
+            <span className="badge badge-green">Live data · not saved</span>
+          )}
+          {cache_hit && <span className="badge badge-amber">cached</span>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="summary-line">
@@ -224,13 +247,22 @@ function BarChart({
   results,
   months_fetched,
 }: {
-  results: CrimeResult[];
+  results: Record<string, unknown>[];
   months_fetched: string[];
 }) {
+  // Detect whether rows use 'month' (crime) or 'date' (all other domains)
+  const dateField =
+    results.length > 0 && "month" in results[0] ? "month" : "date";
+
   const counts: Record<string, number> = {};
   for (const m of months_fetched) counts[m] = 0;
   for (const r of results) {
-    if (r.month in counts) counts[r.month]++;
+    const key = r[dateField];
+    if (typeof key === "string") {
+      // date fields may be full ISO strings — normalise to YYYY-MM
+      const ym = key.slice(0, 7);
+      if (ym in counts) counts[ym]++;
+    }
   }
   const max = Math.max(...Object.values(counts), 1);
 
@@ -349,8 +381,8 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
           <div className="empty-icon">○</div>
           <div className="empty-title">No results found</div>
           <p className="empty-message">
-            No {formatCategory(plan.category).toLowerCase()} were recorded in
-            this area for{" "}
+            No results found for{" "}
+            <strong>{formatCategory(plan.category)}</strong> in{" "}
             {plan.date_from === plan.date_to
               ? formatMonth(plan.date_from)
               : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
@@ -370,14 +402,13 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
       }
       // Raw points — existing MapView path (rendered from parent via prop-pass
       // or inline below with the full MapView implementation from App.tsx)
-      const crimeResults = results as CrimeResult[];
-      return <LegacyMapView results={crimeResults} />;
+      return <LegacyMapView results={results as Record<string, unknown>[]} />;
     }
 
     if (viz_hint === "bar") {
       return (
         <BarChart
-          results={results as CrimeResult[]}
+          results={results as Record<string, unknown>[]}
           months_fetched={months_fetched}
         />
       );
@@ -407,7 +438,9 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
 
       {/* Download toolbar — only for non-empty, non-dashboard results */}
       {count > 0 && !isDashboard && <DownloadToolbar queryId={query_id} />}
-
+      {count > 0 && !isDashboard && !data.ephemeral && (
+        <DownloadToolbar queryId={query_id} />
+      )}
       {/* Follow-up chips */}
       {count > 0 && followUps.length > 0 && (
         <div className="followup-chips">
@@ -442,9 +475,9 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
 
 type MapMode = "points" | "clusters" | "heatmap";
 
-function LegacyMapView({ results }: { results: CrimeResult[] }) {
+function LegacyMapView({ results }: { results: Record<string, unknown>[] }) {
   const [mode, setMode] = useState<MapMode>("points");
-  const [hover, setHover] = useState<CrimeResult | null>(null);
+  const [hover, setHover] = useState<Record<string, unknown> | null>(null);
 
   const points = useMemo(
     () =>
@@ -528,10 +561,18 @@ function LegacyMapView({ results }: { results: CrimeResult[] }) {
       </Map>
       {hover && (
         <div className="map-tooltip">
-          <strong>{formatCategory(hover.category)}</strong>
-          <span>{hover.street ?? "—"}</span>
-          <span>{hover.month}</span>
-          {hover.outcome_category && <em>{hover.outcome_category}</em>}
+          <strong>
+            {(hover as any).description ??
+              formatCategory((hover as any).category ?? "") ??
+              "—"}
+          </strong>
+          {(hover as any).street && <span>{(hover as any).street}</span>}
+          {((hover as any).month || (hover as any).date) && (
+            <span>{(hover as any).month ?? (hover as any).date}</span>
+          )}
+          {(hover as any).outcome_category && (
+            <em>{(hover as any).outcome_category}</em>
+          )}
         </div>
       )}
     </div>

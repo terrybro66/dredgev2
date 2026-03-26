@@ -119,10 +119,13 @@ type Stage = "idle" | "loading" | "done" | "error";
 
 const API = "http://localhost:3001";
 
+// Recent queries will replace these static examples once the
+// QueryHistoryCarousel component is built (feat/query-history-carousel).
+// For now, keep a minimal set covering the main viz hint paths.
 const EXAMPLES = [
-  "burglaries in Cambridge in January 2024",
-  "drug offences in Camden last 3 months",
-  "list violent crime in Bristol last month",
+  "burglaries in Cambridge last month",
+  "weather in Edinburgh this week",
+  "flood risk in Somerset",
 ];
 
 function formatMonth(ym: string): string {
@@ -246,9 +249,6 @@ function InterpretationBanner({
     <div className="interpretation-banner">
       <div className="interpretation-text">
         <span className="interp-label">Searched for </span>
-        // Change:
-        <strong>{formatCategory(plan.category)}</strong>
-        // To:
         <strong>
           {parsed.intent === "weather"
             ? "Weather"
@@ -397,8 +397,7 @@ export function EmptyResults({
       <div className="empty-icon">○</div>
       <div className="empty-title">No results found</div>
       <p className="empty-message">
-        No {formatCategory(plan.category).toLowerCase()} were recorded in this
-        area for{" "}
+        No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
         {plan.date_from === plan.date_to
           ? formatMonth(plan.date_from)
           : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
@@ -408,7 +407,7 @@ export function EmptyResults({
         <p className="empty-reason">{resultContext.reason}</p>
       )}
       <p className="empty-hint">
-        Police data typically lags by 2–3 months. Try an earlier date range.
+        Try adjusting the date range or rephrasing your query.
       </p>
       <FollowUpChips
         followUps={resultContext.followUps}
@@ -531,9 +530,15 @@ function MapView({
       </Map>
       {hover && !aggregated && (
         <div className="map-tooltip">
-          <strong>{formatCategory(hover.category ?? "")}</strong>
-          <span>{(hover as any).street ?? "—"}</span>
-          <span>{(hover as any).month}</span>
+          <strong>
+            {(hover as any).description ??
+              formatCategory((hover as any).category ?? "") ??
+              "—"}
+          </strong>
+          {(hover as any).street && <span>{(hover as any).street}</span>}
+          {((hover as any).month || (hover as any).date) && (
+            <span>{(hover as any).month ?? (hover as any).date}</span>
+          )}
           {(hover as any).outcome_category && (
             <em>{(hover as any).outcome_category}</em>
           )}
@@ -552,10 +557,16 @@ function BarChart({
   results: CrimeResult[];
   months_fetched: string[];
 }) {
+  const dateField =
+    results.length > 0 && "month" in results[0] ? "month" : "date";
   const counts: Record<string, number> = {};
   for (const m of months_fetched) counts[m] = 0;
   for (const r of results) {
-    if (r.month in counts) counts[r.month]++;
+    const key = (r as any)[dateField];
+    if (typeof key === "string") {
+      const ym = key.slice(0, 7);
+      if (ym in counts) counts[ym]++;
+    }
   }
   const max = Math.max(...Object.values(counts), 1);
 
@@ -586,24 +597,29 @@ function BarChart({
 
 function TableView({ results }: { results: CrimeResult[] }) {
   const capped = results.slice(0, 50);
+  const rows = capped as unknown as Record<string, unknown>[];
+  const columns =
+    rows.length > 0
+      ? Object.keys(rows[0])
+          .filter((k) => k !== "raw" && k !== "extras")
+          .slice(0, 6)
+      : [];
   return (
     <div className="table-wrapper">
       <table className="result-table">
         <thead>
           <tr>
-            <th>Category</th>
-            <th>Street</th>
-            <th>Month</th>
-            <th>Outcome</th>
+            {columns.map((col) => (
+              <th key={col}>{col.replace(/_/g, " ")}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {capped.map((r, i) => (
-            <tr key={i}>
-              <td>{formatCategory(r.category)}</td>
-              <td>{r.street ?? "—"}</td>
-              <td>{r.month}</td>
-              <td>{r.outcome_category ?? "—"}</td>
+          {rows.map((r, i) => (
+            <tr key={(r.id as string) ?? i}>
+              {columns.map((col) => (
+                <td key={col}>{r[col] != null ? String(r[col]) : "—"}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -1056,7 +1072,7 @@ function ResultRenderer({
           <span className="result-desc">
             {result.intent === "weather"
               ? `day${count !== 1 ? "s" : ""}`
-              : `${formatCategory(plan.category).toLowerCase()} incidents`}
+              : `${formatCategory(plan.category).toLowerCase()} result${count !== 1 ? "s" : ""}`}
           </span>
         </div>
         <button className="btn-ghost small" onClick={onRefine}>
@@ -1260,7 +1276,7 @@ export default function App() {
       <div className="app">
         <header className="app-header">
           <div className="logo">DREDGE</div>
-          <div className="logo-sub">crime data explorer</div>
+          <div className="logo-sub">public data explorer</div>
         </header>
 
         <main className="app-main">

@@ -426,7 +426,7 @@ describe("edge cases", () => {
       target: { value: "test" },
     });
     fireEvent.click(screen.getByText("Search"));
-    await waitFor(() => screen.getByText(/incidents/));
+    await waitFor(() => screen.getByText(/results/));
     expect(screen.queryByText("⚠")).toBeNull();
   });
 
@@ -444,6 +444,6 @@ describe("edge cases", () => {
       target: { value: "test" },
     });
     fireEvent.click(screen.getByText("Search"));
-    await waitFor(() => screen.getByText(/incidents/));
+    await waitFor(() => screen.getByText(/results/));
   });
 });

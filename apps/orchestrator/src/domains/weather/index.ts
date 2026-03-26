@@ -94,16 +94,6 @@ function rowsFromResponse(
     weathercode,
   } = data.daily;
 
-  console.log("daily keys:", Object.keys(data.daily));
-  console.log(
-    "time:",
-    time?.length,
-    "temp_max:",
-    temperature_2m_max?.length,
-    "windspeed:",
-    windspeed_10m_max?.length,
-  );
-
   return time.map((date, i) => ({
     date,
     latitude: geo.latitude,
@@ -137,7 +127,7 @@ export const weatherAdapter: DomainAdapter = {
     categoryMap: {},
     vizHintRules: { defaultHint: "dashboard", multiMonthHint: "dashboard" },
     rateLimit: { requestsPerMinute: 60 },
-    defaultOrderBy: { date: "asc" },
+    defaultOrderBy: "date",
     cacheTtlHours: 1,
   },
 

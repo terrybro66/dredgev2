@@ -120,14 +120,23 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
-  let adapter: DomainAdapter | undefined = intent
-    ? getDomainForQuery(country_code, intent)
+  // If the semantic classifier missed, fall back to plan.category before
+  // triggering discovery — the LLM already parsed it correctly.
+  const resolvedIntent =
+    intent && intent !== "unknown"
+      ? intent
+      : plan.category && plan.category !== "unknown"
+        ? plan.category
+        : undefined;
+
+  let adapter: DomainAdapter | undefined = resolvedIntent
+    ? getDomainForQuery(country_code, resolvedIntent)
     : undefined;
 
   if (!adapter) {
     // 1b. Check curated registry before falling through to discovery
-    const curatedSource = intent
-      ? findCuratedSource(intent, country_code)
+    const curatedSource = resolvedIntent
+      ? findCuratedSource(resolvedIntent, country_code)
       : null;
 
     if (curatedSource) {
@@ -235,11 +244,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     } else {
       // 1c. Fall through to discovery pipeline
       if (domainDiscovery.isEnabled()) {
+        // Always use the distilled intent summary — never the raw query text.
+        // The raw text is a terrible search query for finding reusable sources.
         const discoveryIntent =
-          rawText ??
-          (intent === "unknown"
-            ? `${plan.category} in ${plan.location}`
-            : intent);
+          resolvedIntent && resolvedIntent !== "unknown"
+            ? resolvedIntent
+            : `${plan.category} in ${plan.location}`;
         await domainDiscovery.run(
           { intent: discoveryIntent, country_code },
           prisma,
@@ -537,6 +547,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           adapter.config.name,
         );
       }
+      console.log(
+        JSON.stringify({
+          event: "debug_store",
+          rowCount: rows.length,
+          sample: rows[0],
+          isEphemeral,
+        }),
+      );
       await adapter.storeResults(queryRecord.id, rows, prisma);
     }
     const store_ms = Date.now() - store_start;
