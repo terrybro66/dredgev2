@@ -254,7 +254,88 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
   }
 
-  // 2. Compute deterministic cache hash
+  // 2. Ephemeral adapters bypass cache, storage and snapshots entirely
+  const isEphemeral = adapter.config.storeResults === false;
+
+  if (isEphemeral) {
+    // Create job record for observability, then fetch live and return directly
+    const queryRecord = await prisma.query.create({
+      data: {
+        text: `${plan.category} in ${plan.location}`,
+        category: plan.category,
+        date_from: plan.date_from,
+        date_to: plan.date_to,
+        poly,
+        viz_hint,
+        domain: adapter.config.name,
+        country_code,
+        resolved_location,
+      },
+    });
+    const job = await prisma.queryJob.create({
+      data: {
+        query_id: queryRecord.id,
+        status: "pending",
+        domain: adapter.config.name,
+        cache_hit: false,
+      },
+    });
+    try {
+      await acquire(adapter.config);
+      const rows = await adapter.fetchData(plan, poly);
+      let liveResults: unknown[] = rows;
+      if (viz_hint === "bar") {
+        const byMonth: Record<string, number> = {};
+        for (const row of rows as any[]) {
+          const month = row.month ?? row.date ?? "unknown";
+          byMonth[month] = (byMonth[month] ?? 0) + 1;
+        }
+        liveResults = Object.entries(byMonth)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([month, count]) => ({ month, count }));
+      } else if (viz_hint === "table") {
+        liveResults = liveResults.slice(0, 100);
+      }
+      await prisma.queryJob.update({
+        where: { id: job.id },
+        data: {
+          status: "complete",
+          rows_inserted: liveResults.length,
+          completedAt: new Date(),
+        },
+      });
+      return res.json({
+        query_id: queryRecord.id,
+        plan,
+        poly,
+        viz_hint,
+        resolved_location,
+        count: liveResults.length,
+        months_fetched: months,
+        results: liveResults,
+        cache_hit: false,
+        ephemeral: true,
+        aggregated: false,
+        resultContext: {
+          status: liveResults.length === 0 ? "empty" : "exact",
+          followUps: [],
+          confidence: liveResults.length === 0 ? "low" : "high",
+        },
+      });
+    } catch (err: any) {
+      await prisma.queryJob.update({
+        where: { id: job.id },
+        data: {
+          status: "error",
+          error_message: err.message,
+          completedAt: new Date(),
+        },
+      });
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  // 3. Compute deterministic cache hash (persistent adapters only)
   const hashInput = JSON.stringify({
     domain: adapter.config.name,
     category: plan.category,
@@ -445,7 +526,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
 
     const store_start = Date.now();
-    const isEphemeral = adapter.config.storeResults === false;
 
     if (!isEphemeral) {
       if (rows.length > 0) {
@@ -516,9 +596,7 @@ FROM (
         adapter.config.prismaModel
       ].findMany({
         where: { query_id: queryRecord.id },
-        ...(adapter.config.defaultOrderBy
-          ? { orderBy: adapter.config.defaultOrderBy }
-          : {}),
+        orderBy: { [adapter.config.defaultOrderBy ?? "date"]: "asc" } as any,
       });
     }
 
