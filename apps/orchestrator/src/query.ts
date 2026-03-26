@@ -537,14 +537,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           adapter.config.name,
         );
       }
-      console.log(
-        JSON.stringify({
-          event: "debug_store",
-          rowCount: rows.length,
-          sample: rows[0],
-          isEphemeral,
-        }),
-      );
       await adapter.storeResults(queryRecord.id, rows, prisma);
     }
     const store_ms = Date.now() - store_start;

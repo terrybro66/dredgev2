@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import axios from "axios";
 
 vi.mock("axios");
-vi.mock("../../intent", () => ({
+vi.mock("../intent", () => ({
   expandDateRange: vi.fn(),
 }));
 
@@ -12,7 +12,7 @@ const { mockExpandDateRange } = vi.hoisted(() => ({
   mockExpandDateRange: vi.fn(),
 }));
 
-vi.mock("../../intent", () => ({
+vi.mock("../intent", () => ({
   expandDateRange: mockExpandDateRange,
 }));
 
@@ -52,7 +52,7 @@ beforeEach(() => {
 describe("fetchCrimesForMonth", () => {
   it("calls correct URL with category slug", async () => {
     mockApiResponse();
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect(mockAxiosGet).toHaveBeenCalledWith(
       expect.stringContaining("crimes-street/burglary"),
@@ -62,7 +62,7 @@ describe("fetchCrimesForMonth", () => {
 
   it("passes date param as the month argument", async () => {
     mockApiResponse();
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect(mockAxiosGet).toHaveBeenCalledWith(
       expect.any(String),
@@ -74,7 +74,7 @@ describe("fetchCrimesForMonth", () => {
 
   it("passes poly param correctly", async () => {
     mockApiResponse();
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect(mockAxiosGet).toHaveBeenCalledWith(
       expect.any(String),
@@ -84,7 +84,7 @@ describe("fetchCrimesForMonth", () => {
 
   it("returns array of RawCrime objects", async () => {
     mockApiResponse();
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     const result = await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect(Array.isArray(result)).toBe(true);
     expect(result[0]).toMatchObject({ category: "burglary" });
@@ -92,14 +92,14 @@ describe("fetchCrimesForMonth", () => {
 
   it("unknown fields on crime objects are preserved", async () => {
     mockApiResponse([{ ...mockCrime, future_field: "some_value" }]);
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     const result = await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect((result[0] as any).future_field).toBe("some_value");
   });
 
   it("handles empty array response without throwing", async () => {
     mockApiResponse([]);
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     const result = await fetchCrimesForMonth(basePlan, poly, "2024-01");
     expect(result).toEqual([]);
   });
@@ -109,7 +109,7 @@ describe("fetchCrimesForMonth", () => {
       { length: 101 },
       (_, i) => `${i}.0,${i}.0`,
     ).join(":");
-    const { fetchCrimesForMonth } = await import("../../crime/fetcher");
+    const { fetchCrimesForMonth } = await import("../domains/crime-uk/fetcher");
     await expect(
       fetchCrimesForMonth(basePlan, longPoly, "2024-01"),
     ).rejects.toThrow("Polygon exceeds 100 points");
@@ -118,10 +118,10 @@ describe("fetchCrimesForMonth", () => {
 
 describe("fetchCrimes", () => {
   async function setup(months: string[]) {
-    const { expandDateRange } = await import("../../intent");
+    const { expandDateRange } = await import("../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue(months);
     mockApiResponse();
-    return import("../../crime/fetcher");
+    return import("../domains/crime-uk/fetcher");
   }
 
   it("calls API once for a single-month range", async () => {
@@ -147,7 +147,7 @@ describe("fetchCrimes", () => {
   });
 
   it("merges results from all months into a single array", async () => {
-    const { expandDateRange } = await import("../../intent");
+    const { expandDateRange } = await import("../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",
@@ -155,14 +155,14 @@ describe("fetchCrimes", () => {
     mockAxiosGet
       .mockResolvedValueOnce({ data: [{ ...mockCrime, month: "2024-01" }] })
       .mockResolvedValueOnce({ data: [{ ...mockCrime, month: "2024-02" }] });
-    const { fetchCrimes } = await import("../../crime/fetcher");
+    const { fetchCrimes } = await import("../domains/crime-uk/fetcher");
     const result = await fetchCrimes(basePlan, poly);
     expect(result).toHaveLength(2);
   });
 
   it("calls months sequentially, not in parallel", async () => {
     const order: string[] = [];
-    const { expandDateRange } = await import("../../intent");
+    const { expandDateRange } = await import("../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",
@@ -172,13 +172,13 @@ describe("fetchCrimes", () => {
       order.push(config.params.date);
       return Promise.resolve({ data: [] });
     });
-    const { fetchCrimes } = await import("../../crime/fetcher");
+    const { fetchCrimes } = await import("../domains/crime-uk/fetcher");
     await fetchCrimes(basePlan, poly);
     expect(order).toEqual(["2024-01", "2024-02", "2024-03"]);
   });
 
   it("returns combined results in month-ascending order", async () => {
-    const { expandDateRange } = await import("../../intent");
+    const { expandDateRange } = await import("../intent");
     (expandDateRange as ReturnType<typeof vi.fn>).mockReturnValue([
       "2024-01",
       "2024-02",
@@ -186,7 +186,7 @@ describe("fetchCrimes", () => {
     mockAxiosGet
       .mockResolvedValueOnce({ data: [{ ...mockCrime, month: "2024-01" }] })
       .mockResolvedValueOnce({ data: [{ ...mockCrime, month: "2024-02" }] });
-    const { fetchCrimes } = await import("../../crime/fetcher");
+    const { fetchCrimes } = await import("../domains/crime-uk/fetcher");
     const result = await fetchCrimes(basePlan, poly);
     expect(result[0].month).toBe("2024-01");
     expect(result[1].month).toBe("2024-02");

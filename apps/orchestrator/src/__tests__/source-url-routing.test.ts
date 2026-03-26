@@ -64,7 +64,7 @@ const { mockPrisma } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("../crime/intent", () => ({
+vi.mock("../intent", () => ({
   parseIntent: mockParseIntent,
   deriveVizHint: mockDeriveVizHint,
   expandDateRange: mockExpandDateRange,

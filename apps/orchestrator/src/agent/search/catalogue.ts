@@ -27,7 +27,13 @@ export async function searchCatalogue(
   try {
     const res = await fetch(url);
     if (!res.ok) {
-      console.warn(JSON.stringify({ event: "catalogue_error", status: res.status, country_code }));
+      console.warn(
+        JSON.stringify({
+          event: "catalogue_error",
+          status: res.status,
+          country_code,
+        }),
+      );
       return [];
     }
 
@@ -40,13 +46,26 @@ export async function searchCatalogue(
       const resources: any[] = dataset.resources ?? [];
       if (resources.length === 0) continue;
 
-      // Use the first resource as the primary URL
-      const resource = resources[0];
+      // Use the first resource with a valid non-empty URL
+      const resource = resources.find(
+        (r: any) => typeof r.url === "string" && r.url.trim() !== "",
+      );
+      if (!resource) continue;
+
+      // Skip URLs that are clearly stale or placeholder values
+      const url = resource.url as string;
+      if (
+        url.includes("datapress.com") || // known stale CDN
+        url.endsWith("#") ||
+        url === "N/A"
+      )
+        continue;
+
       sources.push({
-        url: resource.url as string,
+        url,
         format: inferFormat(resource.format ?? ""),
         description: (dataset.notes ?? dataset.title ?? "") as string,
-        confidence: 0.8, // catalogue results are higher confidence than web search
+        confidence: 0.8,
       });
     }
 
@@ -61,7 +80,9 @@ export async function searchCatalogue(
 
     return sources;
   } catch (err) {
-    console.error(JSON.stringify({ event: "catalogue_fetch_error", error: String(err) }));
+    console.error(
+      JSON.stringify({ event: "catalogue_fetch_error", error: String(err) }),
+    );
     return [];
   }
 }
