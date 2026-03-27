@@ -24,7 +24,11 @@ Return exactly this shape:
 }
 
 Rules:
-- location MUST be a human-readable place name (e.g. "Cambridge, UK"). NEVER return coordinates.
+- location MUST be a human-readable place name. NEVER return coordinates.
+- For UK locations, always include enough context to be unambiguous:
+    - Short or common names MUST include county or region: "Bury, Greater Manchester" not "Bury", "Richmond, North Yorkshire" not "Richmond", "Newport, Wales" not "Newport"
+    - Well-known large cities are fine without region: "London, UK", "Manchester, UK", "Edinburgh, UK"
+    - If the user specifies a region or county, always include it: "Hackney, London" not just "Hackney"
 - Default location to "Cambridge, UK" when none is specified.
 - Default category to "unknown" when intent is unclear.
 - Resolve all relative date expressions to explicit YYYY-MM values:

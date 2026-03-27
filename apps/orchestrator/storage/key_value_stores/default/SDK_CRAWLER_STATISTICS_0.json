@@ -1,29 +1,52 @@
 {
-  "requestsFinished": 1,
-  "requestsFailed": 0,
-  "requestsRetries": 0,
-  "requestsFailedPerMinute": 0,
-  "requestsFinishedPerMinute": 9,
-  "requestMinDurationMillis": 6498,
-  "requestMaxDurationMillis": 6498,
-  "requestTotalFailedDurationMillis": 0,
-  "requestTotalFinishedDurationMillis": 6498,
-  "crawlerStartedAt": "2026-03-26T12:10:39.881Z",
-  "crawlerFinishedAt": "2026-03-26T12:10:46.692Z",
-  "statsPersistedAt": "2026-03-26T12:10:46.692Z",
-  "crawlerRuntimeMillis": 6997,
-  "crawlerLastStartTimestamp": 1774527039695,
+  "requestsFinished": 0,
+  "requestsFailed": 1,
+  "requestsRetries": 1,
+  "requestsFailedPerMinute": 8,
+  "requestsFinishedPerMinute": 0,
+  "requestMinDurationMillis": null,
+  "requestMaxDurationMillis": 0,
+  "requestTotalFailedDurationMillis": 1244,
+  "requestTotalFinishedDurationMillis": 0,
+  "crawlerStartedAt": "2026-03-27T08:53:26.615Z",
+  "crawlerFinishedAt": "2026-03-27T08:53:33.247Z",
+  "statsPersistedAt": "2026-03-27T08:53:33.247Z",
+  "crawlerRuntimeMillis": 6813,
+  "crawlerLastStartTimestamp": 1774601606434,
   "requestRetryHistogram": [
+    null,
+    null,
+    null,
     1
   ],
   "statsId": 0,
-  "requestAvgFailedDurationMillis": null,
-  "requestAvgFinishedDurationMillis": 6498,
-  "requestTotalDurationMillis": 6498,
+  "requestAvgFailedDurationMillis": 1244,
+  "requestAvgFinishedDurationMillis": null,
+  "requestTotalDurationMillis": 1244,
   "requestsTotal": 1,
   "requestsWithStatusCode": {
-    "200": 1
+    "403": 4
   },
-  "errors": {},
-  "retryErrors": {}
+  "errors": {
+    "/Users/terrybroughton/work/dredgev2/node_modules/@crawlee/src/internals/basic-crawler.ts:1377:19": {
+      "missing error code": {
+        "Error": {
+          "Request blocked - received 403 status code.": {
+            "count": 1
+          }
+        }
+      }
+    }
+  },
+  "retryErrors": {
+    "/Users/terrybroughton/work/dredgev2/node_modules/@crawlee/src/internals/basic-crawler.ts:1377:19": {
+      "missing error code": {
+        "Error": {
+          "Request blocked - received 403 status code.": {
+            "count": 3
+          }
+        }
+      }
+    }
+  }
 }

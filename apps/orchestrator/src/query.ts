@@ -29,7 +29,7 @@ const ParseBodySchema = z.object({ text: z.string().min(1) });
 
 const ExecuteBodySchema = z.object({
   plan: QueryPlanSchema,
-  poly: z.string(),
+  poly: z.string().default(""),
   viz_hint: VizHintSchema,
   resolved_location: z.string(),
   country_code: z.string(),
@@ -120,8 +120,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   } = bodyResult.data;
 
   // 1. Resolve adapter via intent + country routing
-  // If the semantic classifier missed, fall back to plan.category before
-  // triggering discovery — the LLM already parsed it correctly.
+  // Use classified intent, fall back to plan.category before giving up.
   const resolvedIntent =
     intent && intent !== "unknown"
       ? intent
@@ -129,14 +128,36 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         ? plan.category
         : undefined;
 
-  let adapter: DomainAdapter | undefined = resolvedIntent
-    ? getDomainForQuery(country_code, resolvedIntent)
+  // Map crime subcategories to the registered intent slug.
+  // The LLM returns "burglary" as category but the registry uses "crime".
+  const CATEGORY_TO_INTENT: Record<string, string> = {
+    burglary: "crime",
+    "all-crime": "crime",
+    drugs: "crime",
+    robbery: "crime",
+    "violent-crime": "crime",
+    "bicycle-theft": "crime",
+    "anti-social-behaviour": "crime",
+    "vehicle-crime": "crime",
+    shoplifting: "crime",
+    "criminal-damage-arson": "crime",
+    "other-theft": "crime",
+    "possession-of-weapons": "crime",
+    "public-order": "crime",
+    "theft-from-the-person": "crime",
+    "other-crime": "crime",
+  };
+  const routingIntent =
+    CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
+
+  let adapter: DomainAdapter | undefined = routingIntent
+    ? getDomainForQuery(country_code, routingIntent)
     : undefined;
 
   if (!adapter) {
     // 1b. Check curated registry before falling through to discovery
-    const curatedSource = resolvedIntent
-      ? findCuratedSource(resolvedIntent, country_code)
+    const curatedSource = routingIntent
+      ? findCuratedSource(routingIntent, country_code)
       : null;
 
     if (curatedSource) {
@@ -244,12 +265,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     } else {
       // 1c. Fall through to discovery pipeline
       if (domainDiscovery.isEnabled()) {
-        // Always use the distilled intent summary — never the raw query text.
-        // The raw text is a terrible search query for finding reusable sources.
         const discoveryIntent =
           resolvedIntent && resolvedIntent !== "unknown"
             ? resolvedIntent
-            : `${plan.category} in ${plan.location}`;
+            : plan.category !== "unknown"
+              ? plan.category
+              : `${plan.category} in ${plan.location}`;
         await domainDiscovery.run(
           { intent: discoveryIntent, country_code },
           prisma,
@@ -280,6 +301,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         domain: adapter.config.name,
         country_code,
         resolved_location,
+        intent: resolvedIntent ?? null,
       },
     });
     const job = await prisma.queryJob.create({
@@ -388,6 +410,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         domain: adapter.config.name,
         country_code,
         resolved_location,
+        intent: resolvedIntent ?? null,
       },
     });
     await prisma.queryJob.create({
@@ -459,6 +482,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         domain: adapter.config.name,
         country_code,
         resolved_location,
+        intent: resolvedIntent ?? null,
       },
     });
   } catch (err: any) {
@@ -710,6 +734,41 @@ FROM (
     );
     return res.status(500).json({ error: err.message });
   }
+});
+
+// ── GET /history ──────────────────────────────────────────────────────────────
+
+queryRouter.get("/history", async (_req: Request, res: Response) => {
+  const records = await prisma.query.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 20,
+    include: {
+      jobs: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: { rows_inserted: true, status: true, cache_hit: true },
+      },
+    },
+  });
+
+  const history = records.map((q) => ({
+    query_id: q.id,
+    text: q.text,
+    category: q.category,
+    date_from: q.date_from,
+    date_to: q.date_to,
+    poly: q.poly,
+    resolved_location: q.resolved_location,
+    country_code: q.country_code,
+    domain: q.domain,
+    intent: (q as any).intent ?? null,
+    viz_hint: q.viz_hint,
+    createdAt: q.createdAt,
+    result_count: q.jobs[0]?.rows_inserted ?? null,
+    cache_hit: q.jobs[0]?.cache_hit ?? false,
+  }));
+
+  return res.json(history);
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
