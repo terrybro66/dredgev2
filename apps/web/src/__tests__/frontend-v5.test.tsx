@@ -7,6 +7,30 @@ import {
   act,
 } from "@testing-library/react";
 import App, { FallbackBanner, FollowUpChips, EmptyResults } from "../App";
+// ── Module mocks — prevent WebGL/canvas/network errors in jsdom ──────────────
+
+vi.mock("maplibre-gl", () => ({
+  default: { Map: vi.fn(), supported: () => false },
+}));
+vi.mock("react-map-gl/maplibre", () => ({
+  default: ({ children }: any) => children ?? null,
+  useControl: vi.fn(() => ({ setProps: vi.fn() })),
+}));
+vi.mock("@deck.gl/mapbox", () => ({
+  MapboxOverlay: vi.fn().mockImplementation(() => ({ setProps: vi.fn() })),
+}));
+vi.mock("@deck.gl/layers", () => ({
+  ScatterplotLayer: vi.fn(),
+}));
+vi.mock("@deck.gl/aggregation-layers", () => ({
+  HexagonLayer: vi.fn(),
+  HeatmapLayer: vi.fn(),
+}));
+// Mock carousel so it never fires a fetch call during tests
+vi.mock("../components/QueryHistoryCarousel", () => ({
+  QueryHistoryCarousel: () => null,
+  CAROUSEL_CSS: "",
+}));
 
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 
@@ -215,7 +239,10 @@ const mockExecuteResponseEmpty = {
 
 function mockFetch(responses: Array<{ ok: boolean; data: unknown }>) {
   let i = 0;
-  return vi.fn(() => {
+  return vi.fn((url: string) => {
+    if (typeof url === "string" && url.includes("/query/history")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    }
     const r = responses[i++] ?? responses[responses.length - 1];
     return Promise.resolve({
       ok: r.ok,
@@ -308,7 +335,10 @@ describe("handleFollowUp", () => {
 
   it("on network failure: stage becomes 'error' and intentError message is shown", async () => {
     let call = 0;
-    global.fetch = vi.fn(() => {
+    global.fetch = vi.fn((url: string) => {
+      if (typeof url === "string" && url.includes("/query/history")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
       call++;
       if (call <= 2)
         return Promise.resolve({

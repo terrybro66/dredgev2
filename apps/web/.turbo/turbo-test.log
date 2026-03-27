@@ -7,29 +7,35 @@
 [1m[46m RUN [49m[22m [36mv4.0.18 [39m[90m/Users/terrybroughton/work/dredgev2/apps/web[39m
 
 [?2026h
-[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m [queued][22m
+[2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m936ms
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/__tests__/WorkspacesPanel.test.tsx[2m [queued][22m
 
 [2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m805ms
+[2m   Start at [22m10:56:40
+[2m   Duration [22m1.14s
 [?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/__tests__/ephemeral-label.test.tsx[2m [queued][22m
 [1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m [queued][22m
 [1m[33m ❯ [39m[22msrc/__tests__/WorkspacesPanel.test.tsx[2m [queued][22m
 
 [2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m[1m[32m0 passed[39m[22m[90m (0)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m905ms
-[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[2m   Start at [22m10:56:40
+[2m   Duration [22m1.24s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
 [1m[33m ❯ [39m[22msrc/__tests__/ephemeral-label.test.tsx[2m [queued][22m
 [1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m [queued][22m
 [1m[33m ❯ [39m[22msrc/__tests__/WorkspacesPanel.test.tsx[2m 0/3[22m
 
 [2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m[1m[32m0 passed[39m[22m[90m (3)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.23s
+[2m   Start at [22m10:56:40
+[2m   Duration [22m1.45s
 [?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
 [1m[33m ❯ [39m[22msrc/__tests__/ephemeral-label.test.tsx[2m 0/8[22m
 [1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m [queued][22m
@@ -37,168 +43,51 @@
 
 [2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m[1m[32m0 passed[39m[22m[90m (11)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.33s
-[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[2m   Start at [22m10:56:40
+[2m   Duration [22m1.76s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/__tests__/WorkspacesPanel.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 355[2mms[22m[39m
+
 [1m[33m ❯ [39m[22msrc/__tests__/ephemeral-label.test.tsx[2m 0/8[22m
-[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m [queued][22m
-[1m[33m ❯ [39m[22msrc/__tests__/WorkspacesPanel.test.tsx[2m 1/3[22m
-
-[2m Test Files [22m[1m[32m0 passed[39m[22m[90m (3)[39m
-[2m      Tests [22m[1m[32m1 passed[39m[22m[90m (11)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.53s
-[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/__tests__/WorkspacesPanel.test.tsx [2m([22m[2m3 tests[22m[2m)[22m[33m 315[2mms[22m[39m
- [32m✓[39m src/__tests__/ephemeral-label.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 179[2mms[22m[39m
-
-
 [1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 0/24[22m
 
-[2m Test Files [22m[1m[32m2 passed[39m[22m[90m (3)[39m
-[2m      Tests [22m[1m[32m11 passed[39m[22m[90m (35)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.63s
-[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[2m Test Files [22m[1m[32m1 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m[1m[32m3 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m1.86s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/__tests__/ephemeral-label.test.tsx [2m([22m[2m8 tests[22m[2m)[22m[32m 199[2mms[22m[39m
 
 [1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 1/24[22m
 
 [2m Test Files [22m[1m[32m2 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m[1m[32m12 passed[39m[22m[90m (35)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.83s
-[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[KNot implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mPOSTs to /query/execute (not /query/parse) when a chip is clicked
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-[90m    at processTicksAndRejections (node:internal/process/task_queues:105:5)[39m
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mPOSTs to /query/execute (not /query/parse) when a chip is clicked
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mrequest body is the ExecuteBody passed as argument — no modification
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mrequest body is the ExecuteBody passed as argument — no modification
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mon 200 response: stage becomes 'done' and result is set
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mon non-200 response: stage becomes 'error' and intentError is set
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-
-[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 8/24[22m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m2.06s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 5/24[22m
 
 [2m Test Files [22m[1m[32m2 passed[39m[22m[90m (3)[39m
-[2m      Tests [22m[1m[32m19 passed[39m[22m[90m (35)[39m
-[2m   Start at [22m17:22:25
-[2m   Duration [22m1.93s
-[?2026l[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[KNot implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mhandleFollowUp[2m > [22m[2mon network failure: stage becomes 'error' and intentError message is shown
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
+[2m      Tests [22m[1m[32m16 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m2.16s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 14/24[22m
 
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mrender integration[2m > [22m[2mwhen resultContext.status === 'fallback', FallbackBanner is visible
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
+[2m Test Files [22m[1m[32m2 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m[1m[32m25 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m2.26s
+[?2026l[?2026h[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K
+[1m[33m ❯ [39m[22msrc/__tests__/frontend-v5.test.tsx[2m 18/24[22m
 
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mrender integration[2m > [22m[2mwhen resultContext.status === 'exact', FallbackBanner is not rendered
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2mrender integration[2m > [22m[2mFollowUpChips appear below results when count > 0 and chips exist
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2medge cases[2m > [22m[2mresultContext missing from API response → app does not crash
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
-[90mstderr[2m | src/__tests__/frontend-v5.test.tsx[2m > [22m[2medge cases[2m > [22m[2mfollowUps null in response → chips render empty, no crash
-[22m[39mError: Failed to initialize WebGL
-    at _setupPainter (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:508516)
-    at new _s (/Users/terrybroughton/work/dredgev2/node_modules/[4mmaplibre-gl[24m/dist/maplibre-gl.js:46:486814)
-    at Maplibre._initialize (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:228:21)
-    at new Maplibre (file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/maplibre/maplibre.js:128:14)
-    at file:///Users/terrybroughton/work/dredgev2/node_modules/[4m@vis.gl[24m/react-maplibre/dist/components/map.js:35:28
-
- [32m✓[39m src/__tests__/frontend-v5.test.tsx [2m([22m[2m24 tests[22m[2m)[22m[32m 299[2mms[22m[39m
+[2m Test Files [22m[1m[32m2 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m[1m[32m29 passed[39m[22m[90m (35)[39m
+[2m   Start at [22m10:56:40
+[2m   Duration [22m2.36s
+[?2026l[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K[1A[K [32m✓[39m src/__tests__/frontend-v5.test.tsx [2m([22m[2m24 tests[22m[2m)[22m[33m 521[2mms[22m[39m
 
 [2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
 [2m      Tests [22m [1m[32m35 passed[39m[22m[90m (35)[39m
-[2m   Start at [22m 17:22:25
-[2m   Duration [22m 2.04s[2m (transform 443ms, setup 289ms, import 1.34s, tests 793ms, environment 2.16s)[22m
+[2m   Start at [22m 10:56:40
+[2m   Duration [22m 2.45s[2m (transform 366ms, setup 396ms, import 1.08s, tests 1.08s, environment 3.01s)[22m
 
 [?25h[1G[0K⠙[1G[0K

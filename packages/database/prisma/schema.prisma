@@ -19,6 +19,7 @@ model Query {
   domain            String        @default("crime-uk")  // changed: "crime" → "crime-uk"
   resolved_location String?
   country_code      String?                             // new in v4.1
+  intent            String? 
   results           CrimeResult[]
   weatherResults    WeatherResult[]
   jobs              QueryJob[]                          // new in v4.1

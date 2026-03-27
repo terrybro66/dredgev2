@@ -77,10 +77,10 @@ export async function applySchemaOp(
 
   const { column, columnType } = op;
 
-  const sql = `ALTER TABLE "${tableName}" ADD COLUMN "${column}" ${columnType}`;
+  const sql = `ALTER TABLE "${tableName}" ADD COLUMN IF NOT EXISTS "${column}" ${columnType}`;
 
   const safePattern =
-    /^ALTER TABLE "[a-z_][a-z0-9_]*" ADD COLUMN "[a-z][a-z0-9_]{0,62}" (text|integer|bigint|boolean|double precision|jsonb|timestamptz)$/;
+    /^ALTER TABLE "[a-z_][a-z0-9_]*" ADD COLUMN IF NOT EXISTS "[a-z][a-z0-9_]{0,62}" (text|integer|bigint|boolean|double precision|jsonb|timestamptz)$/;
 
   if (!safePattern.test(sql)) {
     throw new Error(`Unsafe or invalid SQL generated: ${sql}`);

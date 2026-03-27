@@ -11,6 +11,11 @@ import * as d3Axis from "d3-axis";
 import * as d3Selection from "d3-selection";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { WorkspacesPanel } from "./components/WorkspacesPanel";
+import {
+  QueryHistoryCarousel,
+  CAROUSEL_CSS,
+} from "./components/QueryHistoryCarousel";
+import { useDredgeStore } from "./store";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -203,22 +208,7 @@ function QueryInput({
           />
         </div>
       )}
-      {!loading && !text && (
-        <div className="examples-row">
-          {EXAMPLES.map((ex) => (
-            <button
-              key={ex}
-              className="example-chip"
-              onClick={() => {
-                setText(ex);
-                inputRef.current?.focus();
-              }}
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
-      )}
+      {!loading && !text && <QueryHistoryCarousel />}
     </div>
   );
 }
@@ -1270,9 +1260,15 @@ export default function App() {
     setRefineText("");
   };
 
+  const { setExecuteQuery } = useDredgeStore();
+
+  useEffect(() => {
+    setExecuteQuery(handleFollowUp);
+  }, []);
+
   return (
     <>
-      <style>{CSS}</style>
+      <style>{CSS + CAROUSEL_CSS}</style>
       <div className="app">
         <header className="app-header">
           <div className="logo">DREDGE</div>
