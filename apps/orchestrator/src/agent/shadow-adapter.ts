@@ -23,6 +23,27 @@ export interface ShadowResult {
   newSource: ShadowNewSource;
 }
 
+const DOMAIN_SHAPE_RULES: Record<
+  string,
+  (row: Record<string, unknown>) => boolean
+> = {
+  "crime-uk": (row) => {
+    const hasCategory = "category" in row || "type" in row || "offence" in row;
+    const hasDate = "month" in row || "date" in row;
+    return hasCategory && hasDate;
+  },
+};
+
+export function isValidShapeForDomain(
+  config: DomainConfig,
+  rows: unknown[],
+): boolean {
+  if (rows.length === 0) return false;
+  const rule = DOMAIN_SHAPE_RULES[config.name];
+  if (!rule) return true; // no rule for this domain — pass through
+  return rule(rows[0] as Record<string, unknown>);
+}
+
 export const shadowAdapter = {
   isEnabled(): boolean {
     return process.env.SHADOW_ADAPTER_ENABLED === "true";
@@ -59,6 +80,18 @@ export const shadowAdapter = {
       const sampled = await sampleAndDetectFormat(top.url);
 
       if (!sampled || sampled.rows.length === 0) return null;
+
+      // Step 3 — validate shape before accepting
+      if (!isValidShapeForDomain(config, sampled.rows)) {
+        console.log(
+          JSON.stringify({
+            event: "shadow_adapter_shape_rejected",
+            url: top.url,
+            domain: config.name,
+          }),
+        );
+        return null;
+      }
 
       console.log(
         JSON.stringify({
