@@ -129,6 +129,7 @@ export const weatherAdapter: DomainAdapter = {
     rateLimit: { requestsPerMinute: 60 },
     defaultOrderBy: { date: "asc" },
     cacheTtlHours: 1,
+    temporality: "time-series" as const,
   },
 
   async fetchData(plan: any): Promise<unknown[]> {
