@@ -40,8 +40,53 @@ export function isValidShapeForDomain(
 ): boolean {
   if (rows.length === 0) return false;
   const rule = DOMAIN_SHAPE_RULES[config.name];
-  if (!rule) return true; // no rule for this domain — pass through
+  if (!rule) return true;
   return rule(rows[0] as Record<string, unknown>);
+}
+
+// Known generic/national source hostnames that carry no location signal.
+// These should never be rejected on geography grounds.
+const NATIONAL_SOURCE_HOSTS = [
+  "environment.data.gov.uk",
+  "data.police.uk",
+  "data.gov.uk",
+  "api.open-meteo.com",
+  "archive-api.open-meteo.com",
+];
+
+export function isGeographicallyRelevant(
+  location: string,
+  candidate: { url: string; description: string },
+): boolean {
+  // National sources have no location signal — always accept
+  try {
+    const host = new URL(candidate.url).hostname;
+    if (
+      NATIONAL_SOURCE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
+    ) {
+      return true;
+    }
+  } catch {
+    // malformed URL — fall through to token check
+  }
+
+  // Tokenise the location into meaningful words (drop short connector words)
+  const tokens = location
+    .toLowerCase()
+    .split(/[\s,]+/)
+    .filter((t) => t.length > 2);
+
+  const haystack = (candidate.url + " " + candidate.description).toLowerCase();
+
+  // If any location token appears in the URL or description — accept
+  if (tokens.some((t) => haystack.includes(t))) return true;
+
+  // No location signal found in either direction — only reject if the
+  // description explicitly names a different place (i.e. contains a long
+  // word that looks like a place name but none of our tokens matched).
+  // Simple heuristic: if haystack has no overlap with our tokens AND
+  // the candidate URL hostname is location-specific (not national), reject.
+  return false;
 }
 
 export const shadowAdapter = {
@@ -65,7 +110,6 @@ export const shadowAdapter = {
     );
 
     try {
-      // Step 1 — find candidate sources
       const candidates = await searchAlternativeSources(
         context.intent,
         context.location,
@@ -75,13 +119,24 @@ export const shadowAdapter = {
 
       if (candidates.length === 0) return null;
 
-      // Step 2 — sample the most confident candidate
       const top = candidates.sort((a, b) => b.confidence - a.confidence)[0];
+
+      // Geography check before sampling — avoids wasting a fetch
+      if (!isGeographicallyRelevant(context.location, top)) {
+        console.log(
+          JSON.stringify({
+            event: "shadow_adapter_geography_rejected",
+            url: top.url,
+            location: context.location,
+          }),
+        );
+        return null;
+      }
+
       const sampled = await sampleAndDetectFormat(top.url);
 
       if (!sampled || sampled.rows.length === 0) return null;
 
-      // Step 3 — validate shape before accepting
       if (!isValidShapeForDomain(config, sampled.rows)) {
         console.log(
           JSON.stringify({
