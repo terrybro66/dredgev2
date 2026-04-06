@@ -20,6 +20,7 @@ export const crimeUkAdapter: DomainAdapter = {
     vizHintRules: { defaultHint: "map", multiMonthHint: "bar" },
     rateLimit: { requestsPerMinute: 30 },
     cacheTtlHours: null,
+    temporality: "time-series" as const,
   },
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),
   flattenRow: (row: unknown) => row as Record<string, unknown>,

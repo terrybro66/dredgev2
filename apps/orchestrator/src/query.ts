@@ -507,7 +507,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     // 5. Recovery — attempt fallback strategies when fetch returned nothing
     let fallback: FallbackInfo | undefined;
     let isShadowRecovery = false;
-    let effectiveMonths = months;
+    let effectiveMonths =
+      adapter.config.temporality === "time-series" ? months : [];
 
     if (rows.length === 0 && adapter.recoverFromEmpty) {
       const recovery = await adapter.recoverFromEmpty(plan, poly, prisma);

@@ -544,7 +544,7 @@ describe("execute pipeline — hybrid write path", () => {
       viz_hint: "table",
       resolved_location: "Bristol, England",
       count: expect.any(Number),
-      months_fetched: ["2025-01"],
+      months_fetched: [],
       results: expect.any(Array),
       cache_hit: false,
     });
