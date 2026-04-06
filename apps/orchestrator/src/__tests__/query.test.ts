@@ -24,7 +24,9 @@ const { mockPrisma } = vi.hoisted(() => ({
     query: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      findMany: vi.fn(),
     },
+
     crimeResult: {
       findMany: vi.fn(),
     },
@@ -50,6 +52,7 @@ const { mockPrisma } = vi.hoisted(() => ({
       createMany: vi.fn(),
       findMany: vi.fn(),
     },
+    findMany: vi.fn(),
     $queryRaw: vi.fn(),
   },
 }));
@@ -113,9 +116,6 @@ const basePlan = {
   location: "Cambridge, UK",
 };
 
-// FIX: import queryRouter once via beforeAll — avoids top-level await
-// (banned under module:CommonJS) while still ensuring the import happens
-// after vi.mock() registrations are in place so the router sees hooked deps.
 let queryRouter: Router;
 beforeAll(async () => {
   ({ queryRouter } = await import("../query"));
@@ -666,5 +666,70 @@ describe("shadow adapter recovery storage", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockPrisma.queryCache.create).not.toHaveBeenCalled();
+  });
+});
+describe("GET /query/history", () => {
+  const historyRecord = {
+    id: "q1",
+    text: "burglaries in Cambridge",
+    category: "burglary",
+    date_from: "2024-01",
+    date_to: "2024-01",
+    poly: "52.0,0.0:52.1,0.1",
+    resolved_location: "Cambridge, England",
+    country_code: "GB",
+    domain: "crime-uk",
+    intent: "crime",
+    viz_hint: "map",
+    createdAt: new Date("2024-01-15T10:00:00Z"),
+    jobs: [{ rows_inserted: 42, status: "done", cache_hit: false }],
+  };
+
+  beforeEach(() => {
+    mockPrisma.query.findMany.mockResolvedValue([historyRecord]);
+  });
+
+  it("returns 200 with an array", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/query/history");
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it("each entry has query_id, text, domain, viz_hint, result_count", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/query/history");
+    const entry = res.body[0];
+    expect(entry).toHaveProperty("query_id", "q1");
+    expect(entry).toHaveProperty("text", "burglaries in Cambridge");
+    expect(entry).toHaveProperty("domain", "crime-uk");
+    expect(entry).toHaveProperty("viz_hint", "map");
+    expect(entry).toHaveProperty("result_count", 42);
+  });
+
+  it("result_count is null when no jobs exist", async () => {
+    mockPrisma.query.findMany.mockResolvedValue([
+      { ...historyRecord, jobs: [] },
+    ]);
+    const app = buildApp();
+    const res = await request(app).get("/query/history");
+    expect(res.body[0].result_count).toBeNull();
+  });
+
+  it("cache_hit is false when no jobs exist", async () => {
+    mockPrisma.query.findMany.mockResolvedValue([
+      { ...historyRecord, jobs: [] },
+    ]);
+    const app = buildApp();
+    const res = await request(app).get("/query/history");
+    expect(res.body[0].cache_hit).toBe(false);
+  });
+
+  it("returns empty array when no queries exist", async () => {
+    mockPrisma.query.findMany.mockResolvedValue([]);
+    const app = buildApp();
+    const res = await request(app).get("/query/history");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 });
