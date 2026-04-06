@@ -18,7 +18,6 @@ const { mockStoreResults } = vi.hoisted(() => ({ mockStoreResults: vi.fn() }));
 const { mockGeocodeToPolygon } = vi.hoisted(() => ({
   mockGeocodeToPolygon: vi.fn(),
 }));
-const { mockEvolveSchema } = vi.hoisted(() => ({ mockEvolveSchema: vi.fn() }));
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
     query: {
@@ -86,10 +85,8 @@ vi.mock("../intent", () => ({
   deriveVizHint: mockDeriveVizHint,
   expandDateRange: mockExpandDateRange,
 }));
-vi.mock("../crime/fetcher", () => ({ fetchCrimes: mockFetchCrimes }));
-vi.mock("../crime/store", () => ({ storeResults: mockStoreResults }));
+
 vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
-vi.mock("../schema", () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
@@ -140,7 +137,6 @@ beforeEach(() => {
   });
   mockFetchCrimes.mockResolvedValue([]);
   mockStoreResults.mockResolvedValue(undefined);
-  mockEvolveSchema.mockResolvedValue(undefined);
   mockGetDomainForQuery.mockReturnValue({
     config: {
       name: "crime-uk",
@@ -367,28 +363,6 @@ describe("POST /query/execute", () => {
     );
   });
 
-  it("calls evolveSchema with crime_results and crime-uk when crimes returned", async () => {
-    mockFetchCrimes.mockResolvedValue([
-      { category: "burglary", month: "2024-01" },
-    ]);
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockEvolveSchema).toHaveBeenCalledWith(
-      expect.anything(),
-      "crime_results",
-      expect.anything(),
-      expect.any(String),
-      "crime-uk",
-    );
-  });
-
-  it("does not call evolveSchema when crimes array is empty", async () => {
-    mockFetchCrimes.mockResolvedValue([]);
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockEvolveSchema).not.toHaveBeenCalled();
-  });
-
   it("response includes query_id, plan, poly, viz_hint, resolved_location, count, months_fetched, results", async () => {
     const app = buildApp();
     const res = await request(app)
@@ -610,12 +584,6 @@ describe("shadow adapter recovery storage", () => {
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockPrisma.queryResult.createMany).toHaveBeenCalled();
     expect(mockStoreResults).not.toHaveBeenCalled();
-  });
-
-  it("does not call evolveSchema for shadow-recovered rows", async () => {
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockEvolveSchema).not.toHaveBeenCalled();
   });
 
   it("response includes fallback status when shadow data is used", async () => {

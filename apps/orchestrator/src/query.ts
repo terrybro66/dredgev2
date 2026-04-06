@@ -9,7 +9,6 @@ import {
 } from "@dredge/schemas";
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
-import { evolveSchema } from "./schema";
 import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
 import { getDomainForQuery, DomainAdapter } from "./domains/registry";
 import { generateFollowUps } from "./followups";
@@ -602,15 +601,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         }
       } else {
         if (rows.length > 0) {
-          await evolveSchema(
-            prisma,
-            adapter.config.tableName,
-            rows[0] as Record<string, unknown>,
-            queryRecord.id,
-            adapter.config.name,
-          );
+          await adapter.storeResults(queryRecord.id, rows, prisma);
         }
-        await adapter.storeResults(queryRecord.id, rows, prisma);
       }
     }
 

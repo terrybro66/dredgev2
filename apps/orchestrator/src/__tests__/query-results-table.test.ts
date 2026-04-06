@@ -261,7 +261,6 @@ const { mockGetDomainForQuery } = vi.hoisted(() => ({
 const { mockGeocodeToPolygon } = vi.hoisted(() => ({
   mockGeocodeToPolygon: vi.fn(),
 }));
-const { mockEvolveSchema } = vi.hoisted(() => ({ mockEvolveSchema: vi.fn() }));
 const { mockAcquire } = vi.hoisted(() => ({ mockAcquire: vi.fn() }));
 const { mockCreateSnapshot } = vi.hoisted(() => ({
   mockCreateSnapshot: vi.fn(),
@@ -300,7 +299,6 @@ vi.mock("../intent", () => ({
   expandDateRange: mockExpandDateRange,
 }));
 vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
-vi.mock("../schema", () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
@@ -372,7 +370,6 @@ beforeEach(() => {
     display_name: "Bristol, England",
     country_code: "GB",
   });
-  mockEvolveSchema.mockResolvedValue(undefined);
   mockAcquire.mockResolvedValue(undefined);
   mockCreateSnapshot.mockResolvedValue({
     runId: "run-1",
@@ -509,7 +506,7 @@ describe("execute pipeline — hybrid write path", () => {
     );
   });
 
-  it("evolveSchema is called with the adapter tableName and domain name", async () => {
+  it("storeResults is called when fetchData returns rows", async () => {
     mockAdapterFetchData.mockResolvedValue([
       { description: "Film A", extra_field: "new" },
     ]);
@@ -517,22 +514,16 @@ describe("execute pipeline — hybrid write path", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
 
-    expect(mockEvolveSchema).toHaveBeenCalledWith(
-      expect.anything(), // prisma
-      "query_results", // tableName from adapter.config
-      expect.anything(), // first row
-      expect.any(String), // queryId
-      "cinema-listings-gb", // domain name
-    );
+    expect(mockAdapterStoreResults).toHaveBeenCalledOnce();
   });
 
-  it("evolveSchema is NOT called when fetchData returns an empty array", async () => {
+  it("storeResults is NOT called when fetchData returns an empty array", async () => {
     mockAdapterFetchData.mockResolvedValue([]);
 
     const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
 
-    expect(mockEvolveSchema).not.toHaveBeenCalled();
+    expect(mockAdapterStoreResults).not.toHaveBeenCalled();
   });
 
   it("response shape is correct on a successful execute", async () => {

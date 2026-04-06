@@ -2,14 +2,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
-vi.mock("../crime/fetcher", () => ({ fetchCrimes: vi.fn() }));
+vi.mock("../domains/crime-uk/fetcher", () => ({ fetchCrimes: vi.fn() }));
 vi.mock("../geocoder", () => ({ geocodeToPolygon: vi.fn() }));
 vi.mock("../availability", () => ({
   getLatestMonth: vi.fn(),
   isMonthAvailable: vi.fn(),
 }));
 
-import { fetchCrimes } from "../crime/fetcher";
+import { fetchCrimes } from "../domains/crime-uk/fetcher";
 import { geocodeToPolygon } from "../geocoder";
 import { getLatestMonth, isMonthAvailable } from "../availability";
 
@@ -23,7 +23,7 @@ import {
   recoverWithSmallerRadius,
   recoverWithAllCrime,
   recoverFromEmpty,
-} from "../crime/recovery";
+} from "../domains/crime-uk/recovery";
 
 const MOCK_PLAN = {
   category: "burglary" as const,

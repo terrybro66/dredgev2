@@ -6,7 +6,7 @@
  * When the matched adapter has storeResults: false, the execute pipeline must:
  *   - Return live results directly from fetchData
  *   - NOT write to query_results (adapter.storeResults is a no-op, but the
- *     pipeline must not call evolveSchema either)
+ *    pipeline must not call adapter.storeResults)
  *   - NOT create a QueryCache entry
  *   - NOT create a QueryRun or DatasetSnapshot
  *
@@ -43,9 +43,6 @@ const { mockGetDomainForQuery } = vi.hoisted(() => ({
 const { mockGeocodeToPolygon } = vi.hoisted(() => ({
   mockGeocodeToPolygon: vi.fn(),
 }));
-const { mockEvolveSchema } = vi.hoisted(() => ({
-  mockEvolveSchema: vi.fn(),
-}));
 const { mockAcquire } = vi.hoisted(() => ({ mockAcquire: vi.fn() }));
 const { mockCreateSnapshot } = vi.hoisted(() => ({
   mockCreateSnapshot: vi.fn(),
@@ -80,7 +77,6 @@ vi.mock("../intent", () => ({
   expandDateRange: mockExpandDateRange,
 }));
 vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
-vi.mock("../schema", () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
@@ -192,7 +188,6 @@ beforeEach(() => {
     display_name: "Bristol, England",
     country_code: "GB",
   });
-  mockEvolveSchema.mockResolvedValue(undefined);
   mockAcquire.mockResolvedValue(undefined);
   mockCreateSnapshot.mockResolvedValue({
     runId: "run-1",
@@ -264,18 +259,6 @@ describe("execute pipeline — ephemeral adapter (storeResults: false)", () => {
     await request(app).post("/query/execute").send(validExecuteBody);
 
     expect(mockCreateSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("does NOT call evolveSchema when storeResults: false", async () => {
-    mockGetDomainForQuery.mockReturnValue(ephemeralAdapter());
-    mockEphemeralFetchData.mockResolvedValue([
-      { title: "Dune Part Two", date: "2025-06-01" },
-    ]);
-
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-
-    expect(mockEvolveSchema).not.toHaveBeenCalled();
   });
 
   it("does NOT call prisma.queryResult.findMany when storeResults: false", async () => {
@@ -398,7 +381,7 @@ describe("execute pipeline — persistent adapter (storeResults: true) regressio
     expect(mockCreateSnapshot).toHaveBeenCalledOnce();
   });
 
-  it("evolveSchema IS called when storeResults: true and rows returned", async () => {
+  it("storeResults IS called when storeResults: true and rows returned", async () => {
     mockGetDomainForQuery.mockReturnValue(persistentAdapter());
     mockPersistentFetchData.mockResolvedValue([{ description: "Burglary" }]);
 
@@ -407,7 +390,7 @@ describe("execute pipeline — persistent adapter (storeResults: true) regressio
       .post("/query/execute")
       .send({ ...validExecuteBody, intent: "crime" });
 
-    expect(mockEvolveSchema).toHaveBeenCalledOnce();
+    expect(mockPersistentStoreResults).toHaveBeenCalledOnce();
   });
 
   it("a second identical persistent query hits cache — fetchData called only once", async () => {
