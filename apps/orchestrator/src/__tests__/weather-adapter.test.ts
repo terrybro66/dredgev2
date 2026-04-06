@@ -333,56 +333,96 @@ describe("weatherAdapter.recoverFromEmpty — date fallback", () => {
 // ── storeResults ──────────────────────────────────────────────────────────────
 
 describe("weatherAdapter.storeResults", () => {
-  it("calls prisma.weatherResult.createMany with mapped rows", async () => {
-    const mockPrisma = {
-      weatherResult: {
-        createMany: vi.fn().mockResolvedValue({ count: 2 }),
-      },
-    };
+  const mockPrisma = {
+    queryResult: { createMany: vi.fn().mockResolvedValue({ count: 2 }) },
+  };
 
-    const rows = [
-      {
-        date: "2024-03-01",
-        latitude: 55.9533,
-        longitude: -3.1883,
-        temperature_max: 10.1,
-        temperature_min: 4.1,
-        precipitation: 0.0,
-        wind_speed: 15.0,
-        description: "Mainly clear",
-        raw: {},
-      },
-      {
-        date: "2024-03-02",
-        latitude: 55.9533,
-        longitude: -3.1883,
-        temperature_max: 11.2,
-        temperature_min: 5.2,
-        precipitation: 2.1,
-        wind_speed: 20.0,
-        description: "Slight rain",
-        raw: {},
-      },
-    ];
-
-    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    expect(mockPrisma.weatherResult.createMany).toHaveBeenCalledOnce();
-
-    const call = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(call.data).toHaveLength(2);
-    expect(call.data[0]).toMatchObject({
-      query_id: "query-123",
+  const rows = [
+    {
       date: "2024-03-01",
-    });
+      latitude: 55.9533,
+      longitude: -3.1883,
+      temperature_max: 10.1,
+      temperature_min: 4.1,
+      precipitation: 0.0,
+      wind_speed: 15.0,
+      description: "Mainly clear",
+      raw: { source: "open-meteo" },
+    },
+    {
+      date: "2024-03-02",
+      latitude: 55.9533,
+      longitude: -3.1883,
+      temperature_max: 11.2,
+      temperature_min: 5.2,
+      precipitation: 2.1,
+      wind_speed: 20.0,
+      description: "Slight rain",
+      raw: { source: "open-meteo" },
+    },
+  ];
+
+  beforeEach(() => {
+    mockPrisma.queryResult.createMany.mockClear();
+  });
+
+  it("calls prisma.queryResult.createMany with all rows", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledOnce();
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(2);
   });
 
   it("does nothing when rows array is empty", async () => {
-    const mockPrisma = {
-      weatherResult: {
-        createMany: vi.fn(),
-      },
-    };
     await weatherAdapter.storeResults("query-123", [], mockPrisma as any);
-    expect(mockPrisma.weatherResult.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.queryResult.createMany).not.toHaveBeenCalled();
+  });
+
+  it("domain_name is weather", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].domain_name).toBe("weather");
+  });
+
+  it("source_tag is open-meteo", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].source_tag).toBe("open-meteo");
+  });
+
+  it("lat and lon are set from latitude/longitude", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].lat).toBeCloseTo(55.9533);
+    expect(data[0].lon).toBeCloseTo(-3.1883);
+  });
+
+  it("value is temperature_max", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].value).toBeCloseTo(10.1);
+  });
+
+  it("date is parsed to a Date object", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].date).toBeInstanceOf(Date);
+    expect((data[0].date as Date).getFullYear()).toBe(2024);
+  });
+
+  it("extras contains temperature_min, precipitation, wind_speed", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].extras).toMatchObject({
+      temperature_min: 4.1,
+      precipitation: 0.0,
+      wind_speed: 15.0,
+    });
+  });
+
+  it("query_id is passed through", async () => {
+    await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].query_id).toBe("query-123");
   });
 });
