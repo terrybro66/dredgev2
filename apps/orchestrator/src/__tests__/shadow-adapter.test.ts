@@ -1,4 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  shadowAdapter,
+  isValidShapeForDomain,
+  isGeographicallyRelevant,
+} from "../agent/shadow-adapter";
+import {
+  searchAlternativeSources,
+  sampleAndDetectFormat,
+} from "../agent/workflows/shadow-recovery";
 
 vi.mock("../agent/workflows/shadow-recovery", () => ({
   searchAlternativeSources: vi.fn().mockResolvedValue([]),
@@ -7,39 +16,34 @@ vi.mock("../agent/workflows/shadow-recovery", () => ({
 
 describe("ShadowAdapter", () => {
   beforeEach(() => {
-    vi.resetModules();
+    vi.clearAllMocks();
   });
 
   describe("isEnabled()", () => {
-    it("returns false when SHADOW_ADAPTER_ENABLED is not set", async () => {
+    it("returns false when SHADOW_ADAPTER_ENABLED is not set", () => {
       delete process.env.SHADOW_ADAPTER_ENABLED;
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
       expect(shadowAdapter.isEnabled()).toBe(false);
     });
 
-    it("returns true when SHADOW_ADAPTER_ENABLED=true", async () => {
+    it("returns true when SHADOW_ADAPTER_ENABLED=true", () => {
       process.env.SHADOW_ADAPTER_ENABLED = "true";
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
       expect(shadowAdapter.isEnabled()).toBe(true);
     });
 
-    it("returns false when SHADOW_ADAPTER_ENABLED=false", async () => {
+    it("returns false when SHADOW_ADAPTER_ENABLED=false", () => {
       process.env.SHADOW_ADAPTER_ENABLED = "false";
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
       expect(shadowAdapter.isEnabled()).toBe(false);
     });
   });
 
   describe("isValidShapeForDomain()", () => {
-    it("returns false for empty array", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns false for empty array", () => {
       expect(isValidShapeForDomain({ name: "crime-uk" } as any, [])).toBe(
         false,
       );
     });
 
-    it("returns false for Plymouth-style year-column rows (no category or month)", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns false for Plymouth-style year-column rows (no category or month)", () => {
       const plymouthRows = [
         {
           "2003": "3874",
@@ -53,24 +57,21 @@ describe("ShadowAdapter", () => {
       ).toBe(false);
     });
 
-    it("returns false when category field is present but no date field", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns false when category field is present but no date field", () => {
       const rows = [{ category: "burglary", street: "High Street" }];
       expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
         false,
       );
     });
 
-    it("returns false when date field is present but no category field", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns false when date field is present but no category field", () => {
       const rows = [{ month: "2024-01", street: "High Street" }];
       expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
         false,
       );
     });
 
-    it("returns true for real police.uk rows with category and month", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns true for real police.uk rows with category and month", () => {
       const rows = [
         {
           category: "burglary",
@@ -85,24 +86,21 @@ describe("ShadowAdapter", () => {
       );
     });
 
-    it("accepts 'type' as a valid substitute for 'category'", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("accepts 'type' as a valid substitute for 'category'", () => {
       const rows = [{ type: "burglary", date: "2024-01-15" }];
       expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
         true,
       );
     });
 
-    it("accepts 'offence' as a valid substitute for 'category'", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("accepts 'offence' as a valid substitute for 'category'", () => {
       const rows = [{ offence: "burglary", month: "2024-01" }];
       expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
         true,
       );
     });
 
-    it("returns true for unknown domain (no validation rule — pass through)", async () => {
-      const { isValidShapeForDomain } = await import("../agent/shadow-adapter");
+    it("returns true for unknown domain (no validation rule — pass through)", () => {
       const rows = [{ foo: "bar" }];
       expect(
         isValidShapeForDomain({ name: "unknown-domain" } as any, rows),
@@ -110,11 +108,65 @@ describe("ShadowAdapter", () => {
     });
   });
 
-  describe("recover()", () => {
-    it("returns null when no candidate sources are found", async () => {
-      process.env.SHADOW_ADAPTER_ENABLED = "true";
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
+  describe("isGeographicallyRelevant()", () => {
+    it("returns false when source URL contains a different UK city", () => {
+      expect(
+        isGeographicallyRelevant("Bury St Edmunds", {
+          url: "https://plymouth.thedata.place/summary.csv",
+          description: "Plymouth offences 2003–2015",
+        }),
+      ).toBe(false);
+    });
 
+    it("returns false when description names a different location", () => {
+      expect(
+        isGeographicallyRelevant("Camden", {
+          url: "https://data.example.com/crimes.csv",
+          description: "Bristol crime statistics 2024",
+        }),
+      ).toBe(false);
+    });
+
+    it("returns true when URL contains part of the query location", () => {
+      expect(
+        isGeographicallyRelevant("Camden", {
+          url: "https://data.gov.uk/camden-crime-2024.csv",
+          description: "Crime data",
+        }),
+      ).toBe(true);
+    });
+
+    it("returns true when description contains part of the query location", () => {
+      expect(
+        isGeographicallyRelevant("Bury St Edmunds", {
+          url: "https://data.gov.uk/crimes.csv",
+          description: "Suffolk crime data 2024",
+        }),
+      ).toBe(true);
+    });
+
+    it("returns true when source has no location signal (national dataset — don't reject)", () => {
+      expect(
+        isGeographicallyRelevant("Gloucester", {
+          url: "https://environment.data.gov.uk/flood-monitoring/id/floods",
+          description: "UK flood monitoring API",
+        }),
+      ).toBe(true);
+    });
+
+    it("is case-insensitive", () => {
+      expect(
+        isGeographicallyRelevant("Bury St Edmunds", {
+          url: "https://data.gov.uk/BURY-ST-EDMUNDS-crimes.csv",
+          description: "Crime data",
+        }),
+      ).toBe(true);
+    });
+  });
+
+  describe("recover()", () => {
+    it("returns null when disabled", async () => {
+      delete process.env.SHADOW_ADAPTER_ENABLED;
       const result = await shadowAdapter.recover(
         { name: "crime-uk" } as any,
         {
@@ -125,16 +177,27 @@ describe("ShadowAdapter", () => {
         },
         {},
       );
-
       expect(result).toBeNull();
     });
 
-    it("returns null when sampled rows fail shape validation", async () => {
+    it("returns null when no candidate sources are found", async () => {
       process.env.SHADOW_ADAPTER_ENABLED = "true";
+      vi.mocked(searchAlternativeSources).mockResolvedValueOnce([]);
+      const result = await shadowAdapter.recover(
+        { name: "crime-uk" } as any,
+        {
+          intent: "crime",
+          location: "Camden",
+          country_code: "GB",
+          date_range: "2024-01",
+        },
+        {},
+      );
+      expect(result).toBeNull();
+    });
 
-      const { searchAlternativeSources, sampleAndDetectFormat } =
-        await import("../agent/workflows/shadow-recovery");
-
+    it("returns null when top candidate is geographically irrelevant", async () => {
+      process.env.SHADOW_ADAPTER_ENABLED = "true";
       vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
         {
           url: "https://plymouth.thedata.place/summary.csv",
@@ -142,7 +205,29 @@ describe("ShadowAdapter", () => {
           confidence: 0.8,
         },
       ]);
+      const result = await shadowAdapter.recover(
+        { name: "crime-uk" } as any,
+        {
+          intent: "crime",
+          location: "Bury St Edmunds",
+          country_code: "GB",
+          date_range: "2026-02",
+        },
+        {},
+      );
+      expect(result).toBeNull();
+      expect(sampleAndDetectFormat).not.toHaveBeenCalled();
+    });
 
+    it("returns null when sampled rows fail shape validation", async () => {
+      process.env.SHADOW_ADAPTER_ENABLED = "true";
+      vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
+        {
+          url: "https://data.gov.uk/summary.csv",
+          description: "Bury St Edmunds data",
+          confidence: 0.8,
+        },
+      ]);
       vi.mocked(sampleAndDetectFormat).mockResolvedValueOnce({
         rows: [
           {
@@ -154,9 +239,6 @@ describe("ShadowAdapter", () => {
         format: "csv",
         sampleSize: 1,
       });
-
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
-
       const result = await shadowAdapter.recover(
         { name: "crime-uk" } as any,
         {
@@ -167,24 +249,18 @@ describe("ShadowAdapter", () => {
         },
         {},
       );
-
       expect(result).toBeNull();
     });
 
-    it("returns a result when sampled rows pass shape validation", async () => {
+    it("returns a result when geography and shape both pass", async () => {
       process.env.SHADOW_ADAPTER_ENABLED = "true";
-
-      const { searchAlternativeSources, sampleAndDetectFormat } =
-        await import("../agent/workflows/shadow-recovery");
-
       vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
         {
-          url: "https://example.com/crimes.csv",
-          description: "Suffolk crime data 2024",
+          url: "https://data.gov.uk/bury-st-edmunds-crimes.csv",
+          description: "Bury St Edmunds crime data 2024",
           confidence: 0.7,
         },
       ]);
-
       vi.mocked(sampleAndDetectFormat).mockResolvedValueOnce({
         rows: [
           {
@@ -197,9 +273,6 @@ describe("ShadowAdapter", () => {
         format: "csv",
         sampleSize: 1,
       });
-
-      const { shadowAdapter } = await import("../agent/shadow-adapter");
-
       const result = await shadowAdapter.recover(
         { name: "crime-uk" } as any,
         {
@@ -210,11 +283,10 @@ describe("ShadowAdapter", () => {
         },
         {},
       );
-
       expect(result).not.toBeNull();
       expect(result!.data).toHaveLength(1);
       expect(result!.newSource.sourceUrl).toBe(
-        "https://example.com/crimes.csv",
+        "https://data.gov.uk/bury-st-edmunds-crimes.csv",
       );
     });
   });
