@@ -507,6 +507,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     // 5. Recovery — attempt fallback strategies when fetch returned nothing
     let fallback: FallbackInfo | undefined;
+    let isShadowRecovery = false;
     let effectiveMonths = months;
 
     if (rows.length === 0 && adapter.recoverFromEmpty) {
@@ -534,6 +535,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       if (shadow) {
         rows = shadow.data;
         fallback = shadow.fallback;
+        isShadowRecovery = true;
+
         if (shadow.newSource) {
           await prisma.apiAvailability.upsert({
             where: {
@@ -562,25 +565,44 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     const store_start = Date.now();
 
     if (!isEphemeral) {
-      if (rows.length > 0) {
-        await evolveSchema(
-          prisma,
-          adapter.config.tableName,
-          rows[0] as Record<string, unknown>,
-          queryRecord.id,
-          adapter.config.name,
-        );
+      if (isShadowRecovery) {
+        if (rows.length > 0) {
+          await (prisma as any).queryResult.createMany({
+            data: (rows as Record<string, unknown>[]).map((row) => ({
+              domain_name: adapter.config.name,
+              source_tag: (row._sourceTag as string) ?? adapter.config.name,
+              date: row.date
+                ? new Date(row.date as string)
+                : row.month
+                  ? new Date(`${row.month as string}-01`)
+                  : null,
+              lat: ((row.lat ?? row.latitude) as number) ?? null,
+              lon: ((row.lon ?? row.longitude) as number) ?? null,
+              location: (row.location as string) ?? null,
+              description: (row.description as string) ?? null,
+              category:
+                (row.category as string) ?? (row.type as string) ?? null,
+              value: (row.value as number) ?? null,
+              raw: (row.raw as object) ?? row,
+              extras: (row.extras as object) ?? null,
+              snapshot_id: null,
+            })),
+          });
+        }
+      } else {
+        if (rows.length > 0) {
+          await evolveSchema(
+            prisma,
+            adapter.config.tableName,
+            rows[0] as Record<string, unknown>,
+            queryRecord.id,
+            adapter.config.name,
+          );
+        }
+        await adapter.storeResults(queryRecord.id, rows, prisma);
       }
-      console.log(
-        JSON.stringify({
-          event: "debug_store",
-          rowCount: rows.length,
-          sample: rows[0],
-          isEphemeral,
-        }),
-      );
-      await adapter.storeResults(queryRecord.id, rows, prisma);
     }
+
     const store_ms = Date.now() - store_start;
 
     if (!isEphemeral) {
@@ -598,7 +620,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     let aggregated = false;
     let storedResults: unknown[];
 
-    if (isEphemeral) {
+    if (isEphemeral || isShadowRecovery) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
       if (adapter.config.tableName === "crime_results") {
