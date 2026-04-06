@@ -34,6 +34,22 @@ const DOMAIN_SHAPE_RULES: Record<
   },
 };
 
+export function applyFieldMap(
+  rows: unknown[],
+  fieldMap: Record<string, string>,
+): unknown[] {
+  if (Object.keys(fieldMap).length === 0) return rows;
+  return rows.map((row) => {
+    const r = row as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(r)) {
+      const mapped = fieldMap[key];
+      out[mapped ?? key] = value;
+    }
+    return out;
+  });
+}
+
 export function isValidShapeForDomain(
   config: DomainConfig,
   rows: unknown[],
@@ -44,8 +60,6 @@ export function isValidShapeForDomain(
   return rule(rows[0] as Record<string, unknown>);
 }
 
-// Known generic/national source hostnames that carry no location signal.
-// These should never be rejected on geography grounds.
 const NATIONAL_SOURCE_HOSTS = [
   "environment.data.gov.uk",
   "data.police.uk",
@@ -58,7 +72,6 @@ export function isGeographicallyRelevant(
   location: string,
   candidate: { url: string; description: string },
 ): boolean {
-  // National sources have no location signal — always accept
   try {
     const host = new URL(candidate.url).hostname;
     if (
@@ -70,7 +83,6 @@ export function isGeographicallyRelevant(
     // malformed URL — fall through to token check
   }
 
-  // Tokenise the location into meaningful words (drop short connector words)
   const tokens = location
     .toLowerCase()
     .split(/[\s,]+/)
@@ -78,14 +90,8 @@ export function isGeographicallyRelevant(
 
   const haystack = (candidate.url + " " + candidate.description).toLowerCase();
 
-  // If any location token appears in the URL or description — accept
   if (tokens.some((t) => haystack.includes(t))) return true;
 
-  // No location signal found in either direction — only reject if the
-  // description explicitly names a different place (i.e. contains a long
-  // word that looks like a place name but none of our tokens matched).
-  // Simple heuristic: if haystack has no overlap with our tokens AND
-  // the candidate URL hostname is location-specific (not national), reject.
   return false;
 }
 
@@ -121,7 +127,6 @@ export const shadowAdapter = {
 
       const top = candidates.sort((a, b) => b.confidence - a.confidence)[0];
 
-      // Geography check before sampling — avoids wasting a fetch
       if (!isGeographicallyRelevant(context.location, top)) {
         console.log(
           JSON.stringify({
@@ -137,7 +142,11 @@ export const shadowAdapter = {
 
       if (!sampled || sampled.rows.length === 0) return null;
 
-      if (!isValidShapeForDomain(config, sampled.rows)) {
+      // Apply fieldMap before shape validation so remapped rows can pass the check
+      const fieldMap: Record<string, string> = (top as any).fieldMap ?? {};
+      const mappedRows = applyFieldMap(sampled.rows, fieldMap);
+
+      if (!isValidShapeForDomain(config, mappedRows)) {
         console.log(
           JSON.stringify({
             event: "shadow_adapter_shape_rejected",
@@ -158,7 +167,7 @@ export const shadowAdapter = {
       );
 
       return {
-        data: sampled.rows,
+        data: mappedRows,
         fallback: {
           field: "location",
           original: context.location,
