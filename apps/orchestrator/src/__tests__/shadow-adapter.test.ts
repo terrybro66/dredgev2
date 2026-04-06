@@ -164,6 +164,32 @@ describe("ShadowAdapter", () => {
     });
   });
 
+  describe("applyFieldMap()", () => {
+    it("renames source fields to canonical names", async () => {
+      const { applyFieldMap } = await import("../agent/shadow-adapter");
+      const rows = [{ offence_type: "burglary", incident_date: "2024-01" }];
+      const fieldMap = { offence_type: "category", incident_date: "month" };
+      expect(applyFieldMap(rows, fieldMap)).toEqual([
+        { category: "burglary", month: "2024-01" },
+      ]);
+    });
+
+    it("passes through fields not in the fieldMap unchanged", async () => {
+      const { applyFieldMap } = await import("../agent/shadow-adapter");
+      const rows = [{ offence_type: "burglary", latitude: 52.2 }];
+      const fieldMap = { offence_type: "category" };
+      expect(applyFieldMap(rows, fieldMap)).toEqual([
+        { category: "burglary", latitude: 52.2 },
+      ]);
+    });
+
+    it("returns rows unchanged when fieldMap is empty", async () => {
+      const { applyFieldMap } = await import("../agent/shadow-adapter");
+      const rows = [{ category: "burglary", month: "2024-01" }];
+      expect(applyFieldMap(rows, {})).toEqual(rows);
+    });
+  });
+
   describe("recover()", () => {
     it("returns null when disabled", async () => {
       delete process.env.SHADOW_ADAPTER_ENABLED;
@@ -288,6 +314,88 @@ describe("ShadowAdapter", () => {
       expect(result!.newSource.sourceUrl).toBe(
         "https://data.gov.uk/bury-st-edmunds-crimes.csv",
       );
+    });
+    it("applies fieldMap to rows before returning when config provides one", async () => {
+      process.env.SHADOW_ADAPTER_ENABLED = "true";
+      vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
+        {
+          url: "https://data.gov.uk/bury-crimes.csv",
+          description: "Bury St Edmunds crime data 2024",
+          confidence: 0.7,
+          fieldMap: { offence_type: "category", incident_date: "month" },
+        },
+      ]);
+      vi.mocked(sampleAndDetectFormat).mockResolvedValueOnce({
+        rows: [
+          {
+            offence_type: "burglary",
+            incident_date: "2024-01",
+            latitude: 52.2,
+            longitude: 0.7,
+          },
+        ],
+        format: "csv",
+        sampleSize: 1,
+      });
+
+      const result = await shadowAdapter.recover(
+        { name: "crime-uk" } as any,
+        {
+          intent: "crime",
+          location: "Bury St Edmunds",
+          country_code: "GB",
+          date_range: "2024-01",
+        },
+        {},
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.data[0]).toMatchObject({
+        category: "burglary",
+        month: "2024-01",
+      });
+      expect(result!.data[0]).not.toHaveProperty("offence_type");
+      expect(result!.data[0]).not.toHaveProperty("incident_date");
+    });
+
+    it("returns rows unchanged when no fieldMap is provided", async () => {
+      process.env.SHADOW_ADAPTER_ENABLED = "true";
+      vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
+        {
+          url: "https://data.gov.uk/bury-crimes.csv",
+          description: "Bury St Edmunds crime data 2024",
+          confidence: 0.7,
+        },
+      ]);
+      vi.mocked(sampleAndDetectFormat).mockResolvedValueOnce({
+        rows: [
+          {
+            category: "burglary",
+            month: "2024-01",
+            latitude: 52.2,
+            longitude: 0.7,
+          },
+        ],
+        format: "csv",
+        sampleSize: 1,
+      });
+
+      const result = await shadowAdapter.recover(
+        { name: "crime-uk" } as any,
+        {
+          intent: "crime",
+          location: "Bury St Edmunds",
+          country_code: "GB",
+          date_range: "2024-01",
+        },
+        {},
+      );
+
+      expect(result).not.toBeNull();
+      expect(result!.data[0]).toMatchObject({
+        category: "burglary",
+        month: "2024-01",
+      });
     });
   });
 });
