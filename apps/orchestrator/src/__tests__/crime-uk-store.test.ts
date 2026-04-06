@@ -1,17 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockPrisma, mockGetCurrentColumns } = vi.hoisted(() => ({
+const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    $queryRaw: vi.fn(),
-    $transaction: vi.fn(),
-    crimeResult: { create: vi.fn() },
+    queryResult: { createMany: vi.fn() },
   },
-  mockGetCurrentColumns: vi.fn(),
 }));
 
-vi.mock("../schema", () => ({
-  getCurrentColumns: mockGetCurrentColumns,
-}));
 const baseCrime = {
   category: "burglary",
   month: "2024-01",
@@ -28,111 +22,102 @@ const baseCrime = {
   location_subtype: "",
 };
 
-const baseColumns = [
-  "id",
-  "query_id",
-  "persistent_id",
-  "category",
-  "month",
-  "street",
-  "latitude",
-  "longitude",
-  "outcome_category",
-  "outcome_date",
-  "location_type",
-  "context",
-  "raw",
-];
-
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetCurrentColumns.mockResolvedValue(baseColumns);
-  mockPrisma.$transaction.mockResolvedValue([]);
-  mockPrisma.crimeResult.create.mockReturnValue({ then: vi.fn() });
+  mockPrisma.queryResult.createMany.mockResolvedValue({ count: 1 });
 });
 
 describe("storeResults", () => {
-  it("calls prisma.$transaction with the correct number of create operations", async () => {
+  it("does not call queryResult.createMany when crimes array is empty", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [], mockPrisma as any);
+    expect(mockPrisma.queryResult.createMany).not.toHaveBeenCalled();
+  });
+
+  it("calls queryResult.createMany once with all rows", async () => {
     const { storeResults } = await import("../domains/crime-uk/store");
     await storeResults("query-1", [baseCrime, baseCrime], mockPrisma as any);
-    expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
-    const ops = mockPrisma.$transaction.mock.calls[0][0];
-    expect(ops).toHaveLength(2);
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledOnce();
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data).toHaveLength(2);
   });
 
-  it("latitude is stored as a float, not a string", async () => {
+  it("lat is a float parsed from location.latitude string", async () => {
     const { storeResults } = await import("../domains/crime-uk/store");
     await storeResults("query-1", [baseCrime], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(typeof data.latitude).toBe("number");
-    expect(data.latitude).toBeCloseTo(52.2053);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(typeof data[0].lat).toBe("number");
+    expect(data[0].lat).toBeCloseTo(52.2053);
   });
 
-  it("longitude is stored as a float, not a string", async () => {
+  it("lon is a float parsed from location.longitude string", async () => {
     const { storeResults } = await import("../domains/crime-uk/store");
     await storeResults("query-1", [baseCrime], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(typeof data.longitude).toBe("number");
-    expect(data.longitude).toBeCloseTo(0.1218);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(typeof data[0].lon).toBe("number");
+    expect(data[0].lon).toBeCloseTo(0.1218);
+  });
+
+  it("category is set from crime.category", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].category).toBe("burglary");
+  });
+
+  it("location is the street name", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].location).toBe("Test Street");
+  });
+
+  it("date is a Date parsed from the month string", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].date).toBeInstanceOf(Date);
+    expect((data[0].date as Date).getFullYear()).toBe(2024);
+    expect((data[0].date as Date).getMonth()).toBe(0); // January
+  });
+
+  it("domain_name is crime-uk", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].domain_name).toBe("crime-uk");
+  });
+
+  it("source_tag is police-api", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].source_tag).toBe("police-api");
+  });
+
+  it("extras contains outcome_category, location_type, context, persistent_id", async () => {
+    const { storeResults } = await import("../domains/crime-uk/store");
+    await storeResults("query-1", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].extras).toMatchObject({
+      outcome_category: "Under investigation",
+      location_type: "Force",
+      context: "",
+      persistent_id: "abc123",
+    });
   });
 
   it("raw field contains the full original crime object", async () => {
     const { storeResults } = await import("../domains/crime-uk/store");
     await storeResults("query-1", [baseCrime], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(data.raw).toEqual(baseCrime);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].raw).toEqual(baseCrime);
   });
 
-  it("only writes columns that currently exist in the schema", async () => {
-    mockGetCurrentColumns.mockResolvedValue([
-      "id",
-      "query_id",
-      "category",
-      "month",
-    ]);
+  it("query_id is passed through", async () => {
     const { storeResults } = await import("../domains/crime-uk/store");
-    await storeResults("query-1", [baseCrime], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(Object.keys(data)).toEqual(
-      expect.arrayContaining(["query_id", "category", "month"]),
-    );
-    expect(data).not.toHaveProperty("latitude");
-    expect(data).not.toHaveProperty("street");
-  });
-
-  it("a column not in the schema is silently dropped", async () => {
-    mockGetCurrentColumns.mockResolvedValue(["id", "query_id", "category"]);
-    const { storeResults } = await import("../domains/crime-uk/store");
-    await storeResults("query-1", [baseCrime], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(data).not.toHaveProperty("month");
-    expect(data).not.toHaveProperty("latitude");
-  });
-
-  it("a new column added by schema evolution in the same request is written correctly", async () => {
-    mockGetCurrentColumns.mockResolvedValue([...baseColumns, "new_field"]);
-    const crimeWithNew = { ...baseCrime, new_field: "extra_value" } as any;
-    const { storeResults } = await import("../domains/crime-uk/store");
-    await storeResults("query-1", [crimeWithNew], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(data.new_field).toBe("extra_value");
-  });
-
-  it("unknown top-level fields are included in the flattened row", async () => {
-    mockGetCurrentColumns.mockResolvedValue([...baseColumns, "future_field"]);
-    const crimeWithUnknown = {
-      ...baseCrime,
-      future_field: "future_value",
-    } as any;
-    const { storeResults } = await import("../domains/crime-uk/store");
-    await storeResults("query-1", [crimeWithUnknown], mockPrisma as any);
-    const data = mockPrisma.crimeResult.create.mock.calls[0][0].data;
-    expect(data.future_field).toBe("future_value");
-  });
-
-  it("does not call prisma.$transaction when crimes array is empty", async () => {
-    const { storeResults } = await import("../domains/crime-uk/store");
-    await storeResults("query-1", [], mockPrisma as any);
-    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    await storeResults("query-abc", [baseCrime], mockPrisma as any);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].query_id).toBe("query-abc");
   });
 });
