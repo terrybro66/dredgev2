@@ -5,7 +5,7 @@ import type { Router } from "express";
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
-    crimeResult: {
+    queryResult: {
       findMany: vi.fn(),
     },
   },
@@ -27,38 +27,44 @@ function buildApp() {
 
 const sampleRows = [
   {
-    id: "r1",
+    id: "qr1",
     query_id: "q1",
+    domain_name: "crime-uk",
+    source_tag: "police-api",
+    lat: 52.2,
+    lon: 0.1,
+    location: "High Street",
+    description: null,
     category: "burglary",
-    month: "2024-01",
-    latitude: 52.2,
-    longitude: 0.1,
-    street: "High Street",
-    outcome_category: null,
-    outcome_date: null,
-    location_type: null,
-    context: null,
-    persistent_id: null,
+    value: null,
+    date: null,
+    raw: null,
+    extras: null,
+    snapshot_id: null,
+    created_at: new Date(),
   },
   {
-    id: "r2",
+    id: "qr2",
     query_id: "q1",
+    domain_name: "crime-uk",
+    source_tag: "police-api",
+    lat: 52.3,
+    lon: 0.2,
+    location: "Mill Road",
+    description: null,
     category: "burglary",
-    month: "2024-01",
-    latitude: 52.3,
-    longitude: 0.2,
-    street: "Mill Road",
-    outcome_category: null,
-    outcome_date: null,
-    location_type: null,
-    context: null,
-    persistent_id: null,
+    value: null,
+    date: null,
+    raw: null,
+    extras: null,
+    snapshot_id: null,
+    created_at: new Date(),
   },
 ];
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockPrisma.crimeResult.findMany.mockResolvedValue(sampleRows);
+  mockPrisma.queryResult.findMany.mockResolvedValue(sampleRows);
 });
 
 describe("GET /query/:id/export", () => {
@@ -77,7 +83,7 @@ describe("GET /query/:id/export", () => {
   });
 
   it("returns 404 when no results exist for the query ID", async () => {
-    mockPrisma.crimeResult.findMany.mockResolvedValue([]);
+    mockPrisma.queryResult.findMany.mockResolvedValue([]);
     const app = buildApp();
     const res = await request(app).get("/query/nonexistent/export?format=csv");
     expect(res.status).toBe(404);
@@ -105,8 +111,8 @@ describe("GET /query/:id/export", () => {
     const headers = lines[0].split(",");
     expect(headers).toContain("id");
     expect(headers).toContain("category");
-    expect(headers).toContain("latitude");
-    expect(headers).toContain("longitude");
+    expect(headers).toContain("lat");
+    expect(headers).toContain("lon");
   });
 
   it("CSV row count matches result count", async () => {
@@ -141,13 +147,50 @@ describe("GET /query/:id/export", () => {
     expect(feature.geometry.coordinates).toEqual([0.1, 52.2]);
   });
 
-  it("GeoJSON features have properties excluding latitude and longitude", async () => {
+  it("GeoJSON features have properties excluding lat and lon", async () => {
     const app = buildApp();
     const res = await request(app).get("/query/q1/export?format=geojson");
     const props = res.body.features[0].properties;
-    expect(props).not.toHaveProperty("latitude");
-    expect(props).not.toHaveProperty("longitude");
+    expect(props).not.toHaveProperty("lat");
+    expect(props).not.toHaveProperty("lon");
     expect(props).toHaveProperty("category");
-    expect(props).toHaveProperty("month");
+    expect(props).toHaveProperty("domain_name");
   });
+
+  const queryResultRows = [
+    {
+      id: "qr1",
+      query_id: "q2",
+      domain_name: "flood-uk",
+      source_tag: "shadow",
+      lat: 51.5,
+      lon: -0.1,
+      location: "Thames at Teddington",
+      description: "Flood alert",
+      category: "flood-alert",
+      value: 1.2,
+      date: null,
+      raw: null,
+      extras: null,
+      snapshot_id: null,
+      created_at: new Date(),
+    },
+    {
+      id: "qr2",
+      query_id: "q2",
+      domain_name: "flood-uk",
+      source_tag: "shadow",
+      lat: 51.6,
+      lon: -0.2,
+      location: "Thames at Richmond",
+      description: "Flood warning",
+      category: "flood-warning",
+      value: 1.8,
+      date: null,
+      raw: null,
+      extras: null,
+      snapshot_id: null,
+      created_at: new Date(),
+    },
+  ];
 });

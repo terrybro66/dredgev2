@@ -14,7 +14,7 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
     });
   }
 
-  const rows = await prisma.crimeResult.findMany({
+  const rows: any[] = await (prisma as any).queryResult.findMany({
     where: { query_id: req.params.id },
   });
 
@@ -32,16 +32,11 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
       'attachment; filename="dredge-export.csv"',
     );
 
-    const stringifier = stringify({
-      header: true,
-    });
-
+    const stringifier = stringify({ header: true });
     stringifier.pipe(res);
-
     for (const row of rows) {
       stringifier.write(row);
     }
-
     stringifier.end();
     return;
   }
@@ -54,21 +49,14 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
     );
 
     const features = rows.map((row: any) => {
-      const { latitude, longitude, ...properties } = row;
-
+      const { lat, lon, ...properties } = row;
       return {
         type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [longitude, latitude],
-        },
+        geometry: { type: "Point", coordinates: [lon, lat] },
         properties,
       };
     });
 
-    return res.json({
-      type: "FeatureCollection",
-      features,
-    });
+    return res.json({ type: "FeatureCollection", features });
   }
 });
