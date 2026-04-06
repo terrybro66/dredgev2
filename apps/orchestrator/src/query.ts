@@ -569,6 +569,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         if (rows.length > 0) {
           await (prisma as any).queryResult.createMany({
             data: (rows as Record<string, unknown>[]).map((row) => ({
+              query_id: queryRecord.id,
               domain_name: adapter.config.name,
               source_tag: (row._sourceTag as string) ?? adapter.config.name,
               date: row.date
@@ -576,13 +577,23 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
                 : row.month
                   ? new Date(`${row.month as string}-01`)
                   : null,
-              lat: ((row.lat ?? row.latitude) as number) ?? null,
-              lon: ((row.lon ?? row.longitude) as number) ?? null,
+              lat:
+                row.lat != null
+                  ? parseFloat(String(row.lat))
+                  : row.latitude != null
+                    ? parseFloat(String(row.latitude))
+                    : null,
+              lon:
+                row.lon != null
+                  ? parseFloat(String(row.lon))
+                  : row.longitude != null
+                    ? parseFloat(String(row.longitude))
+                    : null,
               location: (row.location as string) ?? null,
               description: (row.description as string) ?? null,
               category:
                 (row.category as string) ?? (row.type as string) ?? null,
-              value: (row.value as number) ?? null,
+              value: row.value != null ? parseFloat(String(row.value)) : null,
               raw: (row.raw as object) ?? row,
               extras: (row.extras as object) ?? null,
               snapshot_id: null,
@@ -656,7 +667,7 @@ FROM (
       });
     }
 
-    if (!isEphemeral) {
+    if (!isEphemeral && !isShadowRecovery) {
       await prisma.queryCache.create({
         data: {
           query_hash,
