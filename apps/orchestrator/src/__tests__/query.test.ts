@@ -46,6 +46,10 @@ const { mockPrisma } = vi.hoisted(() => ({
     apiAvailability: {
       upsert: vi.fn(),
     },
+    queryResult: {
+      createMany: vi.fn(),
+      findMany: vi.fn(),
+    },
     $queryRaw: vi.fn(),
   },
 }));
@@ -159,6 +163,8 @@ beforeEach(() => {
   mockPrisma.datasetSnapshot.create.mockResolvedValue({ id: "snap-id" });
   mockPrisma.apiAvailability.upsert.mockResolvedValue({});
   mockPrisma.$queryRaw.mockResolvedValue([]);
+  mockPrisma.queryResult.createMany.mockResolvedValue({});
+  mockPrisma.queryResult.findMany.mockResolvedValue([]);
 
   // ── NEW: defaults for the four previously-unmocked modules ──────────────────
   mockAcquire.mockResolvedValue(undefined);
@@ -389,6 +395,8 @@ describe("POST /query/execute", () => {
       .post("/query/execute")
       .send(validExecuteBody);
     expect(res.status).toBe(200);
+    console.log("500 body:", res.body);
+
     expect(res.body).toMatchObject({
       query_id: expect.any(String),
       plan: basePlan,
@@ -529,10 +537,6 @@ describe("cache, job tracking, and routing", () => {
       }),
     );
   });
-
-  // FIX: moved out of describe("POST /query/parse") where validExecuteBody
-  // was not yet declared, and mockGetDomainForQuery override now runs before
-  // buildApp() so the handler sees undefined from the registry lookup.
   it("returns 400 with unsupported_region when country_code has no adapter", async () => {
     mockGetDomainForQuery.mockReturnValue(undefined);
     const app = buildApp();
@@ -573,5 +577,53 @@ describe("cache, job tracking, and routing", () => {
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
     expect(res.body.intent).toBe("crime");
+  });
+});
+
+describe("shadow adapter recovery storage", () => {
+  const shadowRows = [
+    { category: "burglary", month: "2024-01", latitude: 52.2, longitude: 0.7 },
+  ];
+  const shadowResult = {
+    data: shadowRows,
+    fallback: {
+      field: "location" as const,
+      original: "Bury St Edmunds",
+      used: "Bury St Edmunds",
+      explanation: "Shadow source used",
+    },
+    newSource: {
+      sourceUrl: "https://data.gov.uk/bury-crimes.csv",
+      providerType: "csv",
+      confidence: 0.7,
+    },
+  };
+
+  beforeEach(() => {
+    mockFetchCrimes.mockResolvedValue([]);
+    mockShadowAdapter.isEnabled.mockReturnValue(true);
+    mockShadowAdapter.recover.mockResolvedValue(shadowResult);
+  });
+
+  it("writes shadow rows to queryResult.createMany, not adapter.storeResults", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalled();
+    expect(mockStoreResults).not.toHaveBeenCalled();
+  });
+
+  it("does not call evolveSchema for shadow-recovered rows", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockEvolveSchema).not.toHaveBeenCalled();
+  });
+
+  it("response includes fallback status when shadow data is used", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/execute")
+      .send(validExecuteBody);
+    expect(res.status).toBe(200);
+    expect(res.body.resultContext.status).toBe("fallback");
   });
 });
