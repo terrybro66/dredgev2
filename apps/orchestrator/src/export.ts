@@ -14,11 +14,11 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
     });
   }
 
-  const rows: any[] = await (prisma as any).queryResult.findMany({
+  const rows = await prisma.queryResult.findMany({
     where: { query_id: req.params.id },
   });
 
-  if (!rows || rows.length === 0) {
+  if (rows.length === 0) {
     return res.status(404).json({
       error: "not_found",
       message: "No results found for this query ID",
@@ -34,9 +34,17 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
 
     const stringifier = stringify({ header: true });
     stringifier.pipe(res);
+
     for (const row of rows) {
-      stringifier.write(row);
+      const serialized = Object.fromEntries(
+        Object.entries(row).map(([k, v]) => [
+          k,
+          v !== null && typeof v === "object" ? JSON.stringify(v) : v,
+        ]),
+      );
+      stringifier.write(serialized);
     }
+
     stringifier.end();
     return;
   }
@@ -48,14 +56,16 @@ exportRouter.get("/:id/export", async (req: Request, res: Response) => {
       'attachment; filename="dredge-export.geojson"',
     );
 
-    const features = rows.map((row: any) => {
-      const { lat, lon, ...properties } = row;
-      return {
-        type: "Feature",
-        geometry: { type: "Point", coordinates: [lon, lat] },
-        properties,
-      };
-    });
+    const features = rows
+      .filter((row) => row.lat != null && row.lon != null)
+      .map((row) => {
+        const { lat, lon, ...properties } = row;
+        return {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [lon, lat] },
+          properties,
+        };
+      });
 
     return res.json({ type: "FeatureCollection", features });
   }
