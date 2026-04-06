@@ -3,7 +3,9 @@ import {
   shadowAdapter,
   isValidShapeForDomain,
   isGeographicallyRelevant,
+  applyFieldMap,
 } from "../agent/shadow-adapter";
+
 import {
   searchAlternativeSources,
   sampleAndDetectFormat,
@@ -165,6 +167,14 @@ describe("ShadowAdapter", () => {
   });
 
   describe("applyFieldMap()", () => {
+    it("handles null and undefined elements in rows without throwing", () => {
+      const rows = [{ offence_type: "burglary" }, null, undefined];
+      const fieldMap = { offence_type: "category" };
+      expect(() => applyFieldMap(rows, fieldMap)).not.toThrow();
+      const result = applyFieldMap(rows, fieldMap) as any[];
+      expect(result[0]).toEqual({ category: "burglary" });
+    });
+
     it("renames source fields to canonical names", async () => {
       const { applyFieldMap } = await import("../agent/shadow-adapter");
       const rows = [{ offence_type: "burglary", incident_date: "2024-01" }];

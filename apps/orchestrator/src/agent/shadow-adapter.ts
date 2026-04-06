@@ -40,7 +40,9 @@ export function applyFieldMap(
 ): unknown[] {
   if (Object.keys(fieldMap).length === 0) return rows;
   return rows.map((row) => {
+    if (row == null) return row;
     const r = row as Record<string, unknown>;
+
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(r)) {
       const mapped = fieldMap[key];

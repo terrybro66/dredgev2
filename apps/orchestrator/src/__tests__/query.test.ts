@@ -626,4 +626,45 @@ describe("shadow adapter recovery storage", () => {
     expect(res.status).toBe(200);
     expect(res.body.resultContext.status).toBe("fallback");
   });
+
+  it("shadow storage rows include query_id", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({ query_id: "test-id" }),
+        ]),
+      }),
+    );
+  });
+
+  it("shadow storage parses string latitude and longitude to numbers", async () => {
+    mockShadowAdapter.recover.mockResolvedValue({
+      ...shadowResult,
+      data: [
+        {
+          category: "burglary",
+          month: "2024-01",
+          latitude: "52.2",
+          longitude: "0.7",
+        },
+      ],
+    });
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({ lat: 52.2, lon: 0.7 }),
+        ]),
+      }),
+    );
+  });
+
+  it("does not write to queryCache for shadow-recovered results", async () => {
+    const app = buildApp();
+    await request(app).post("/query/execute").send(validExecuteBody);
+    expect(mockPrisma.queryCache.create).not.toHaveBeenCalled();
+  });
 });
