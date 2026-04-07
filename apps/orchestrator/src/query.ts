@@ -21,6 +21,7 @@ import { classifyIntent } from "./semantic/classifier";
 import { findCuratedSource, resolveLocationSlug } from "./curated-registry";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
+import { setUserLocation, getUserLocation } from "./session";
 
 export const queryRouter = Router();
 
@@ -55,11 +56,39 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     return res.status(400).json(err);
   }
 
+  const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
+
+  // Detect "near me" — if the LLM returned a near-me placeholder, substitute
+  // the location stored from the user's last real query.
+  const NEAR_ME_PATTERN =
+    /\bnear\s+me\b|\bmy\s+location\b|\bmy\s+area\b|\bnearby\b/i;
+  if (NEAR_ME_PATTERN.test(plan.location) || NEAR_ME_PATTERN.test(text)) {
+    if (sessionId) {
+      const stored = await getUserLocation(sessionId);
+      if (stored) {
+        plan = {
+          ...plan,
+          location: stored.display_name,
+        };
+      }
+    }
+  }
+
   let geocoded;
   try {
     geocoded = await geocodeToPolygon(plan.location, prisma);
   } catch (err: any) {
     return res.status(400).json(err);
+  }
+
+  // Store resolved location for future "near me" queries
+  if (sessionId && !NEAR_ME_PATTERN.test(text)) {
+    await setUserLocation(sessionId, {
+      lat: geocoded.lat,
+      lon: geocoded.lon,
+      display_name: geocoded.display_name,
+      country_code: geocoded.country_code,
+    });
   }
 
   let intent: string | undefined;

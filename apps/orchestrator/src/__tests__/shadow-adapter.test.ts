@@ -4,6 +4,7 @@ import {
   isValidShapeForDomain,
   isGeographicallyRelevant,
   applyFieldMap,
+  checkPointInPolygon,
 } from "../agent/shadow-adapter";
 
 import {
@@ -20,6 +21,18 @@ describe("ShadowAdapter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+  const londonPolygon = {
+    type: "Polygon" as const,
+    coordinates: [
+      [
+        [-0.2, 51.4],
+        [0.0, 51.4],
+        [0.0, 51.6],
+        [-0.2, 51.6],
+        [-0.2, 51.4],
+      ],
+    ],
+  };
 
   describe("isEnabled()", () => {
     it("returns false when SHADOW_ADAPTER_ENABLED is not set", () => {
@@ -109,8 +122,178 @@ describe("ShadowAdapter", () => {
       ).toBe(true);
     });
   });
+  describe("checkPointInPolygon()", () => {
+    // ← add this back
+
+    const mockPrisma = {
+      $queryRaw: vi.fn(),
+    };
+
+    beforeEach(() => {
+      mockPrisma.$queryRaw.mockReset();
+    });
+
+    it("returns true when PostGIS reports the point is inside the polygon", async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([{ contains: true }]);
+      const result = await checkPointInPolygon(
+        { lat: 51.5, lon: -0.1 },
+        londonPolygon,
+        mockPrisma,
+      );
+      expect(result).toBe(true);
+    });
+
+    it("returns false when PostGIS reports the point is outside the polygon", async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([{ contains: false }]);
+      const result = await checkPointInPolygon(
+        { lat: 52.24, lon: 0.72 },
+        londonPolygon,
+        mockPrisma,
+      );
+      expect(result).toBe(false);
+    });
+
+    it("returns false when PostGIS returns an empty result", async () => {
+      mockPrisma.$queryRaw.mockResolvedValueOnce([]);
+      const result = await checkPointInPolygon(
+        { lat: 51.5, lon: -0.1 },
+        londonPolygon,
+        mockPrisma,
+      );
+      expect(result).toBe(false);
+    });
+
+    it("returns false when PostGIS throws", async () => {
+      mockPrisma.$queryRaw.mockRejectedValueOnce(new Error("PostGIS error"));
+      const result = await checkPointInPolygon(
+        { lat: 51.5, lon: -0.1 },
+        londonPolygon,
+        mockPrisma,
+      );
+      expect(result).toBe(false);
+    });
+  });
 
   describe("isGeographicallyRelevant()", () => {
+    describe("coverage-aware behaviour", () => {
+      it("national: accepts regardless of URL and description content", () => {
+        expect(
+          isGeographicallyRelevant("Bury St Edmunds", {
+            url: "https://data.gov.uk/uk-crime-statistics.csv",
+            description: "National crime data",
+            coverage: { type: "national", region: null, locationPolygon: null },
+          }),
+        ).toBe(true);
+      });
+
+      it("national: accepts even when URL contains a different city", () => {
+        expect(
+          isGeographicallyRelevant("Camden", {
+            url: "https://plymouth.gov.uk/data.csv",
+            description: "National crime statistics",
+            coverage: { type: "national", region: null, locationPolygon: null },
+          }),
+        ).toBe(true);
+      });
+
+      // In the coverage-aware describe — replace the local polygon tests with:
+
+      it("local with polygon but no prisma: falls back to token matching", () => {
+        expect(
+          isGeographicallyRelevant("London", {
+            url: "https://data.gov.uk/london-crimes.csv",
+            description: "London crime data",
+            coverage: {
+              type: "local",
+              region: null,
+              locationPolygon: londonPolygon,
+            },
+          }),
+        ).toBe(true); // token match: "london" in description
+      });
+
+      it("local with polygon but no prisma and no token match: returns false", () => {
+        expect(
+          isGeographicallyRelevant("Bury St Edmunds", {
+            url: "https://example-stats.co.uk/london-crimes.csv",
+            description: "London crime data",
+            coverage: {
+              type: "local",
+              region: null,
+              locationPolygon: londonPolygon,
+            },
+          }),
+        ).toBe(false); // no token match, no prisma for spatial check
+      });
+
+      it("regional: accepts when region name contains a query location token", () => {
+        expect(
+          isGeographicallyRelevant("Ipswich", {
+            url: "https://example-stats.co.uk/crimes.csv",
+            description: "Crime data",
+            coverage: {
+              type: "regional",
+              region: "Suffolk",
+              locationPolygon: null,
+            },
+          }),
+        ).toBe(false); // "ipswich" not in "suffolk", "suffolk" not in "ipswich" — falls through
+      });
+
+      it("regional: accepts when query location token appears in region name", () => {
+        expect(
+          isGeographicallyRelevant("West London", {
+            url: "https://data.gov.uk/crimes.csv",
+            description: "Crime data",
+            coverage: {
+              type: "regional",
+              region: "Greater London",
+              locationPolygon: null,
+            },
+          }),
+        ).toBe(true); // "london" appears in "Greater London"
+      });
+
+      it("unknown coverage: falls back to token matching (match)", () => {
+        expect(
+          isGeographicallyRelevant("Camden", {
+            url: "https://data.gov.uk/camden-crimes.csv",
+            description: "Crime data",
+            coverage: { type: "unknown", region: null, locationPolygon: null },
+          }),
+        ).toBe(true);
+      });
+
+      it("unknown coverage: falls back to token matching (no match)", () => {
+        expect(
+          isGeographicallyRelevant("Camden", {
+            url: "https://example-stats.co.uk/plymouth-crimes.csv",
+            description: "Plymouth crime data",
+            coverage: { type: "unknown", region: null, locationPolygon: null },
+          }),
+        ).toBe(false);
+      });
+
+      it("null coverage: falls back to token matching (backward compat)", () => {
+        expect(
+          isGeographicallyRelevant("Camden", {
+            url: "https://data.gov.uk/camden-crimes.csv",
+            description: "Crime data",
+            coverage: null,
+          }),
+        ).toBe(true);
+      });
+
+      it("absent coverage: falls back to token matching (backward compat)", () => {
+        expect(
+          isGeographicallyRelevant("Camden", {
+            url: "https://data.gov.uk/camden-crimes.csv",
+            description: "Crime data",
+          }),
+        ).toBe(true);
+      });
+    });
+
     it("returns false when source URL contains a different UK city", () => {
       expect(
         isGeographicallyRelevant("Bury St Edmunds", {
@@ -201,6 +384,53 @@ describe("ShadowAdapter", () => {
   });
 
   describe("recover()", () => {
+    it("rejects a local-coverage source when PostGIS says point is outside polygon", async () => {
+      process.env.SHADOW_ADAPTER_ENABLED = "true";
+      vi.mocked(searchAlternativeSources).mockResolvedValueOnce([
+        {
+          url: "https://data.gov.uk/london-crimes.csv",
+          description: "London crime data",
+          confidence: 0.8,
+          coverage: {
+            type: "local",
+            region: null,
+            locationPolygon: {
+              type: "Polygon",
+              coordinates: [
+                [
+                  [-0.2, 51.4],
+                  [0.0, 51.4],
+                  [0.0, 51.6],
+                  [-0.2, 51.6],
+                  [-0.2, 51.4],
+                ],
+              ],
+            },
+          },
+        },
+      ]);
+
+      const mockPrismaWithSpatial = {
+        $queryRaw: vi.fn().mockResolvedValueOnce([{ contains: false }]),
+        apiAvailability: { upsert: vi.fn() },
+      };
+
+      const result = await shadowAdapter.recover(
+        { name: "crime-uk" } as any,
+        {
+          intent: "crime",
+          location: "Bury St Edmunds",
+          country_code: "GB",
+          date_range: "2024-01",
+          queryPoint: { lat: 52.24, lon: 0.72 },
+        },
+        mockPrismaWithSpatial,
+      );
+
+      expect(result).toBeNull();
+      expect(sampleAndDetectFormat).not.toHaveBeenCalled();
+    });
+
     it("returns null when disabled", async () => {
       delete process.env.SHADOW_ADAPTER_ENABLED;
       const result = await shadowAdapter.recover(

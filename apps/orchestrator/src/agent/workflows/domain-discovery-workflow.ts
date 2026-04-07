@@ -22,6 +22,11 @@ export interface ProposedDomainConfig {
   storeResults: boolean;
   refreshPolicy: "realtime" | "daily" | "weekly" | "static";
   ephemeralRationale: string;
+  coverage: {
+    type: "national" | "regional" | "local" | "unknown";
+    region: string | null;
+    locationPolygon: { type: "Polygon"; coordinates: number[][][] } | null;
+  };
 }
 
 // Direct file extensions that don't need browser resolution
@@ -255,6 +260,11 @@ Propose:
    data that benefits from caching and history (e.g. crime statistics, flood risk, planning applications).
 5. A refresh policy: "realtime" (fetch live, never cache), "daily", "weekly", or "static" (never changes).
 6. A brief rationale explaining the storeResults decision (ephemeralRationale).
+7. Geographic coverage of this data source:
+   - "national": covers the entire country (e.g. UK-wide crime statistics)
+   - "regional": covers a specific region or county — provide the region name (e.g. "East of England")
+   - "local": specific to one city or small area — provide a GeoJSON Polygon if you can infer one from the URL/description
+   - "unknown": cannot determine coverage from the available information
 
 Return only JSON in this exact shape:
 {
@@ -263,8 +273,14 @@ Return only JSON in this exact shape:
   "confidence": 0.8,
   "storeResults": true,
   "refreshPolicy": "weekly",
-  "ephemeralRationale": "Crime statistics are stable reference data that benefit from caching."
-}`;
+  "ephemeralRationale": "Crime statistics are stable reference data.",
+  "coverage": {
+    "type": "national",
+    "region": null,
+    "locationPolygon": null
+  }
+}
+`;
 
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -299,6 +315,11 @@ Return only JSON in this exact shape:
       storeResults: parsed.storeResults ?? true,
       refreshPolicy: parsed.refreshPolicy ?? "weekly",
       ephemeralRationale: parsed.ephemeralRationale ?? "",
+      coverage: {
+        type: parsed.coverage?.type ?? "unknown",
+        region: parsed.coverage?.region ?? null,
+        locationPolygon: parsed.coverage?.locationPolygon ?? null,
+      },
     };
   } catch (err) {
     console.error(

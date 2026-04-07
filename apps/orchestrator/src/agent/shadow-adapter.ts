@@ -9,6 +9,7 @@ export interface ShadowContext {
   location: string;
   country_code: string;
   date_range: string;
+  queryPoint?: { lat: number; lon: number } | null;
 }
 
 export interface ShadowNewSource {
@@ -21,6 +22,18 @@ export interface ShadowResult {
   data: unknown[];
   fallback: FallbackInfo;
   newSource: ShadowNewSource;
+}
+
+export interface Coverage {
+  type: "national" | "regional" | "local" | "unknown";
+  region?: string | null;
+  locationPolygon?: { type: "Polygon"; coordinates: number[][][] } | null;
+}
+
+export interface CandidateWithCoverage {
+  url: string;
+  description: string;
+  coverage?: Coverage | null;
 }
 
 const DOMAIN_SHAPE_RULES: Record<
@@ -42,7 +55,6 @@ export function applyFieldMap(
   return rows.map((row) => {
     if (row == null) return row;
     const r = row as Record<string, unknown>;
-
     const out: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(r)) {
       const mapped = fieldMap[key];
@@ -62,6 +74,24 @@ export function isValidShapeForDomain(
   return rule(rows[0] as Record<string, unknown>);
 }
 
+export async function checkPointInPolygon(
+  point: { lat: number; lon: number },
+  polygon: { type: "Polygon"; coordinates: number[][][] },
+  prisma: any,
+): Promise<boolean> {
+  try {
+    const result = await prisma.$queryRaw<{ contains: boolean }[]>`
+      SELECT ST_Contains(
+        ST_GeomFromGeoJSON(${JSON.stringify(polygon)}),
+        ST_SetSRID(ST_MakePoint(${point.lon}, ${point.lat}), 4326)
+      ) AS contains
+    `;
+    return result[0]?.contains === true;
+  } catch {
+    return false;
+  }
+}
+
 const NATIONAL_SOURCE_HOSTS = [
   "environment.data.gov.uk",
   "data.police.uk",
@@ -72,8 +102,37 @@ const NATIONAL_SOURCE_HOSTS = [
 
 export function isGeographicallyRelevant(
   location: string,
-  candidate: { url: string; description: string },
+  candidate: CandidateWithCoverage,
 ): boolean {
+  const coverage = candidate.coverage;
+
+  // national: always accept
+  if (coverage?.type === "national") return true;
+
+  // regional: bidirectional token match between location and region name
+  if (coverage?.type === "regional" && coverage.region) {
+    const locationTokens = location
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .filter((t) => t.length > 2);
+    const regionTokens = coverage.region
+      .toLowerCase()
+      .split(/[\s,]+/)
+      .filter((t) => t.length > 2);
+    const locationInRegion = locationTokens.some((t) =>
+      coverage.region!.toLowerCase().includes(t),
+    );
+    const regionInLocation = regionTokens.some((t) =>
+      location.toLowerCase().includes(t),
+    );
+    if (locationInRegion || regionInLocation) return true;
+    // no token overlap — fall through to token matching on URL/description
+  }
+
+  // local with polygon but no prisma: fall through to token matching
+  // (checkPointInPolygon is called separately in recover() when prisma is available)
+
+  // known national hosts: always accept
   try {
     const host = new URL(candidate.url).hostname;
     if (
@@ -82,19 +141,16 @@ export function isGeographicallyRelevant(
       return true;
     }
   } catch {
-    // malformed URL — fall through to token check
+    // malformed URL — fall through
   }
 
+  // token matching on URL + description
   const tokens = location
     .toLowerCase()
     .split(/[\s,]+/)
     .filter((t) => t.length > 2);
-
   const haystack = (candidate.url + " " + candidate.description).toLowerCase();
-
-  if (tokens.some((t) => haystack.includes(t))) return true;
-
-  return false;
+  return tokens.some((t) => haystack.includes(t));
 }
 
 export const shadowAdapter = {
@@ -105,7 +161,7 @@ export const shadowAdapter = {
   async recover(
     config: DomainConfig,
     context: ShadowContext,
-    _prisma: unknown,
+    prisma: any,
   ): Promise<ShadowResult | null> {
     if (!this.isEnabled()) return null;
 
@@ -129,6 +185,7 @@ export const shadowAdapter = {
 
       const top = candidates.sort((a, b) => b.confidence - a.confidence)[0];
 
+      // Stage 1: sync geography check (national / regional / token matching)
       if (!isGeographicallyRelevant(context.location, top)) {
         console.log(
           JSON.stringify({
@@ -140,11 +197,33 @@ export const shadowAdapter = {
         return null;
       }
 
-      const sampled = await sampleAndDetectFormat(top.url);
+      // Stage 2: PostGIS point-in-polygon for local sources with a polygon
+      const topCoverage = (top as any).coverage as Coverage | null | undefined;
+      if (
+        topCoverage?.type === "local" &&
+        topCoverage.locationPolygon &&
+        context.queryPoint
+      ) {
+        const inside = await checkPointInPolygon(
+          context.queryPoint,
+          topCoverage.locationPolygon,
+          prisma,
+        );
+        if (!inside) {
+          console.log(
+            JSON.stringify({
+              event: "shadow_adapter_polygon_rejected",
+              url: top.url,
+              location: context.location,
+            }),
+          );
+          return null;
+        }
+      }
 
+      const sampled = await sampleAndDetectFormat(top.url);
       if (!sampled || sampled.rows.length === 0) return null;
 
-      // Apply fieldMap before shape validation so remapped rows can pass the check
       const fieldMap: Record<string, string> = (top as any).fieldMap ?? {};
       const mappedRows = applyFieldMap(sampled.rows, fieldMap);
 
