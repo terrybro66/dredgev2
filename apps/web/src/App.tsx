@@ -333,11 +333,16 @@ function IntentErrorPanel({
   );
   const isServiceError =
     error.error === "network_error" || error.error === "execute_error";
+  const isNotSupported = error.error === "not_supported";
 
   return (
     <div className="error-panel">
       <div className="error-label">
-        {isServiceError ? "SERVICE ERROR" : "COULD NOT INTERPRET QUERY"}
+        {isNotSupported
+          ? "NOT SUPPORTED YET"
+          : isServiceError
+            ? "SERVICE ERROR"
+            : "COULD NOT INTERPRET QUERY"}
       </div>
       <p className="error-message">{error.message}</p>
       {!isServiceError && (
@@ -1184,9 +1189,9 @@ export default function App() {
         body: JSON.stringify({ ...(parseData as object), rawText: text }),
       });
       const data = await res.json();
-      if (!res.ok) {
+      if (!res.ok || data.error) {
         setIntentError({
-          error: "execute_error",
+          error: data.error ?? "execute_error",
           understood: {},
           missing: [],
           message:

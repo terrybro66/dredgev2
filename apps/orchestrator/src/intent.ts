@@ -39,8 +39,12 @@ Rules:
     no date mentioned → date_from and date_to both = ${lastMonthStr}
 - Do NOT include viz_hint in your output.
 
-If the user's intent maps to a known domain, use that domain's slug as the category.
-Default to "unknown" when the intent is unclear rather than forcing a domain-specific value.\``;
+The supported category slugs are:
+  crime, weather, flood risk, transport, cinema listings, population statistics
+
+If the user's intent clearly matches one of these, use that slug exactly.
+If the intent does not match any supported category, return category: "unknown".
+Never invent a new category slug.\``;
 }
 
 export function stripFences(text: string): string {

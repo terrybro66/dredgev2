@@ -511,15 +511,15 @@ describe("cache, job tracking, and routing", () => {
       }),
     );
   });
-  it("returns 400 with unsupported_region when country_code has no adapter", async () => {
+  it("returns 200 with not_supported when country_code has no adapter", async () => {
     mockGetDomainForQuery.mockReturnValue(undefined);
     const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
       .send({ ...validExecuteBody, country_code: "US" });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe("unsupported_region");
-    expect(res.body.country_code).toBe("US");
+    expect(res.status).toBe(200);
+    expect(res.body.error).toBe("not_supported");
+    expect(res.body.supported).toBeInstanceOf(Array);
   });
 
   it("returns country_code from geocoder in parse payload", async () => {

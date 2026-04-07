@@ -315,15 +315,25 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
             : plan.category !== "unknown"
               ? plan.category
               : `${plan.category} in ${plan.location}`;
-        await domainDiscovery.run(
-          { intent: discoveryIntent, country_code },
-          prisma,
-        );
+        // Non-blocking — don't await so the user gets a fast response
+        domainDiscovery
+          .run({ intent: discoveryIntent, country_code }, prisma)
+          .catch(() => {});
       }
-      return res.status(400).json({
-        error: "unsupported_region",
-        message: `No data source available for country: ${country_code} / intent: ${intent}. Discovery pipeline triggered — check admin for review.`,
-        country_code,
+      return res.status(200).json({
+        error: "not_supported",
+        message:
+          routingIntent && routingIntent !== "unknown"
+            ? `We don't have a data source for "${routingIntent}" yet. We've added it to our review queue.`
+            : `We couldn't understand that query. Try asking about crime, weather, flooding, transport, cinema listings, or population statistics.`,
+        supported: [
+          "crime",
+          "weather",
+          "flood risk",
+          "transport",
+          "cinema listings",
+          "population statistics",
+        ],
         discovery_triggered: domainDiscovery.isEnabled(),
       });
     }
