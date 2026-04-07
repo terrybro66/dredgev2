@@ -300,6 +300,9 @@ model DataSource {
   lastRowCount     Int?
   extrasSchema     Json?
   createdAt        DateTime      @default(now())
+  coverageType    String?   // "national" | "regional" | "local" | "unknown"
+  coverageRegion  String?   // e.g. "East of England" — for regional sources
+  coveragePolygon Json?     // GeoJSON Polygon — for local sources
 
   @@unique([domainName, url])
   @@map("data_sources")

@@ -87,6 +87,7 @@ const highConfidenceGovConfig = {
   ephemeralRationale: "",
   confidence: 0.95,
   sampleRows: [{ description: "Flood alert" }],
+  coverage: { type: "national" as const, region: null, locationPolygon: null },
 };
 
 const lowConfidenceConfig = {

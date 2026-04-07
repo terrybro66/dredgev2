@@ -160,6 +160,11 @@ describe("DomainDiscoveryPipeline", () => {
       refreshPolicy: "realtime",
       ephemeralRationale:
         "Cinema showtimes change daily and have no value being stored.",
+      coverage: {
+        type: "unknown" as const,
+        region: null,
+        locationPolygon: null,
+      },
     });
 
     const { domainDiscovery } = await import("../agent/domain-discovery");
