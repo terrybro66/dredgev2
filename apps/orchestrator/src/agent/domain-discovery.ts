@@ -5,6 +5,7 @@ import {
 } from "./workflows/domain-discovery-workflow";
 import { shouldAutoApprove, autoApprovalReason } from "./auto-approval";
 import { registerDiscoveredDomain } from "./registration";
+import { sendTelegramMessage } from "../notify";
 
 export interface DiscoveryContext {
   intent: string;
@@ -180,6 +181,15 @@ export const domainDiscovery = {
           refresh_policy: proposed.refreshPolicy,
           auto_approve_reason: reason,
         }),
+      );
+      await sendTelegramMessage(
+        `🔍 *Domain review required*\n\n` +
+          `Intent: \`${context.intent}\` (${context.country_code})\n` +
+          `Proposed: \`${proposed.name}\`\n` +
+          `Confidence: ${proposed.confidence.toFixed(2)}\n` +
+          `Source: ${top.url}\n` +
+          `Store results: ${proposed.storeResults}\n\n` +
+          `Approve: POST /admin/discovery/{id}/approve`,
       );
 
       return null;

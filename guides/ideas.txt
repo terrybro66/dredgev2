@@ -1,0 +1,436 @@
+Overview
+This document provides a high-level, code-free todo list for migrating from the current DREDGE system to the full connected domain reasoning architecture described in the evolution plan. Each item is a discrete milestone with estimated effort and dependencies.
+
+Phase 1: Foundation — Zero-Code Domain Addition
+Goal: Domains can be added without code changes
+Duration: 2-3 weeks
+
+1.1 Database Foundation
+Create the hybrid query_results table migration
+
+Migrate existing crime and weather data to new table
+
+Create Domain and DataSource models
+
+Add PostGIS extension for spatial queries (if not already)
+
+Write migration for domain relationships table (future-proofing)
+
+Add indexes on frequently queried fields
+
+1.2 Registry Rewrite
+Convert in-memory domain registry to database-backed loader
+
+Implement hot-reload on domain changes
+
+Add domain lookup by intent patterns
+
+Write domain factory that builds adapters from database config
+
+Test: Add a test domain via database, verify it appears in registry
+
+1.3 Registration Implementation
+Implement ephemeral registration path (no storage)
+
+Implement persistent registration path (uses query_results)
+
+Add automatic query retry after registration
+
+Test: Discover cinema domain, approve, verify subsequent queries work
+
+1.4 Admin Endpoints
+Build GET /admin/discovery endpoint
+
+Build POST /admin/discovery/:id/approve with override support
+
+Build POST /admin/discovery/:id/reject
+
+Add basic authentication to admin routes
+
+Create simple admin UI (HTML or JSON view)
+
+1.5 Cleanup
+Remove old per-domain table creation code
+
+Archive crime-specific code that's no longer needed
+
+Update all tests to use new registry
+
+Document how to add a domain without code
+
+Phase 2: Output Generators — Multi-Modal Results
+Goal: Support video, audio, 3D, and itinerary outputs
+Duration: 6-10 weeks (can be parallelized)
+
+2.1 Output Generator Infrastructure
+Define OutputGenerator interface
+
+Build output router that selects generator by query type
+
+Create output_artifacts and artifact_snapshots tables
+
+Add artifact storage to workspace system
+
+2.2 Video Generator (Remotion)
+Evaluate Remotion for server-side rendering
+
+Create basic Remotion template for tutorials
+
+Build asset sourcing from Unsplash/other APIs
+
+Implement video render queue (async)
+
+Add video export and sharing
+
+Test: Generate tutorial video for a query
+
+2.3 Audio Generator (Magenta/Tone.js)
+Evaluate Magenta.js or Magenta API
+
+Build composition parameter extraction from intent
+
+Implement MIDI generation pipeline
+
+Add Tone.js preview component
+
+Test: Generate song from text description
+
+2.4 3D Scene Generator (Three.js)
+Evaluate React Three Fiber setup
+
+Build sentiment-to-scene parameter mapping
+
+Create reusable 3D scene components
+
+Implement GLTF export
+
+Test: Generate scene from sentiment data
+
+2.5 Itinerary Generator
+Build greedy interval scheduling algorithm
+
+Integrate travel time API (Google Maps)
+
+Add travel time caching
+
+Build itinerary UI with timeline view
+
+Test: Generate Fringe show itinerary
+
+Phase 3: Tool Library — Reusable Primitives
+Goal: Extract core capabilities into composable tools
+Duration: 2-3 weeks
+
+3.1 Core Data Tools
+Create fetch_data tool (existing, wrap as tool)
+
+Create filter_by_constraints tool
+
+Create rank_by_preference tool with scoring
+
+Create group_by_location tool for clustering
+
+3.2 Spatial Tools
+Create calculate_travel tool with Google Maps integration
+
+Create calculate_reachable_area tool (isochrones)
+
+Add train-specific reachable area for UK rail
+
+Build travel time cache with 30-day TTL
+
+Precompute travel times for common domains (Edinburgh Fringe venues)
+
+3.3 Optimization Tools
+Create optimize_schedule tool (greedy + DP options)
+
+Add weighted optimization for quality-based queries
+
+Create sequence_by_geography tool (traveling salesman approximation)
+
+3.4 Procedural Tools
+Create sequence_steps tool for procedural guidance
+
+Create generate_checklist tool
+
+Create suggest_followups tool (anticipate next questions)
+
+3.5 Scraping Tool
+Deploy Stagehand as a service (or integrate directly)
+
+Create scrape_website tool with schema extraction
+
+Add cache for scraped content (avoid re-scraping)
+
+Phase 4: Reasoning Agent — Mastra Integration
+Goal: Agent composes tools autonomously
+Duration: 3-4 weeks
+
+4.1 Mastra Setup
+Install and configure Mastra
+
+Set up OpenRouter with Claude/GPT model
+
+Create base reasoning agent with system prompt
+
+Register all Phase 3 tools with agent
+
+4.2 Agent Execution
+Implement agent execution loop with tool calling
+
+Add tool result handling and continuation
+
+Build response synthesis from tool outputs
+
+Create output type detection from agent responses
+
+4.3 Workflow Templates
+Create itinerary workflow template
+
+Create reachable area workflow template
+
+Create procedural guide workflow template
+
+Create cross-domain query workflow template
+
+Implement workflow selector (agent chooses or uses template)
+
+4.4 Basic Session Memory
+Set up Redis for session storage
+
+Create session memory service (get/set/update)
+
+Add user location to session
+
+Add license status to session
+
+Test: Session persists across queries
+
+4.5 Agent Testing
+Test agent on hunting license query
+
+Test agent on itinerary query
+
+Test agent on train travel query
+
+Test agent on cross-domain query
+
+Iterate on prompts based on failures
+
+Phase 4.5: Domain Relationships — Connected Reasoning
+Goal: Domains understand relationships to each other
+Duration: 5 weeks
+
+4.5.1 Relationship Discovery
+Create DomainRelationship database table
+
+Build relationship discovery tool (LLM analyzes domains)
+
+Add relationship auto-approval for high confidence
+
+Create admin UI for reviewing proposed relationships
+
+Test: Auto-discover license → hunting zones relationship
+
+4.5.2 Cross-Domain Tools
+Create overlay_spatial_data tool (intersection, union, difference)
+
+Create merge_domains tool (unify data from multiple domains)
+
+Build relationship-aware query router
+
+Add spatial join key detection (county, zip, coordinates)
+
+4.5.3 Advanced Session Memory
+Add license status to session (type, species, expiry)
+
+Add user preferences to session (land type, species, distance)
+
+Add previous query context for refinements
+
+Implement context extraction from user responses
+
+Test: Session remembers license across queries
+
+4.5.4 Cross-Domain UI
+Add context banner showing license status
+
+Create interactive map with overlay controls
+
+Build recommendation list component
+
+Add source/relationship attribution
+
+Create shareable itinerary generator
+
+4.5.5 Workspace Enhancement
+Add cross-domain overlay items to workspaces
+
+Support workspace items with multiple source domains
+
+Add "create itinerary from workspace" feature
+
+4.5.6 Testing & Optimization
+Test end-to-end: license → hunting spots → itinerary
+
+Performance test spatial overlays
+
+Cache relationship lookups
+
+Document relationship patterns for future domains
+
+Phase 5: Autonomous Discovery — Learning System
+Goal: Agent discovers new domains and tools automatically
+Duration: 3-4 weeks
+
+5.1 Autonomous Discovery Agent
+Create capability gap detection (agent knows when it can't answer)
+
+Build discovery trigger from failed queries
+
+Implement auto-approval for low-risk domains (confidence > 0.9)
+
+Add risk assessment for discovered domains
+
+Create discovery audit trail
+
+5.2 Tool Discovery
+Build tool proposal from discovery results
+
+Implement tool auto-registration for high-confidence proposals
+
+Create tool registry table
+
+Add tool versioning for updates
+
+Test: Agent discovers and registers new tool for carbon footprint
+
+5.3 Learning Loop
+Track successful and failed queries
+
+Identify patterns in successful tool compositions
+
+Update system prompts based on successful patterns
+
+Suggest new tools for repeated patterns
+
+Create learning dashboard for admin
+
+5.4 Feedback Collection
+Add user feedback buttons (helpful/not helpful)
+
+Store feedback with query and response
+
+Use feedback to adjust confidence thresholds
+
+Create feedback review queue for admin
+
+Test: Feedback improves future responses
+
+5.5 Monitoring
+Add telemetry for domain discovery events
+
+Monitor tool usage patterns
+
+Track relationship discovery quality
+
+Set up alerts for failed discoveries
+
+Create observability dashboard
+
+Cross-Cutting Tasks (Throughout)
+Documentation
+Update API documentation for new endpoints
+
+Document domain relationship patterns
+
+Create admin user guide for discovery approval
+
+Write developer guide for adding tools
+
+Document session memory structure
+
+Testing Infrastructure
+Add integration tests for domain registration
+
+Add end-to-end tests for hunting license flow
+
+Add performance benchmarks for spatial overlays
+
+Create test fixtures for sample domains
+
+Add regression tests for existing functionality
+
+Deployment
+Update docker-compose with Redis service
+
+Add PostGIS extension to PostgreSQL container
+
+Create migration runner for production
+
+Set up Stagehand service deployment
+
+Configure environment variables for all services
+
+Security
+Add rate limiting to admin endpoints
+
+Implement API key rotation for external services
+
+Sanitize scraped content
+
+Add file upload scanning (for game saves)
+
+Set up audit logging for admin actions
+
+Dependency Map
+text
+Phase 1 ─────────────────────────────────────────────────────────────┐
+   │                                                                 │
+   ▼                                                                 │
+Phase 2 ─────────────────────────────────────────────────────────┐   │
+   │                                                             │   │
+   ▼                                                             │   │
+Phase 3 ──────────────────────────────────────────────────────┐  │   │
+   │                                                          │  │   │
+   ▼                                                          │  │   │
+Phase 4 ─────────────────────────────────────────────────┐   │  │   │
+   │                                                     │   │  │   │
+   ▼                                                     ▼   ▼  ▼   ▼
+Phase 4.5 ─────────────────────────────────────────────────────────┐
+   │                                                             │
+   ▼                                                             │
+Phase 5 ─────────────────────────────────────────────────────────┘
+Parallelizable paths:
+
+Phase 2 output generators can be worked on in parallel by different team members
+
+Phase 3 tools can be built after Phase 1, independent of Phase 2
+
+Phase 4.5 depends on Phase 4, but Phase 5 can start after Phase 4.5
+
+Summary
+Phase	Tasks	Duration	Dependencies
+Phase 1	15 tasks	2-3 weeks	None
+Phase 2	15 tasks	6-10 weeks	Phase 1
+Phase 3	15 tasks	2-3 weeks	Phase 1
+Phase 4	15 tasks	3-4 weeks	Phase 3
+Phase 4.5	20 tasks	5 weeks	Phase 4
+Phase 5	15 tasks	3-4 weeks	Phase 4.5
+Cross-cutting	15 tasks	Ongoing	All
+Total estimated time: 21-29 weeks with a dedicated team
+With parallelization: 16-22 weeks
+
+Immediate Next Steps (Week 1)
+Create query_results table migration — This is the foundation everything else depends on
+
+Migrate crime and weather data — Ensure existing functionality continues
+
+Build basic Domain and DataSource models — Start with schema, not full logic
+
+Write admin approval endpoints — Simple GET/POST, authentication later
+
+Test adding a test domain via database — Manual verification before automation
+
+Once these are complete, the system is at a point where you can add new domains without code. From there, you can prioritize which output generators or tool library items make sense for your first use cases (cinema itineraries, hunting licenses, or game herd maps).
+
