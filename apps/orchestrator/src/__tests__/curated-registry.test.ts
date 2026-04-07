@@ -446,7 +446,7 @@ describe("query pipeline — curated source path", () => {
     expect(mockDomainDiscovery.run).toHaveBeenCalledOnce();
   });
 
-  it("does NOT trigger discovery when curated registry returns a match", async () => {
+  it("triggers discovery in the background when curated registry returns a match", async () => {
     mockGetDomainForQuery.mockReturnValue(undefined);
     mockFindCuratedSource.mockReturnValue(curatedEphemeralSource);
     mockDomainDiscovery.isEnabled.mockReturnValue(true);
@@ -454,7 +454,8 @@ describe("query pipeline — curated source path", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(executeBody);
 
-    expect(mockDomainDiscovery.run).not.toHaveBeenCalled();
+    // Discovery fires (non-blocking) so a proper adapter can be built over time
+    expect(mockDomainDiscovery.run).toHaveBeenCalledOnce();
   });
 
   it("registered adapter takes priority over curated registry", async () => {

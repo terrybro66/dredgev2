@@ -158,6 +158,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   // Map crime subcategories to the registered intent slug.
   // The LLM returns "burglary" as category but the registry uses "crime".
+  // Similarly, LLM variants of other intents are normalised here.
   const CATEGORY_TO_INTENT: Record<string, string> = {
     burglary: "crime",
     "all-crime": "crime",
@@ -167,6 +168,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "bicycle-theft": "crime",
     "anti-social-behaviour": "crime",
     "vehicle-crime": "crime",
+    flooding: "flood risk",
+    "flood warnings": "flood risk",
+    "flood alerts": "flood risk",
+    "flood risk": "flood risk",
     shoplifting: "crime",
     "criminal-damage-arson": "crime",
     "other-theft": "crime",
@@ -189,6 +194,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       : null;
 
     if (curatedSource) {
+      // Background: trigger discovery so a proper adapter can be built over time.
+      // Don't await — this must not block the user's response.
+      if (domainDiscovery.isEnabled()) {
+        domainDiscovery
+          .run(
+            { intent: routingIntent ?? plan.category, country_code },
+            prisma,
+          )
+          .catch(() => {}); // non-fatal
+      }
+
       // Build an on-the-fly adapter from the curated source
       const source = curatedSource; // capture for closures
       adapter = {
@@ -685,7 +701,7 @@ FROM (
         adapter.config.prismaModel
       ].findMany({
         where: { query_id: queryRecord.id },
-        orderBy: { [adapter.config.defaultOrderBy ?? "date"]: "asc" } as any,
+        orderBy: (adapter.config.defaultOrderBy ?? { date: "asc" }) as any,
       });
     }
 

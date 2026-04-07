@@ -1,0 +1,9 @@
+{
+	"id": "enS12j7x3Un64dj",
+	"json": "{\"id\":\"enS12j7x3Un64dj\",\"url\":\"https://www.bing.com/search?q=flooding%20open%20data%20GB%20government%20dataset%20filetype%3Acsv%20OR%20filetype%3Ajson\",\"loadedUrl\":\"https://www.bing.com/search?q=flooding%20open%20data%20GB%20government%20dataset%20filetype%3Acsv%20OR%20filetype%3Ajson\",\"uniqueKey\":\"https://www.bing.com/search?q=flooding+open+data+GB+government+dataset+filetype%3Acsv+OR+filetype%3Ajson\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"state\":4}},\"handledAt\":\"2026-04-07T10:30:36.705Z\"}",
+	"method": "GET",
+	"orderNo": null,
+	"retryCount": 0,
+	"uniqueKey": "https://www.bing.com/search?q=flooding+open+data+GB+government+dataset+filetype%3Acsv+OR+filetype%3Ajson",
+	"url": "https://www.bing.com/search?q=flooding%20open%20data%20GB%20government%20dataset%20filetype%3Acsv%20OR%20filetype%3Ajson"
+}

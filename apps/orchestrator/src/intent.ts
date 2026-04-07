@@ -55,7 +55,7 @@ export function deriveVizHint(
   rawText: string,
   intent = "unknown",
 ): VizHint {
-  if (intent === "weather") return "dashboard";
+  if (intent === "weather" || plan.category === "weather") return "dashboard";
   const lower = rawText.toLowerCase();
   if (
     lower.includes("list") ||

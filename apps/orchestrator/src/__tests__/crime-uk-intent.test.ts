@@ -282,6 +282,21 @@ describe("deriveVizHint", () => {
   it("returns 'map' as default when no rule matches", () => {
     expect(deriveVizHint(basePlan, "crimes in Cambridge")).toBe("map");
   });
+
+  it("returns 'dashboard' when intent is 'weather'", () => {
+    expect(
+      deriveVizHint(basePlan, "weather in London", "weather"),
+    ).toBe("dashboard");
+  });
+
+  it("returns 'dashboard' when plan.category is 'weather' (classifier absent)", () => {
+    expect(
+      deriveVizHint(
+        { ...basePlan, category: "weather" as const },
+        "weather in Bury",
+      ),
+    ).toBe("dashboard");
+  });
 });
 
 // ---------------------------------------------------------------------------

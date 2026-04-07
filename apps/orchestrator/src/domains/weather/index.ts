@@ -177,21 +177,17 @@ export const weatherAdapter: DomainAdapter = {
   ): Promise<void> {
     if (rows.length === 0) return;
 
-    await prisma.queryResult.createMany({
+    await prisma.weatherResult.createMany({
       data: (rows as Record<string, unknown>[]).map((row) => ({
         query_id: queryId,
-        domain_name: "weather",
-        source_tag: "open-meteo",
-        lat: row.latitude as number | null,
-        lon: row.longitude as number | null,
-        date: row.date ? new Date(row.date as string) : null,
+        date: row.date as string,
+        latitude: row.latitude as number | null,
+        longitude: row.longitude as number | null,
+        temperature_max: row.temperature_max as number | null,
+        temperature_min: row.temperature_min as number | null,
+        precipitation: row.precipitation as number | null,
+        wind_speed: row.wind_speed as number | null,
         description: row.description as string | null,
-        value: row.temperature_max as number | null,
-        extras: {
-          temperature_min: row.temperature_min ?? null,
-          precipitation: row.precipitation ?? null,
-          wind_speed: row.wind_speed ?? null,
-        },
         raw: row.raw ?? null,
       })),
     });
