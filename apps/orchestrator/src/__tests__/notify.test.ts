@@ -4,14 +4,25 @@ import { sendTelegramMessage } from "../notify";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+let savedToken: string | undefined;
+let savedChatId: string | undefined;
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockFetch.mockResolvedValue({ ok: true });
+  // Save and clear real env vars so tests are isolated from .env
+  savedToken = process.env.TELEGRAM_BOT_TOKEN;
+  savedChatId = process.env.TELEGRAM_CHAT_ID;
+  delete process.env.TELEGRAM_BOT_TOKEN;
+  delete process.env.TELEGRAM_CHAT_ID;
 });
 
 afterEach(() => {
-  delete process.env.TELEGRAM_BOT_TOKEN;
-  delete process.env.TELEGRAM_CHAT_ID;
+  // Restore original values
+  if (savedToken !== undefined) process.env.TELEGRAM_BOT_TOKEN = savedToken;
+  else delete process.env.TELEGRAM_BOT_TOKEN;
+  if (savedChatId !== undefined) process.env.TELEGRAM_CHAT_ID = savedChatId;
+  else delete process.env.TELEGRAM_CHAT_ID;
 });
 
 describe("sendTelegramMessage()", () => {

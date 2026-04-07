@@ -49,6 +49,21 @@ export const domainDiscovery = {
         }),
       );
 
+      // Shared helper — mark requires_review and notify admin
+      const requiresReview = async (reason: string, url?: string) => {
+        await prisma.domainDiscovery.update({
+          where: { id: record!.id },
+          data: { status: "requires_review", completedAt: new Date() },
+        });
+        await sendTelegramMessage(
+          `🔍 *Domain review required*\n\n` +
+            `Intent: \`${context.intent}\` (${context.country_code})\n` +
+            `ID: \`${record!.id}\`\n` +
+            `Reason: ${reason}` +
+            (url ? `\nSource: ${url}` : ""),
+        );
+      };
+
       // Step 1 — discover candidate sources
       const candidates = await discoverSources(
         context.intent,
@@ -56,10 +71,7 @@ export const domainDiscovery = {
       );
 
       if (candidates.length === 0) {
-        await prisma.domainDiscovery.update({
-          where: { id: record.id },
-          data: { status: "requires_review", completedAt: new Date() },
-        });
+        await requiresReview("No candidate sources found");
         return null;
       }
 
@@ -71,10 +83,7 @@ export const domainDiscovery = {
         console.log(
           JSON.stringify({ event: "discovery_sample_failed", url: top.url }),
         );
-        await prisma.domainDiscovery.update({
-          where: { id: record.id },
-          data: { status: "requires_review", completedAt: new Date() },
-        });
+        await requiresReview("Could not sample source — may need manual config", top.url);
         return null;
       }
 
@@ -90,10 +99,7 @@ export const domainDiscovery = {
         console.log(
           JSON.stringify({ event: "discovery_propose_failed", url: top.url }),
         );
-        await prisma.domainDiscovery.update({
-          where: { id: record.id },
-          data: { status: "requires_review", completedAt: new Date() },
-        });
+        await requiresReview("LLM failed to propose config", top.url);
         return null;
       }
 
@@ -182,14 +188,18 @@ export const domainDiscovery = {
           auto_approve_reason: reason,
         }),
       );
+
       await sendTelegramMessage(
         `🔍 *Domain review required*\n\n` +
           `Intent: \`${context.intent}\` (${context.country_code})\n` +
+          `ID: \`${record.id}\`\n` +
           `Proposed: \`${proposed.name}\`\n` +
           `Confidence: ${proposed.confidence.toFixed(2)}\n` +
           `Source: ${top.url}\n` +
           `Store results: ${proposed.storeResults}\n\n` +
-          `Approve: POST /admin/discovery/{id}/approve`,
+          `curl -X POST http://localhost:3001/admin/discovery/${record.id}/approve \\\n` +
+          `  -H "Authorization: Bearer $ADMIN_API_KEY" \\\n` +
+          `  -H "Content-Type: application/json" -d '{}'`,
       );
 
       return null;

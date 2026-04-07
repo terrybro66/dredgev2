@@ -280,6 +280,10 @@ vi.mock("../db", () => ({
       upsert: mockDataSourceUpsert,
       findMany: mockDataSourceFindMany,
     },
+    // No registered dynamic domains in these tests
+    domainDiscovery: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
 }));
 
