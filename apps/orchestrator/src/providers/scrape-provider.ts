@@ -5,6 +5,15 @@ interface ScrapeProviderOptions {
   extractionPrompt: string;
 }
 
+/**
+ * Generic row schema: each item is a flat key/value object.
+ * Works for any domain — cinema titles, train times, pharmacy listings, etc.
+ * The extractionPrompt instructs the LLM what fields to populate.
+ */
+const ROW_SCHEMA = z.object({
+  items: z.array(z.record(z.string(), z.unknown())),
+});
+
 export function createScrapeProvider(options: ScrapeProviderOptions) {
   return {
     async fetchRows(url: string): Promise<Record<string, unknown>[]> {
@@ -16,8 +25,13 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
           baseURL: "https://openrouter.ai/api/v1",
         },
         localBrowserLaunchOptions: {
-          headless: false,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            // Spoof a real Chrome user-agent so sites don't detect headless mode
+            "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          ],
         },
       });
 
@@ -34,35 +48,31 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
           timeoutMs: 60000,
         });
 
-        // Wait for dynamic content like the working script does
+        // Wait for dynamic content to render
         await page.waitForSelector("body", { timeout: 10000 });
         await page.waitForTimeout(4000);
 
         try {
-          // Use the same schema as the working script
           const result = await stagehand.extract(
             options.extractionPrompt,
-            z.object({
-              cinema: z.string().nullable(),
-              movies: z.array(z.string()),
-            }),
+            ROW_SCHEMA,
             { page },
           );
 
-          const movies = (result as any)?.movies ?? [];
-          return Array.isArray(movies)
-            ? movies.map((title: string) => ({ title }))
+          const items = (result as any)?.items ?? [];
+          return Array.isArray(items)
+            ? (items as Record<string, unknown>[])
             : [];
         } catch (err: any) {
-          // gpt-4o-mini via OpenRouter always wraps response in { type, properties }
+          // gpt-4o-mini via OpenRouter sometimes wraps response in { type, properties }
           // The data is in err.text even for non-NoObjectGeneratedError failures
           if (err?.text) {
             try {
               const parsed = JSON.parse(err.text);
               const unwrapped = parsed?.properties ?? parsed;
-              const movies = unwrapped?.movies ?? unwrapped?.items ?? [];
-              if (Array.isArray(movies) && movies.length > 0) {
-                return movies.map((title: string) => ({ title }));
+              const items = unwrapped?.items ?? [];
+              if (Array.isArray(items) && items.length > 0) {
+                return items as Record<string, unknown>[];
               }
             } catch {
               // fall through
@@ -75,7 +85,11 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
         console.warn("[ScrapeProvider] page error:", err?.message);
         return [];
       } finally {
-        await stagehand.close().catch(() => {});
+        // Timeout close() so a stuck consent modal never hangs the process
+        await Promise.race([
+          stagehand.close(),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]).catch(() => {});
       }
     },
   };

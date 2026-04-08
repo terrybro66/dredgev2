@@ -194,9 +194,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       : null;
 
     if (curatedSource) {
-      // Background: trigger discovery so a proper adapter can be built over time.
-      // Don't await — this must not block the user's response.
-      if (domainDiscovery.isEnabled()) {
+      // Skip background discovery for scrape-type curated sources — the curated
+      // entry IS the definitive source, discovery would only find garbage URLs.
+      // Only trigger discovery for REST/CSV sources where a better adapter might exist.
+      if (domainDiscovery.isEnabled() && curatedSource.type !== "scrape") {
         domainDiscovery
           .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
           .catch(() => {}); // non-fatal
@@ -227,8 +228,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           _locationArg: string,
         ): Promise<unknown[]> {
           try {
-            const fetchUrl = source.url ?? "";
-
             if (source.type === "scrape") {
               const { createScrapeProvider } =
                 await import("./providers/scrape-provider");
@@ -240,9 +239,24 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               if ((source as any).searchStrategy) {
                 const strategy = (source as any)
                   .searchStrategy as SearchStrategy;
+
+                // Use resolved_location when available; fall back to country
+                // name so bare queries ("cinema listings") don't return US results
+                const COUNTRY_NAMES: Record<string, string> = {
+                  GB: "UK",
+                  US: "USA",
+                  AU: "Australia",
+                  CA: "Canada",
+                  IE: "Ireland",
+                };
+                const locationContext =
+                  resolved_location && resolved_location.trim()
+                    ? resolved_location
+                    : (COUNTRY_NAMES[country_code] ?? country_code);
+
                 const serpQuery = strategy.queryTemplate
                   .replace("{intent}", source.intent)
-                  .replace("{location}", resolved_location);
+                  .replace("{location}", locationContext);
 
                 console.log(
                   JSON.stringify({
@@ -286,9 +300,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               );
             }
 
-            const provider = createRestProvider({ url: fetchUrl });
+            const restUrl = source.url ?? "";
+            const provider = createRestProvider({ url: restUrl });
             const rows = await provider.fetchRows();
-            return tagRows(rows as Record<string, unknown>[], fetchUrl);
+            return tagRows(rows as Record<string, unknown>[], restUrl);
           } catch {
             return [];
           }

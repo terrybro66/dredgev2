@@ -25,7 +25,9 @@ Return exactly this shape:
 
 Rules:
 - location MUST be a human-readable place name. NEVER return coordinates.
-- For UK locations, always include enough context to be unambiguous:
+- If the user names a specific venue (cinema, theatre, stadium, pub, restaurant etc.), set location to the venue name exactly as stated — do NOT normalise to the city it is in.
+    Examples: "Odeon Braehead" not "Glasgow, UK", "Vue Manchester Printworks" not "Manchester, UK", "Everyman Leeds" not "Leeds, UK"
+- For UK locations without a named venue, always include enough context to be unambiguous:
     - Short or common names MUST include county or region: "Bury, Greater Manchester" not "Bury", "Richmond, North Yorkshire" not "Richmond", "Newport, Wales" not "Newport"
     - Well-known large cities are fine without region: "London, UK", "Manchester, UK", "Edinburgh, UK"
     - If the user specifies a region or county, always include it: "Hackney, London" not just "Hackney"
@@ -54,12 +56,20 @@ export function stripFences(text: string): string {
     .trim();
 }
 
+// Intents whose data never has coordinates — always show as table
+const TABLE_ONLY_INTENTS = new Set([
+  "cinema listings",
+  "transport",
+  "population statistics",
+]);
+
 export function deriveVizHint(
   plan: QueryPlan,
   rawText: string,
   intent = "unknown",
 ): VizHint {
   if (intent === "weather" || plan.category === "weather") return "dashboard";
+  if (TABLE_ONLY_INTENTS.has(intent) || TABLE_ONLY_INTENTS.has(plan.category)) return "table";
   const lower = rawText.toLowerCase();
   if (
     lower.includes("list") ||
