@@ -194,9 +194,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       : null;
 
     if (curatedSource) {
-      // Background: trigger discovery so a proper adapter can be built over time.
-      // Don't await — this must not block the user's response.
-      if (domainDiscovery.isEnabled()) {
+      // Skip background discovery for scrape-type curated sources — the curated
+      // entry IS the definitive source, discovery would only find garbage URLs.
+      // Only trigger discovery for REST/CSV sources where a better adapter might exist.
+      if (domainDiscovery.isEnabled() && curatedSource.type !== "scrape") {
         domainDiscovery
           .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
           .catch(() => {}); // non-fatal

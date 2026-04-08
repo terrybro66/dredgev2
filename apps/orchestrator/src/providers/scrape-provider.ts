@@ -25,8 +25,13 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
           baseURL: "https://openrouter.ai/api/v1",
         },
         localBrowserLaunchOptions: {
-          headless: false,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          headless: true,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            // Spoof a real Chrome user-agent so sites don't detect headless mode
+            "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          ],
         },
       });
 
@@ -80,7 +85,11 @@ export function createScrapeProvider(options: ScrapeProviderOptions) {
         console.warn("[ScrapeProvider] page error:", err?.message);
         return [];
       } finally {
-        await stagehand.close().catch(() => {});
+        // Timeout close() so a stuck consent modal never hangs the process
+        await Promise.race([
+          stagehand.close(),
+          new Promise<void>((resolve) => setTimeout(resolve, 5000)),
+        ]).catch(() => {});
       }
     },
   };
