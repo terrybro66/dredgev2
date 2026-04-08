@@ -17,6 +17,13 @@
  * required anywhere else.
  */
 
+export interface SearchStrategy {
+  /** SerpAPI query template — {intent} and {location} are replaced at runtime */
+  queryTemplate: string;
+  /** Ranked preferred domains — first match in SerpAPI results wins */
+  preferredDomains?: string[];
+}
+
 export interface CuratedSource {
   /** 2–4 word intent label — must match what the semantic classifier returns */
   intent: string;
@@ -24,68 +31,45 @@ export interface CuratedSource {
   countryCodes: string[];
   /** Human-readable name for logging and admin UI */
   name: string;
-  /** URL or URL template — use {location} for location-specific slugs */
-  url: string;
+  /** URL — required for non-scrape types. Optional when searchStrategy is present */
+  url?: string;
   /** Transport type */
   type: "rest" | "csv" | "xlsx" | "pdf" | "scrape";
   /** Required when type === "scrape" */
   extractionPrompt?: string;
+  /** When present on scrape-type sources, URL is discovered via SerpAPI at query time */
+  searchStrategy?: SearchStrategy;
   /** false = return live results and discard; true = store in query_results */
   storeResults: boolean;
   /** How fresh this data needs to be */
   refreshPolicy: "realtime" | "daily" | "weekly" | "static";
   /** Maps source-specific field names to canonical query_results column names */
   fieldMap: Record<string, string>;
-  locationSlugMap?: Record<string, string>;
 }
 
 export const CURATED_SOURCES: CuratedSource[] = [
-  // ── Cinema listings (ephemeral) ─────────────────────────────────────────────
+  // ── Cinema listings (ephemeral — URL resolved via SerpAPI at query time) ────
   {
     intent: "cinema listings",
     countryCodes: ["GB"],
-    name: "Odeon UK",
-    url: "https://www.odeon.co.uk/cinemas/{location}/",
+    name: "cinema-listings-gb",
     type: "scrape" as const,
+    searchStrategy: {
+      queryTemplate: "{intent} {location}",
+      preferredDomains: [
+        "odeon.co.uk",
+        "myvue.com",
+        "cineworld.co.uk",
+        "picturehouses.com",
+        "everymancinema.com",
+      ],
+    },
     extractionPrompt:
-      "Find all movie titles currently showing on this cinema page. Look for film listings, showtimes, or posters. Return ALL titles.", // ← update this line
+      "Find all movie titles currently showing on this cinema page. " +
+      "Look for film listings, showtimes, or posters. Return ALL titles.",
     storeResults: false,
     refreshPolicy: "realtime",
     fieldMap: { title: "description", showtime: "date" },
-    locationSlugMap: {
-      braehead: "braehead",
-      glasgow: "glasgow-fort",
-      edinburgh: "edinburgh",
-      birmingham: "birmingham",
-      london: "west-end",
-    },
-  },
-  {
-    intent: "cinema listings",
-    countryCodes: ["GB"],
-    name: "Vue UK",
-    url: "https://www.myvue.com/api/showtimes",
-    type: "rest",
-    storeResults: false,
-    refreshPolicy: "realtime",
-    fieldMap: {
-      filmName: "description",
-      performanceTime: "date",
-      certificateCode: "extras.certificate",
-    },
-  },
-  {
-    intent: "cinema listings",
-    countryCodes: ["GB"],
-    name: "Cineworld UK",
-    url: "https://www.cineworld.co.uk/api/quickbook/cinemas",
-    type: "rest",
-    storeResults: false,
-    refreshPolicy: "realtime",
-    fieldMap: {
-      name: "description",
-      date: "date",
-    },
   },
 
   // ── Flood risk (persistent) ─────────────────────────────────────────────────

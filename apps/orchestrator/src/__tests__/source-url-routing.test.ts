@@ -1,8 +1,8 @@
 /**
  * source-url-routing.test.ts
  *
- * Pipeline tests for {location} placeholder resolution in the execute handler.
- * Uses mocked curated-registry so we can control what findCuratedSource returns.
+ * Pipeline tests for curated source URL resolution in the execute handler.
+ * Covers both REST sources (static URL) and scrape sources (SerpAPI-resolved URL).
  *
  * Run:
  *   pnpm vitest run src/__tests__/source-url-routing.test.ts --reporter=verbose
@@ -42,12 +42,17 @@ const { mockDomainDiscovery } = vi.hoisted(() => ({
 const { mockClassifyIntent } = vi.hoisted(() => ({
   mockClassifyIntent: vi.fn(),
 }));
-const { mockFindCuratedSource, mockResolveLocationSlug } = vi.hoisted(() => ({
+const { mockFindCuratedSource } = vi.hoisted(() => ({
   mockFindCuratedSource: vi.fn(),
-  mockResolveLocationSlug: vi.fn(),
 }));
 const { mockRestProviderCreate } = vi.hoisted(() => ({
   mockRestProviderCreate: vi.fn(),
+}));
+const { mockScrapeProviderCreate } = vi.hoisted(() => ({
+  mockScrapeProviderCreate: vi.fn(),
+}));
+const { mockResolveUrlForQuery } = vi.hoisted(() => ({
+  mockResolveUrlForQuery: vi.fn(),
 }));
 
 const { mockPrisma } = vi.hoisted(() => ({
@@ -88,12 +93,19 @@ vi.mock("../semantic/classifier", () => ({
 }));
 vi.mock("../curated-registry", () => ({
   findCuratedSource: mockFindCuratedSource,
-  resolveLocationSlug: mockResolveLocationSlug,
+  resolveLocationSlug: vi.fn(),
   CURATED_SOURCES: [],
 }));
 vi.mock("../providers/rest-provider", () => ({
   createRestProvider: mockRestProviderCreate,
   restGet: vi.fn(),
+}));
+vi.mock("../providers/scrape-provider", () => ({
+  createScrapeProvider: mockScrapeProviderCreate,
+}));
+vi.mock("../agent/search/serp", () => ({
+  searchWithSerp: vi.fn().mockResolvedValue([]),
+  resolveUrlForQuery: mockResolveUrlForQuery,
 }));
 vi.mock("../enrichment/source-tag", () => ({
   tagRows: vi.fn((rows: unknown[]) => rows),
@@ -105,46 +117,49 @@ vi.mock("../enrichment/source-scoring", () => ({
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const basePlan = {
-  category: "burglary",
-  date_from: "2025-01",
-  date_to: "2025-01",
-  location: "Braehead, UK",
+  category: "cinema listings",
+  date_from: "2026-04",
+  date_to: "2026-04",
+  location: "Sheffield, UK",
 };
 
 const executeBody = {
   plan: basePlan,
-  poly: "55.8,-4.4:55.8,-4.3:55.9,-4.3:55.9,-4.4",
+  poly: "53.3,-1.6:53.3,-1.4:53.5,-1.4:53.5,-1.6",
   viz_hint: "table" as const,
-  resolved_location: "Braehead, Renfrewshire, Scotland, United Kingdom",
+  resolved_location: "Sheffield, South Yorkshire, England, United Kingdom",
   country_code: "GB",
   intent: "cinema listings",
-  months: ["2025-01"],
+  months: ["2026-04"],
 };
 
-const odeonSource = {
+/** Scrape source that uses SerpAPI URL resolution */
+const cinemaSource = {
   intent: "cinema listings",
   countryCodes: ["GB"],
-  name: "Odeon UK",
-  url: "https://www.odeon.co.uk/cinemas/{location}/",
-  type: "rest" as const,
-  storeResults: false,
-  refreshPolicy: "realtime" as const,
-  fieldMap: { title: "description", showtime: "date" },
-  locationSlugMap: {
-    braehead: "braehead",
-    glasgow: "glasgow-fort",
+  name: "cinema-listings-gb",
+  type: "scrape" as const,
+  searchStrategy: {
+    queryTemplate: "{intent} {location}",
+    preferredDomains: ["odeon.co.uk", "myvue.com", "cineworld.co.uk"],
   },
-};
-
-const plainSource = {
-  intent: "cinema listings",
-  countryCodes: ["GB"],
-  name: "Odeon UK",
-  url: "https://www.odeon.co.uk/api/showtimes",
-  type: "rest" as const,
+  extractionPrompt:
+    "Find all movie titles currently showing on this cinema page.",
   storeResults: false,
   refreshPolicy: "realtime" as const,
-  fieldMap: { title: "description", showtime: "date" },
+  fieldMap: { title: "description" },
+};
+
+/** Plain REST source — static URL, no resolution needed */
+const plainSource = {
+  intent: "flood risk",
+  countryCodes: ["GB"],
+  name: "EA Flood Monitoring",
+  url: "https://environment.data.gov.uk/flood-monitoring/id/floods",
+  type: "rest" as const,
+  storeResults: true,
+  refreshPolicy: "daily" as const,
+  fieldMap: { description: "description" },
 };
 
 let queryRouter: Router;
@@ -166,12 +181,16 @@ beforeEach(() => {
   mockRestProviderCreate.mockReturnValue({
     fetchRows: vi.fn().mockResolvedValue([]),
   });
+  mockScrapeProviderCreate.mockReturnValue({
+    fetchRows: vi.fn().mockResolvedValue([]),
+  });
+  mockResolveUrlForQuery.mockResolvedValue(null);
   mockParseIntent.mockResolvedValue(basePlan);
   mockDeriveVizHint.mockReturnValue("table");
-  mockExpandDateRange.mockReturnValue(["2025-01"]);
+  mockExpandDateRange.mockReturnValue(["2026-04"]);
   mockGeocodeToPolygon.mockResolvedValue({
-    poly: "55.8,-4.4:55.8,-4.3:55.9,-4.3:55.9,-4.4",
-    display_name: "Braehead, Renfrewshire, Scotland, United Kingdom",
+    poly: "53.3,-1.6:53.3,-1.4:53.5,-1.4:53.5,-1.6",
+    display_name: "Sheffield, South Yorkshire, England, United Kingdom",
     country_code: "GB",
   });
   mockEvolveSchema.mockResolvedValue(undefined);
@@ -191,7 +210,6 @@ beforeEach(() => {
   });
   mockGetDomainForQuery.mockReturnValue(undefined);
   mockFindCuratedSource.mockReturnValue(null);
-  mockResolveLocationSlug.mockReturnValue(null);
 
   mockPrisma.query.create.mockResolvedValue({ id: "q-1", ...basePlan });
   mockPrisma.query.findUnique.mockResolvedValue(null);
@@ -209,67 +227,60 @@ beforeEach(() => {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe("query pipeline — {location} placeholder resolution", () => {
-  it("resolves {location} placeholder in URL when slug map match is found", async () => {
-    mockFindCuratedSource.mockReturnValue(odeonSource);
-    mockResolveLocationSlug.mockReturnValue("braehead");
+describe("query pipeline — curated source URL resolution", () => {
+  describe("scrape source with searchStrategy", () => {
+    it("calls resolveUrlForQuery with the query built from template + resolved location", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockResolveUrlForQuery.mockResolvedValue("https://www.odeon.co.uk/cinemas/sheffield/");
 
-    const app = buildApp();
-    await request(app).post("/query/execute").send(executeBody);
+      const app = buildApp();
+      await request(app).post("/query/execute").send(executeBody);
 
-    expect(mockRestProviderCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: "https://www.odeon.co.uk/cinemas/braehead/",
-      }),
-    );
+      expect(mockResolveUrlForQuery).toHaveBeenCalledWith(
+        "cinema listings Sheffield, South Yorkshire, England, United Kingdom",
+        cinemaSource.searchStrategy.preferredDomains,
+      );
+    });
+
+    it("calls createScrapeProvider with the URL returned by resolveUrlForQuery", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockResolveUrlForQuery.mockResolvedValue("https://www.odeon.co.uk/cinemas/sheffield/");
+
+      const app = buildApp();
+      await request(app).post("/query/execute").send(executeBody);
+
+      expect(mockScrapeProviderCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          extractionPrompt: cinemaSource.extractionPrompt,
+        }),
+      );
+    });
+
+    it("returns empty rows and does not call scrapeProvider when resolveUrlForQuery returns null", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockResolveUrlForQuery.mockResolvedValue(null);
+
+      const app = buildApp();
+      const res = await request(app).post("/query/execute").send(executeBody);
+
+      expect(mockScrapeProviderCreate).not.toHaveBeenCalled();
+      expect(res.status).toBe(200);
+    });
   });
 
-  it("calls resolveLocationSlug with resolved_location and locationSlugMap", async () => {
-    mockFindCuratedSource.mockReturnValue(odeonSource);
-    mockResolveLocationSlug.mockReturnValue("braehead");
+  describe("REST source with static URL", () => {
+    it("uses the URL from the source directly without calling resolveUrlForQuery", async () => {
+      mockFindCuratedSource.mockReturnValue(plainSource);
 
-    const app = buildApp();
-    await request(app).post("/query/execute").send(executeBody);
+      const app = buildApp();
+      await request(app).post("/query/execute").send(executeBody);
 
-    expect(mockResolveLocationSlug).toHaveBeenCalledWith(
-      "Braehead, Renfrewshire, Scotland, United Kingdom",
-      odeonSource.locationSlugMap,
-    );
-  });
-
-  it("does not call the provider with an unresolved {location} template URL when no slug found", async () => {
-    mockFindCuratedSource.mockReturnValue(odeonSource);
-    mockResolveLocationSlug.mockReturnValue(null);
-
-    const app = buildApp();
-    await request(app).post("/query/execute").send(executeBody);
-
-    expect(mockRestProviderCreate).not.toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: expect.stringContaining("{location}"),
-      }),
-    );
-  });
-
-  it("sources without {location} in URL use the URL as-is", async () => {
-    mockFindCuratedSource.mockReturnValue(plainSource);
-
-    const app = buildApp();
-    await request(app).post("/query/execute").send(executeBody);
-
-    expect(mockRestProviderCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        url: "https://www.odeon.co.uk/api/showtimes",
-      }),
-    );
-  });
-
-  it("does not call resolveLocationSlug for sources without a locationSlugMap", async () => {
-    mockFindCuratedSource.mockReturnValue(plainSource);
-
-    const app = buildApp();
-    await request(app).post("/query/execute").send(executeBody);
-
-    expect(mockResolveLocationSlug).not.toHaveBeenCalled();
+      expect(mockResolveUrlForQuery).not.toHaveBeenCalled();
+      expect(mockRestProviderCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://environment.data.gov.uk/flood-monitoring/id/floods",
+        }),
+      );
+    });
   });
 });

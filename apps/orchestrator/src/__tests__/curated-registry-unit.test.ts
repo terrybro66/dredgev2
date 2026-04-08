@@ -65,21 +65,36 @@ describe("resolveLocationSlug", () => {
 
 // ── CuratedSource structure ───────────────────────────────────────────────────
 
-describe("CuratedSource — locationSlugMap structure", () => {
-  it("sources without locationSlugMap are valid", () => {
+describe("CuratedSource — structure", () => {
+  it("all sources have intent, type, fieldMap, storeResults, and refreshPolicy", () => {
     for (const source of CURATED_SOURCES) {
       expect(source).toHaveProperty("intent");
-      expect(source).toHaveProperty("url");
+      expect(source).toHaveProperty("type");
+      expect(source).toHaveProperty("fieldMap");
+      expect(source).toHaveProperty("storeResults");
+      expect(source).toHaveProperty("refreshPolicy");
     }
   });
 
-  it("a source with {location} in URL must have a locationSlugMap", () => {
-    const templateSources = CURATED_SOURCES.filter((s) =>
-      s.url.includes("{location}"),
-    );
-    for (const source of templateSources) {
-      expect(source).toHaveProperty("locationSlugMap");
-      expect(typeof (source as any).locationSlugMap).toBe("object");
+  it("non-scrape sources must have a url", () => {
+    for (const source of CURATED_SOURCES.filter((s) => s.type !== "scrape")) {
+      expect(source.url).toBeTruthy();
+    }
+  });
+
+  it("scrape sources must have either a url or a searchStrategy", () => {
+    for (const source of CURATED_SOURCES.filter((s) => s.type === "scrape")) {
+      const hasUrl = Boolean(source.url);
+      const hasStrategy = Boolean(source.searchStrategy);
+      expect(hasUrl || hasStrategy).toBe(true);
+    }
+  });
+
+  it("scrape sources with searchStrategy must have an extractionPrompt", () => {
+    for (const source of CURATED_SOURCES.filter(
+      (s) => s.type === "scrape" && s.searchStrategy,
+    )) {
+      expect(source.extractionPrompt).toBeTruthy();
     }
   });
 
@@ -87,5 +102,12 @@ describe("CuratedSource — locationSlugMap structure", () => {
     const result = findCuratedSource("cinema listings", "GB");
     expect(result).not.toBeNull();
     expect(result?.storeResults).toBe(false);
+    expect(result?.type).toBe("scrape");
+  });
+
+  it("cinema source uses searchStrategy, not a static URL", () => {
+    const result = findCuratedSource("cinema listings", "GB");
+    expect(result?.searchStrategy).toBeDefined();
+    expect(result?.url).toBeUndefined();
   });
 });

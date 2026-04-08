@@ -94,6 +94,63 @@ describe("searchCatalogue — relevance filtering", () => {
     expect(results[0].url).toBe("https://example.com/cinemas.json");
   });
 
+  it("filters the vets URL even when the dataset title contains 'listings'", async () => {
+    // This is the actual failure case: CKAN dataset titled "Sunderland local listings"
+    // matches the intent keyword "listings" but the resource URL points to vets data
+    mockCkan([
+      makeCkanDataset({
+        title: "Sunderland local listings",
+        notes: "Various local service listings for Sunderland.",
+        resourceUrl: "http://www.sunderland.gov.uk/localpublicdata/vets",
+      }),
+    ]);
+    const results = await searchCatalogue("cinema listings", "GB");
+    expect(results).toHaveLength(0);
+  });
+
+  it("filters URLs with known irrelevant path segments", async () => {
+    const irrelevantPaths = [
+      "http://example.com/data/parking",
+      "http://example.com/data/recycling",
+      "http://example.com/data/allotments",
+    ];
+    for (const url of irrelevantPaths) {
+      mockCkan([
+        makeCkanDataset({
+          title: "Local listings data",
+          notes: "Various listings.",
+          resourceUrl: url,
+        }),
+      ]);
+      const results = await searchCatalogue("cinema listings", "GB");
+      expect(results).toHaveLength(0);
+    }
+  });
+
+  it("passes URLs with no suspicious path segment when metadata is relevant", async () => {
+    mockCkan([
+      makeCkanDataset({
+        title: "Cinema listings",
+        notes: "Film data",
+        resourceUrl: "https://api.example.com/v1/data.csv",
+      }),
+    ]);
+    const results = await searchCatalogue("cinema listings", "GB");
+    expect(results).toHaveLength(1);
+  });
+
+  it("passes URLs that contain an intent keyword in the path", async () => {
+    mockCkan([
+      makeCkanDataset({
+        title: "Local venue data",
+        notes: "Various venues",
+        resourceUrl: "https://example.com/cinema/listings.json",
+      }),
+    ]);
+    const results = await searchCatalogue("cinema listings", "GB");
+    expect(results).toHaveLength(1);
+  });
+
   it("is case-insensitive in keyword matching", async () => {
     mockCkan([
       makeCkanDataset({
@@ -168,5 +225,18 @@ describe("searchCatalogue — relevance filtering", () => {
     const results = await searchCatalogue("cinema listings", "GB");
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe("https://example.com/real.csv");
+  });
+
+  it("discards catalogue resources with no declared format", async () => {
+    mockCkan([
+      makeCkanDataset({
+        title: "Cinema listings",
+        notes: "Cinema showtimes for UK venues.",
+        resourceUrl: "https://www.council.gov.uk/cinema-page",
+        resourceFormat: "",
+      }),
+    ]);
+    const results = await searchCatalogue("cinema listings", "GB");
+    expect(results).toHaveLength(0);
   });
 });

@@ -8,18 +8,74 @@ const CATALOGUE_BY_COUNTRY: Record<string, string> = {
 };
 
 /**
- * Returns true if the dataset title or description contains at least one
- * keyword from the intent string. Prevents irrelevant catalogue results
- * (e.g. a vets directory for a "cinema listings" search) from being passed
- * to the scraper.
+ * Extracts meaningful keywords from an intent string (words > 2 chars).
  */
-function isRelevant(intent: string, title: string, notes: string): boolean {
-  const keywords = intent
+function intentKeywords(intent: string): string[] {
+  return intent
     .toLowerCase()
     .split(/\s+/)
-    .filter((w) => w.length > 2); // ignore short stop words
+    .filter((w) => w.length > 2);
+}
+
+/**
+ * Returns true if the dataset title or description contains at least one
+ * intent keyword. This is a necessary but not sufficient condition —
+ * a dataset titled "local listings" matches "cinema listings" even if
+ * its resource URL points to vets data.
+ */
+function metadataRelevant(
+  keywords: string[],
+  title: string,
+  notes: string,
+): boolean {
   const haystack = `${title} ${notes}`.toLowerCase();
   return keywords.some((kw) => haystack.includes(kw));
+}
+
+/**
+ * Returns true if the resource URL path does NOT contain words that are
+ * clearly unrelated to the intent AND contains no intent keyword.
+ *
+ * A URL like /localpublicdata/vets has "vets" in the path but no intent
+ * keyword ("cinema", "listings") — it fails this check.
+ *
+ * A URL that has no intent keyword but also no obviously irrelevant path
+ * segment passes (benefit of the doubt — the URL path isn't always
+ * descriptive, e.g. /api/v1/data.csv).
+ */
+function urlRelevant(keywords: string[], url: string): boolean {
+  const path = url.toLowerCase();
+  // If any intent keyword appears in the URL, it's definitely relevant
+  if (keywords.some((kw) => path.includes(kw))) return true;
+  // If the URL path contains a segment that contradicts the intent, reject it
+  // Extract path segments after the domain
+  try {
+    const { pathname } = new URL(url);
+    const segments = pathname.toLowerCase().split("/").filter(Boolean);
+    // A segment is "contradicting" if it has no overlap with intent keywords
+    // AND the full URL has no intent keyword AND the segment is a meaningful word
+    // Use a simple heuristic: if the last meaningful segment looks like a
+    // completely different domain concept, flag it
+    const lastSegment = segments[segments.length - 1] ?? "";
+    // Known-bad patterns for common intents — extend as needed
+    const IRRELEVANT_SEGMENTS = new Set([
+      "vets",
+      "veterinary",
+      "planning",
+      "recycling",
+      "bins",
+      "parking",
+      "allotments",
+      "cemeteries",
+      "toilets",
+      "housing",
+      "benefits",
+    ]);
+    if (IRRELEVANT_SEGMENTS.has(lastSegment)) return false;
+  } catch {
+    // Not a valid URL — let it through, will fail at fetch time
+  }
+  return true;
 }
 
 function inferFormat(format: string): DiscoveredSource["format"] {
@@ -56,6 +112,7 @@ export async function searchCatalogue(
     const datasets: any[] = data.result?.results ?? [];
 
     const sources: DiscoveredSource[] = [];
+    const keywords = intentKeywords(intent);
 
     for (const dataset of datasets) {
       const resources: any[] = dataset.resources ?? [];
@@ -69,18 +126,34 @@ export async function searchCatalogue(
 
       // Skip URLs that are clearly stale or placeholder values
       const url = resource.url as string;
-      if (
-        url.includes("datapress.com") || // known stale CDN
-        url.endsWith("#") ||
-        url === "N/A"
-      )
+      if (url.includes("datapress.com") || url.endsWith("#") || url === "N/A")
         continue;
 
-      // Skip datasets with no topical relevance to the intent
+      if (inferFormat(resource.format ?? "") === "scrape") continue;
+
+      // Skip datasets with no topical relevance to the intent (metadata check)
       const title = (dataset.title ?? "") as string;
       const notes = (dataset.notes ?? "") as string;
-      if (!isRelevant(intent, title, notes)) continue;
+      const urlHasKeyword = keywords.some((kw) =>
+        url.toLowerCase().includes(kw),
+      );
 
+      if (!metadataRelevant(keywords, title, notes) && !urlHasKeyword) {
+        console.log(
+          JSON.stringify({ event: "catalogue_filtered_metadata", url, title }),
+        );
+        continue;
+      }
+
+      // Skip datasets whose resource URL contradicts the intent (URL check)
+      if (!urlRelevant(keywords, url)) {
+        console.log(
+          JSON.stringify({ event: "catalogue_filtered_url", url, title }),
+        );
+        continue;
+      }
+
+      console.log(JSON.stringify({ event: "catalogue_accepted", url, title }));
       sources.push({
         url,
         format: inferFormat(resource.format ?? ""),

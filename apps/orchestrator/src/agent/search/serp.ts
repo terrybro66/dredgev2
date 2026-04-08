@@ -14,7 +14,9 @@ export async function searchWithSerp(
 ): Promise<DiscoveredSource[]> {
   const apiKey = process.env.SERAPI_KEY;
   if (!apiKey) {
-    console.warn(JSON.stringify({ event: "serp_disabled", reason: "SERAPI_KEY not set" }));
+    console.warn(
+      JSON.stringify({ event: "serp_disabled", reason: "SERAPI_KEY not set" }),
+    );
     return [];
   }
 
@@ -43,7 +45,40 @@ export async function searchWithSerp(
       confidence: 0.5,
     }));
   } catch (err) {
-    console.error(JSON.stringify({ event: "serp_fetch_error", error: String(err) }));
+    console.error(
+      JSON.stringify({ event: "serp_fetch_error", error: String(err) }),
+    );
     return [];
+  }
+}
+export async function resolveUrlForQuery(
+  query: string,
+  preferredDomains: string[] = [],
+): Promise<string | null> {
+  const apiKey = process.env.SERAPI_KEY;
+  if (!apiKey) return null;
+
+  const url =
+    `https://serpapi.com/search.json` +
+    `?q=${encodeURIComponent(query).replace(/%20/g, "+")}` +
+    `&api_key=${apiKey}&num=10`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = (await res.json()) as any;
+    const links: string[] = (data.organic_results ?? []).map(
+      (r: any) => r.link as string,
+    );
+
+    // Preferred domain match first
+    for (const domain of preferredDomains) {
+      const match = links.find((l) => l.includes(domain));
+      if (match) return match;
+    }
+
+    return links[0] ?? null;
+  } catch {
+    return null;
   }
 }

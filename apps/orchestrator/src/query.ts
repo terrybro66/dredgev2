@@ -18,7 +18,7 @@ import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
-import { findCuratedSource, resolveLocationSlug } from "./curated-registry";
+import { findCuratedSource, SearchStrategy } from "./curated-registry";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { setUserLocation, getUserLocation } from "./session";
@@ -198,10 +198,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       // Don't await — this must not block the user's response.
       if (domainDiscovery.isEnabled()) {
         domainDiscovery
-          .run(
-            { intent: routingIntent ?? plan.category, country_code },
-            prisma,
-          )
+          .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
           .catch(() => {}); // non-fatal
       }
 
@@ -230,35 +227,63 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           _locationArg: string,
         ): Promise<unknown[]> {
           try {
-            // Resolve {location} placeholder if present
-            let fetchUrl = source.url;
-            if (
-              fetchUrl.includes("{location}") &&
-              (source as any).locationSlugMap
-            ) {
-              const slug = resolveLocationSlug(
-                resolved_location,
-                (source as any).locationSlugMap,
-              );
-              if (slug) {
-                fetchUrl = fetchUrl.replace("{location}", slug);
-              } else {
-                console.warn(
-                  `[curated] no slug found for "${resolved_location}" in ${source.name}`,
-                );
-                return [];
-              }
-            }
+            const fetchUrl = source.url ?? "";
 
             if (source.type === "scrape") {
               const { createScrapeProvider } =
                 await import("./providers/scrape-provider");
+              const { resolveUrlForQuery } =
+                await import("./agent/search/serp");
+
+              let fetchUrl = source.url ?? "";
+
+              if ((source as any).searchStrategy) {
+                const strategy = (source as any)
+                  .searchStrategy as SearchStrategy;
+                const serpQuery = strategy.queryTemplate
+                  .replace("{intent}", source.intent)
+                  .replace("{location}", resolved_location);
+
+                console.log(
+                  JSON.stringify({
+                    event: "scrape_url_resolving",
+                    query: serpQuery,
+                  }),
+                );
+                fetchUrl =
+                  (await resolveUrlForQuery(
+                    serpQuery,
+                    strategy.preferredDomains ?? [],
+                  )) ?? "";
+
+                if (!fetchUrl) {
+                  console.warn(
+                    JSON.stringify({
+                      event: "scrape_url_not_found",
+                      query: serpQuery,
+                    }),
+                  );
+                  return [];
+                }
+                console.log(
+                  JSON.stringify({
+                    event: "scrape_url_resolved",
+                    url: fetchUrl,
+                  }),
+                );
+              }
+
               const extractionPrompt =
-                (source as any).extractionPrompt ??
+                source.extractionPrompt ??
                 `Extract all data items from this page at ${fetchUrl}`;
               const provider = createScrapeProvider({ extractionPrompt });
-              const rows = await provider.fetchRows(fetchUrl);
-              return tagRows(rows as Record<string, unknown>[], fetchUrl);
+              return tagRows(
+                (await provider.fetchRows(fetchUrl)) as Record<
+                  string,
+                  unknown
+                >[],
+                fetchUrl,
+              );
             }
 
             const provider = createRestProvider({ url: fetchUrl });
