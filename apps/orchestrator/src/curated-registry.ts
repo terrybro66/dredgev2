@@ -65,8 +65,11 @@ export const CURATED_SOURCES: CuratedSource[] = [
       ],
     },
     extractionPrompt:
-      "Find all movie titles currently showing on this cinema page. " +
-      "Look for film listings, showtimes, or posters. Return ALL titles.",
+      "Find all movies currently showing on this cinema page. " +
+      "Look for film listings, showtimes, or posters. " +
+      "Return each film as an object with fields: title (string), showtime (string, if available), " +
+      "certificate (string, e.g. PG/12A/15/18, if shown). " +
+      "Return ALL films as an array under the key 'items'.",
     storeResults: false,
     refreshPolicy: "realtime",
     fieldMap: { title: "description", showtime: "date" },

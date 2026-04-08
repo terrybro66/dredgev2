@@ -85,8 +85,10 @@ beforeEach(() => {
   mockContext.pages.mockReturnValue([mockPage]);
   mockNewPage.mockResolvedValue(mockPage);
   mockExtract.mockResolvedValue({
-    cinema: "Odeon Braehead",
-    movies: ["Dune Part Two", "Gladiator II"],
+    items: [
+      { title: "Dune Part Two" },
+      { title: "Gladiator II" },
+    ],
   });
   mockAxiosGet.mockResolvedValue({ data: [] });
 });
@@ -150,8 +152,7 @@ describe("ScrapeProvider", () => {
     (error as any).text = JSON.stringify({
       type: "object",
       properties: {
-        cinema: "Odeon Braehead",
-        movies: ["Dune Part Two"],
+        items: [{ title: "Dune Part Two" }],
       },
     });
     mockExtract.mockRejectedValue(error);

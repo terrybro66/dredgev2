@@ -96,8 +96,11 @@ async function discoverWithBrowser(
   const crawler = new StagehandCrawler({
     stagehandOptions: {
       env: "LOCAL" as const,
-      model: "openai/gpt-4.1-mini",
-      apiKey: process.env.OPENROUTER_API_KEY,
+      model: {
+        modelName: "openai/gpt-4o-mini",
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: "https://openrouter.ai/api/v1",
+      },
     },
     maxRequestsPerCrawl: 1,
     async requestHandler({ page, log }) {
@@ -154,8 +157,11 @@ export async function resolveDirectDownloadUrl(url: string): Promise<string> {
   const crawler = new StagehandCrawler({
     stagehandOptions: {
       env: "LOCAL" as const,
-      model: "openai/gpt-4.1-mini",
-      apiKey: process.env.OPENROUTER_API_KEY,
+      model: {
+        modelName: "openai/gpt-4o-mini",
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: "https://openrouter.ai/api/v1",
+      },
     },
     maxRequestsPerCrawl: 1,
     async requestHandler({ page, log }) {
