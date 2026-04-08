@@ -21,6 +21,8 @@ import { classifyIntent } from "./semantic/classifier";
 import { findCuratedSource, SearchStrategy } from "./curated-registry";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
+import { suggestFollowups } from "./suggest-followups";
+import { buildClarificationRequest } from "./clarification";
 import { setUserLocation, getUserLocation } from "./session";
 
 export const queryRouter = Router();
@@ -147,6 +149,18 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     rawText,
   } = bodyResult.data;
 
+  // 0. Clarification check — regulatory/eligibility intents return questions
+  //    before any data fetch. Check raw text first (most expressive), then
+  //    the parsed intent/category.
+  const clarificationText = rawText ?? intent ?? plan.category ?? "";
+  const clarificationRequest = buildClarificationRequest(clarificationText);
+  if (clarificationRequest) {
+    return res.status(200).json({
+      type:    "clarification",
+      request: clarificationRequest,
+    });
+  }
+
   // 1. Resolve adapter via intent + country routing
   // Use classified intent, fall back to plan.category before giving up.
   const resolvedIntent =
@@ -235,10 +249,18 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
                 await import("./agent/search/serp");
 
               let fetchUrl = source.url ?? "";
+              let extractionPrompt = source.extractionPrompt ?? "";
 
               if ((source as any).searchStrategy) {
                 const strategy = (source as any)
                   .searchStrategy as SearchStrategy;
+                const {
+                  getCachedScrapeUrl,
+                  setCachedScrapeUrl,
+                } = await import("./agent/search/scrape-url-cache");
+                const { generateExtractionPrompt } = await import(
+                  "./agent/search/extraction-prompt-generator"
+                );
 
                 // Use resolved_location when available; fall back to country
                 // name so bare queries ("cinema listings") don't return US results
@@ -254,42 +276,92 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
                     ? resolved_location
                     : (COUNTRY_NAMES[country_code] ?? country_code);
 
-                const serpQuery = strategy.queryTemplate
-                  .replace("{intent}", source.intent)
-                  .replace("{location}", locationContext);
-
-                console.log(
-                  JSON.stringify({
-                    event: "scrape_url_resolving",
-                    query: serpQuery,
-                  }),
+                // Check cache first — saves a SerpAPI call on repeat queries
+                const cached = await getCachedScrapeUrl(
+                  source.intent,
+                  locationContext,
                 );
-                fetchUrl =
-                  (await resolveUrlForQuery(
-                    serpQuery,
-                    strategy.preferredDomains ?? [],
-                  )) ?? "";
 
-                if (!fetchUrl) {
-                  console.warn(
+                if (cached) {
+                  console.log(
                     JSON.stringify({
-                      event: "scrape_url_not_found",
+                      event: "scrape_url_cache_hit",
+                      url: cached.url,
+                      intent: source.intent,
+                      location: locationContext,
+                    }),
+                  );
+                  fetchUrl = cached.url;
+                  extractionPrompt = cached.extractionPrompt;
+                } else {
+                  const serpQuery = strategy.queryTemplate
+                    .replace("{intent}", source.intent)
+                    .replace("{location}", locationContext);
+
+                  console.log(
+                    JSON.stringify({
+                      event: "scrape_url_resolving",
                       query: serpQuery,
                     }),
                   );
-                  return [];
+                  fetchUrl =
+                    (await resolveUrlForQuery(
+                      serpQuery,
+                      strategy.preferredDomains ?? [],
+                    )) ?? "";
+
+                  if (!fetchUrl) {
+                    console.warn(
+                      JSON.stringify({
+                        event: "scrape_url_not_found",
+                        query: serpQuery,
+                      }),
+                    );
+                    return [];
+                  }
+
+                  console.log(
+                    JSON.stringify({
+                      event: "scrape_url_resolved",
+                      url: fetchUrl,
+                    }),
+                  );
+
+                  // Generate extraction prompt if not curated
+                  if (!extractionPrompt) {
+                    extractionPrompt = await generateExtractionPrompt(
+                      source.intent,
+                    );
+                    console.log(
+                      JSON.stringify({
+                        event: "scrape_prompt_generated",
+                        intent: source.intent,
+                      }),
+                    );
+                  }
+
+                  // Populate cache for next time
+                  await setCachedScrapeUrl(source.intent, locationContext, {
+                    url: fetchUrl,
+                    extractionPrompt,
+                  });
                 }
+              }
+              // Fallback: generate prompt for static-URL scrape sources
+              // that have no curated extractionPrompt and no searchStrategy
+              if (!extractionPrompt) {
+                const { generateExtractionPrompt } = await import(
+                  "./agent/search/extraction-prompt-generator"
+                );
+                extractionPrompt = await generateExtractionPrompt(source.intent);
                 console.log(
                   JSON.stringify({
-                    event: "scrape_url_resolved",
-                    url: fetchUrl,
+                    event: "scrape_prompt_generated_static",
+                    intent: source.intent,
                   }),
                 );
               }
 
-              const extractionPrompt =
-                source.extractionPrompt ??
-                `Extract all data items from this page at ${fetchUrl}`;
               const provider = createScrapeProvider({ extractionPrompt });
               return tagRows(
                 (await provider.fetchRows(fetchUrl)) as Record<
@@ -539,6 +611,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       resultCount: cached.result_count,
     });
 
+    const chips = suggestFollowups({
+      rows: cached.results as unknown[],
+      domain: adapter.config.name,
+      handleId: `qr_${queryRecord.id}`,
+      ephemeral: false,
+      memory: {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        profile: { user_attributes: {}, location_history: [] },
+      },
+    });
+
     const resultContext: ResultContext = {
       status: "exact",
       followUps,
@@ -558,6 +641,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       results: cached.results,
       cache_hit: true,
       aggregated,
+      chips,
       resultContext,
     });
   }
@@ -817,6 +901,17 @@ FROM (
       resultCount: storedResults.length,
     });
 
+    const chips = suggestFollowups({
+      rows: storedResults as unknown[],
+      domain: adapter.config.name,
+      handleId: `qr_${queryRecord.id}`,
+      ephemeral: false,
+      memory: {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        profile: { user_attributes: {}, location_history: [] },
+      },
+    });
+
     const resultContext: ResultContext =
       storedResults.length === 0
         ? { status: "empty", followUps, confidence: "low" }
@@ -835,6 +930,7 @@ FROM (
       results: storedResults,
       cache_hit: false,
       aggregated,
+      chips,
       resultContext,
     });
   } catch (err: any) {
@@ -855,6 +951,72 @@ FROM (
     );
     return res.status(500).json({ error: err.message });
   }
+});
+
+// ── POST /chip — Phase C.11 ───────────────────────────────────────────────────
+//
+// Dispatches a chip action. Currently handles:
+//   fetch_domain: cinema-showtimes  — scrape live showtimes for a named cinema
+//
+// Future actions (calculate_travel, overlay_spatial, etc.) will be added here
+// as the connected query pipeline grows.
+
+const ChipBodySchema = z.object({
+  action:      z.string(),
+  args:        z.object({
+    domain:      z.string().optional(),
+    ref:         z.string().optional(),
+    cinemaName:  z.string().optional(),
+    cacheKey:    z.string().optional(),
+  }),
+  sessionId:   z.string().optional(),
+});
+
+queryRouter.post("/chip", async (req: Request, res: Response) => {
+  const parsed = ChipBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "validation_error", details: parsed.error.errors });
+  }
+
+  const { action, args, sessionId } = parsed.data;
+
+  // ── fetch_domain: cinema-showtimes ────────────────────────────────────────
+  if (action === "fetch_domain" && args.domain === "cinema-showtimes") {
+    const cinemaName = args.cinemaName;
+    if (!cinemaName) {
+      return res.status(400).json({ error: "missing_cinema_name" });
+    }
+
+    try {
+      const { fetchShowtimes } = await import("./domains/cinemas-gb/showtimes");
+      const { createEphemeralHandle, pushResultHandle } = await import("./conversation-memory");
+
+      const cacheKey = args.cacheKey ?? cinemaName.toLowerCase().replace(/\s+/g, "-");
+      const rows = await fetchShowtimes(cinemaName, cacheKey);
+      const handle = createEphemeralHandle(rows, "cinema-showtimes");
+
+      if (sessionId) {
+        await pushResultHandle(sessionId, handle);
+      }
+
+      return res.json({
+        type:     "ephemeral",
+        handle,
+        rows,
+        viz_hint: "table",
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "chip_execution_error", message: err.message });
+    }
+  }
+
+  // ── Unhandled action ─────────────────────────────────────────────────────
+  return res.status(400).json({
+    error:   "unsupported_chip_action",
+    action,
+    domain:  args.domain ?? null,
+    message: `Chip action '${action}' (domain: ${args.domain ?? "none"}) is not yet implemented.`,
+  });
 });
 
 // ── GET /history ──────────────────────────────────────────────────────────────

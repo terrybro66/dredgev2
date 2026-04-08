@@ -125,6 +125,11 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
       action: "calculate_travel",
       args: {},
     },
+    {
+      label: "Show nearby transport",
+      action: "fetch_domain",
+      args: { domain: "transport" },
+    },
   ],
   has_time_series: [
     {
@@ -170,11 +175,28 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
   ],
 };
 
+// ── Domain-specific chip overrides ───────────────────────────────────────────
+//
+// Some domains generate chips that are not derivable from capability inference
+// alone — they require knowledge of the domain's semantic role.
+// These are injected AFTER the capability-based chips, before deduplication.
+
+const DOMAIN_CHIPS: Record<string, ChipTemplate[]> = {
+  "cinemas-gb": [
+    {
+      label: "What's on here?",
+      action: "fetch_domain",
+      args: { domain: "cinema-showtimes" },
+    },
+  ],
+};
+
 // ── Public: generateChips ─────────────────────────────────────────────────────
 
 /**
- * Generate all valid chips for a ResultHandle based on its capabilities.
- * Returns an unranked list — the chip ranker (C.3) scores and trims to
+ * Generate all valid chips for a ResultHandle based on its capabilities
+ * and domain-specific overrides.
+ * Returns an unranked list — the chip ranker (C.4) scores and trims to
  * CHIP_DISPLAY_MAX before the response is sent.
  *
  * Every chip carries args.ref pointing back to the handle id so tools
@@ -182,21 +204,25 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
  */
 export function generateChips(handle: ResultHandle): Chip[] {
   const chips: Chip[] = [];
-  const seenActions = new Set<string>();
+  const seenKeys = new Set<string>();
 
+  const dedupeKey = (tpl: ChipTemplate) =>
+    `${tpl.action}:${tpl.args.domain ?? ""}:${tpl.args.constraint ?? ""}:${tpl.args.field ?? ""}`;
+
+  const push = (tpl: ChipTemplate) => {
+    const key = dedupeKey(tpl);
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    chips.push({ ...tpl, args: { ...tpl.args, ref: handle.id } });
+  };
+
+  // 1. Capability-based chips
   for (const cap of handle.capabilities) {
-    const templates = CAPABILITY_CHIPS[cap] ?? [];
-    for (const tpl of templates) {
-      // Deduplicate by action+constraint/field combination
-      const key = `${tpl.action}:${tpl.args.constraint ?? ""}:${tpl.args.field ?? ""}`;
-      if (seenActions.has(key)) continue;
-      seenActions.add(key);
-      chips.push({
-        ...tpl,
-        args: { ...tpl.args, ref: handle.id },
-      });
-    }
+    for (const tpl of CAPABILITY_CHIPS[cap] ?? []) push(tpl);
   }
+
+  // 2. Domain-specific chips
+  for (const tpl of DOMAIN_CHIPS[handle.domain] ?? []) push(tpl);
 
   return chips;
 }

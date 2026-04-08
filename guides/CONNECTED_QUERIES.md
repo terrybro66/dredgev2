@@ -979,10 +979,9 @@ Phase C.0 — Dynamic scrape pipeline (prerequisite) ✅ COMPLETE
     │   C.0.5 TABLE_ONLY_INTENTS viz hint ✅
     │   C.0.6 SERPAPI_KEY typo fix ✅
     │   C.0.7 Country fallback for bare queries ✅
-    │   ── REMAINING ──
-    │   C.0.8 URL+schema cache (Redis, TTL 7 days) — saves SerpAPI cost on repeat queries
-    │   C.0.9 Dynamic extraction prompt generation from natural language intent
-    │   C.0.10 Remove fixed intent slug list from intent parser
+    │   C.0.8 URL+schema cache (Redis, TTL 7 days) ✅
+    │   C.0.9 Dynamic extraction prompt generation from natural language intent ✅
+    │   C.0.10 Remove fixed intent slug list from intent parser ✅
     │
 Phase C — Connected Queries (overlaps B from B.1)
     │   C.1 Types: ConversationMemory, ResultHandle, Chip, ClarificationRequest ✅
@@ -1079,9 +1078,9 @@ Most items are complete from the `feature/scrape-pipeline-robustness` branch.
 | C.0.5 | `TABLE_ONLY_INTENTS` viz hint — cinema/transport never shown as map | ✅ Done |
 | C.0.6 | `SERPAPI_KEY` typo fix | ✅ Done |
 | C.0.7 | Country fallback for bare queries (no location → append country name) | ✅ Done |
-| C.0.8 | URL+schema cache — Redis key `scrape:url:{intent}:{location}`, TTL 7 days | Pending |
-| C.0.9 | Dynamic extraction prompt generation from natural language intent | Pending |
-| C.0.10 | Remove fixed intent slug list from intent parser — return natural language intent | Pending |
+| C.0.8 | URL+schema cache — Redis key `scrape:url:{intent}:{location}`, TTL 7 days | ✅ Done |
+| C.0.9 | Dynamic extraction prompt generation from natural language intent | ✅ Done |
+| C.0.10 | Remove fixed intent slug list from intent parser — return natural language intent | ✅ Done |
 
 ---
 
@@ -1095,14 +1094,14 @@ already implemented. Remaining work starts at C.4 (chip ranker).
 | C.1 | Types: `ConversationMemory`, `ResultHandle`, `Chip`, `ClarificationRequest` in `types/connected.ts` | ✅ Done | None |
 | C.2 | QueryRouter — refinement detection, template matching, `REFINEMENT_PATTERNS` | ✅ Done | C.1 |
 | C.3 | Result shape → capability inference → chip generation | ✅ Done | C.1 |
-| C.4 | Chip ranker: score all valid chips, return top `CHIP_DISPLAY_MAX` (3) | Pending | C.3 |
-| C.5 | Seed DomainRelationship table (5 ranking entries: cinema→travel, flood→transport, etc.) | Pending | C.2 |
-| C.6 | `suggest_followups` post-result hook wired to C.3 + C.4 + C.5 | Pending | C.3, C.4, C.5 |
-| C.7 | Action chips in result UI | Pending | C.6 |
-| C.8 | ConversationMemory Redis store — expand session to full shape, 24h TTL, size limits | Pending | C.1 |
-| C.9 | Ephemeral ResultHandle — Redis hash, 100 row cap, 1h TTL, eviction at N=5 | Pending | C.1, C.8 |
-| C.10 | `cinemas` persistent domain (Track A) — locations only, lat/lon, chain name | Pending | None |
-| C.11 | Cinema showtimes as connected query (Track B) — triggered by chip from cinema result, not standalone query | Pending | C.9, C.10 |
+| C.4 | Chip ranker: score all valid chips, return top `CHIP_DISPLAY_MAX` (3) | ✅ Done | C.3 |
+| C.5 | Seed DomainRelationship table (5 ranking entries: cinema→travel, flood→transport, etc.) | ✅ Done | C.2 |
+| C.6 | `suggest_followups` post-result hook wired to C.3 + C.4 + C.5 | ✅ Done | C.3, C.4, C.5 |
+| C.7 | Action chips in result UI | ✅ Done | C.6 |
+| C.8 | ConversationMemory Redis store — expand session to full shape, 24h TTL, size limits | ✅ Done | C.1 |
+| C.9 | Ephemeral ResultHandle — Redis hash, 100 row cap, 1h TTL, eviction at N=5 | ✅ Done | C.1, C.8 |
+| C.10 | `cinemas` persistent domain (Track A) — locations only, lat/lon, chain name | ✅ Done | None |
+| C.11 | Cinema showtimes as connected query (Track B) — triggered by chip from cinema result, not standalone query | ✅ Done | C.9, C.10 |
 | C.12 | Log-based relationship pattern discovery (Tier 3 calls logged → promoted) | Pending | C.2 |
 | C.13 | Spatial artifact snapshots — extend `createSnapshot` for isochrone + route polylines | Pending | B.4 |
 

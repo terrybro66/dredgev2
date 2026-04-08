@@ -41,12 +41,11 @@ Rules:
     no date mentioned → date_from and date_to both = ${lastMonthStr}
 - Do NOT include viz_hint in your output.
 
-The supported category slugs are:
-  crime, weather, flood risk, transport, cinema listings, population statistics
-
-If the user's intent clearly matches one of these, use that slug exactly.
-If the intent does not match any supported category, return category: "unknown".
-Never invent a new category slug.\``;
+For "category", return a concise natural-language phrase (2–4 words, lowercase) that describes what the user wants.
+  Examples: "cinema listings", "crime statistics", "flood risk", "train times", "bus timetables",
+            "restaurant reviews", "pharmacy opening hours", "weather forecast", "population statistics"
+Use "unknown" only when the intent is completely unclear.
+Do NOT restrict yourself to a fixed list — new intent types are welcome.\``;
 }
 
 export function stripFences(text: string): string {

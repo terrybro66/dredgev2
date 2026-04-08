@@ -72,6 +72,48 @@ interface FollowUp {
   query: ExecuteBody;
 }
 
+// Action chips — Phase C.7
+type ChipAction =
+  | "filter_by"
+  | "overlay_spatial"
+  | "calculate_travel"
+  | "compare_location"
+  | "fetch_domain"
+  | "show_map"
+  | "show_chart"
+  | "clarify";
+
+interface ChipArgs {
+  ref?: string;
+  domain?: string;
+  filters?: Record<string, unknown>;
+  location?: string;
+  field?: string;
+  constraint?: string;
+  value?: unknown;
+}
+
+interface Chip {
+  label: string;
+  action: ChipAction;
+  args: ChipArgs;
+  score?: number;
+}
+
+// D.1 — Clarification types
+interface ClarificationField {
+  field: string;
+  prompt: string;
+  input_type: "text" | "number" | "select" | "boolean";
+  options?: string[];
+  target: "active_filters" | "user_attributes";
+}
+
+interface ClarificationRequest {
+  intent: string;
+  questions: ClarificationField[];
+}
+
 interface ResultContext {
   status: "exact" | "fallback" | "empty";
   reason?: string;
@@ -93,6 +135,7 @@ interface ExecuteResult {
   resultContext?: ResultContext;
   aggregated: boolean;
   intent: string;
+  chips?: Chip[];
 }
 
 interface IntentError {
@@ -315,6 +358,125 @@ export function FollowUpChips({
           {f.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+// ── ActionChips — Phase C.7 ───────────────────────────────────────────────────
+
+const ACTION_ICONS: Partial<Record<ChipAction, string>> = {
+  show_map:         "◉",
+  show_chart:       "▲",
+  calculate_travel: "→",
+  fetch_domain:     "⊕",
+  filter_by:        "⊘",
+  overlay_spatial:  "⊞",
+  compare_location: "⇄",
+  clarify:          "?",
+};
+
+export function ActionChips({
+  chips,
+  onAction,
+}: {
+  chips: Chip[];
+  onAction: (chip: Chip) => void;
+}) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="action-chips">
+      {chips.map((chip) => (
+        <button
+          key={chip.label}
+          className="action-chip"
+          title={`${chip.action}${chip.args.domain ? ` → ${chip.args.domain}` : ""}`}
+          onClick={() => onAction(chip)}
+        >
+          <span className="action-chip-icon">
+            {ACTION_ICONS[chip.action] ?? "·"}
+          </span>
+          {chip.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── ClarificationPanel — Phase D.2 ───────────────────────────────────────────
+
+export function ClarificationPanel({
+  request,
+  onSubmit,
+  onDismiss,
+}: {
+  request: ClarificationRequest;
+  onSubmit: (answers: Record<string, string>) => void;
+  onDismiss: () => void;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const set = (field: string, value: string) =>
+    setAnswers((prev) => ({ ...prev, [field]: value }));
+
+  const allAnswered = request.questions.every(
+    (q) => answers[q.field] !== undefined && answers[q.field] !== "",
+  );
+
+  return (
+    <div className="clarification-panel">
+      <div className="clarification-header">
+        <span className="clarification-label">A FEW QUESTIONS FIRST</span>
+        <button className="btn-ghost small" onClick={onDismiss}>✕</button>
+      </div>
+      <p className="clarification-intent">
+        To check eligibility for <strong>{request.intent}</strong>, please answer:
+      </p>
+      <div className="clarification-fields">
+        {request.questions.map((q) => (
+          <div key={q.field} className="clarification-field">
+            <label className="clarification-prompt">{q.prompt}</label>
+            {q.input_type === "select" && q.options ? (
+              <select
+                className="clarification-select"
+                value={answers[q.field] ?? ""}
+                onChange={(e) => set(q.field, e.target.value)}
+              >
+                <option value="">— select —</option>
+                {q.options.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            ) : q.input_type === "boolean" ? (
+              <div className="clarification-bool">
+                {["Yes", "No"].map((opt) => (
+                  <button
+                    key={opt}
+                    className={`clarification-bool-btn${answers[q.field] === opt ? " selected" : ""}`}
+                    onClick={() => set(q.field, opt)}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input
+                className="clarification-input"
+                type={q.input_type === "number" ? "number" : "text"}
+                value={answers[q.field] ?? ""}
+                onChange={(e) => set(q.field, e.target.value)}
+                placeholder={q.input_type === "number" ? "Enter a number" : "Your answer"}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <button
+        className="clarification-submit"
+        disabled={!allAnswered}
+        onClick={() => allAnswered && onSubmit(answers)}
+      >
+        Continue →
+      </button>
     </div>
   );
 }
@@ -1043,10 +1205,12 @@ function ResultRenderer({
   result,
   onRefine,
   onFollowUp,
+  onChipAction,
 }: {
   result: ExecuteResult;
   onRefine: () => void;
   onFollowUp: (query: ExecuteBody) => void;
+  onChipAction: (chip: Chip) => void;
 }) {
   const { plan, viz_hint, count, months_fetched, results, resultContext } =
     result;
@@ -1058,6 +1222,7 @@ function ResultRenderer({
   };
 
   const followUps = safeContext.followUps ?? [];
+  const chips = result.chips ?? [];
 
   return (
     <div className="result-panel">
@@ -1121,6 +1286,10 @@ function ResultRenderer({
       {count > 0 && followUps.length > 0 && (
         <FollowUpChips followUps={followUps} onSelect={onFollowUp} />
       )}
+
+      {count > 0 && chips.length > 0 && (
+        <ActionChips chips={chips} onAction={onChipAction} />
+      )}
     </div>
   );
 }
@@ -1135,6 +1304,7 @@ export default function App() {
   const [parsed, setParsed] = useState<ParsedQuery | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
+  const [clarification, setClarification] = useState<{ request: ClarificationRequest; executeBody: ExecuteBody } | null>(null);
   const [refineText, setRefineText] = useState("");
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [lastQueryId, setLastQueryId] = useState<string | null>(null);
@@ -1189,6 +1359,15 @@ export default function App() {
         body: JSON.stringify({ ...(parseData as object), rawText: text }),
       });
       const data = await res.json();
+
+      // D.1 — clarification response
+      if (data.type === "clarification") {
+        setClarification({ request: data.request, executeBody: parseData as ExecuteBody });
+        setStage("done");
+        setLoadingStage(null);
+        return;
+      }
+
       if (!res.ok || data.error) {
         setIntentError({
           error: data.error ?? "execute_error",
@@ -1204,6 +1383,7 @@ export default function App() {
       }
       setParsed(parseData);
       setResult(data);
+      setClarification(null);
       setRefineText(text);
       setStage("done");
     } catch {
@@ -1262,7 +1442,125 @@ export default function App() {
     setResult(null);
     setParsed(null);
     setIntentError(null);
+    setClarification(null);
     setRefineText("");
+  };
+
+  // D.2 — user submitted clarification answers — re-execute with answers in rawText
+  const handleClarificationSubmit = async (answers: Record<string, string>) => {
+    if (!clarification) return;
+    const answerText = Object.entries(answers)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(", ");
+    // Re-run execute with answers appended to rawText so the orchestrator
+    // can match them against regulatory rules (D.4+)
+    const body = {
+      ...clarification.executeBody,
+      rawText: `${clarification.request.intent} — ${answerText}`,
+    };
+    setStage("loading");
+    setLoadingStage("fetching");
+    setClarification(null);
+    try {
+      const res = await fetch(`${API}/query/execute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setIntentError({
+          error: data.error ?? "execute_error",
+          understood: {},
+          missing: [],
+          message: data.message ?? "Execution failed.",
+        });
+        setStage("error");
+      } else {
+        setResult(data);
+        setStage("done");
+      }
+    } catch (err: any) {
+      setIntentError({
+        error: "network_error",
+        understood: {},
+        missing: [],
+        message: err?.message ?? "Lost connection.",
+      });
+      setStage("error");
+    }
+    setLoadingStage(null);
+  };
+
+  // C.7 / C.11 — action chip dispatch
+  const handleChipAction = async (chip: Chip) => {
+    if (!result) return;
+
+    if (chip.action === "show_map") {
+      setResult({ ...result, viz_hint: "map" });
+      return;
+    }
+    if (chip.action === "show_chart") {
+      setResult({ ...result, viz_hint: "bar" });
+      return;
+    }
+
+    // C.11 — cinema showtimes via /query/chip
+    if (chip.action === "fetch_domain" && chip.args.domain === "cinema-showtimes") {
+      // Extract cinema name from the current result rows
+      const rows = result.results as Array<Record<string, unknown>>;
+      const cinemaName =
+        (rows[0]?.description as string) ??
+        (rows[0]?.name as string) ??
+        result.plan.location;
+
+      setStage("loading");
+      setLoadingStage("fetching");
+
+      try {
+        const res = await fetch(`${API}/query/chip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "fetch_domain",
+            args: { domain: "cinema-showtimes", cinemaName, ref: chip.args.ref },
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setIntentError({
+            error: "chip_error",
+            understood: {},
+            missing: [],
+            message: data.message ?? "Could not fetch showtimes.",
+          });
+          setStage("error");
+        } else {
+          // Show showtimes as a table result
+          setResult({
+            ...result,
+            count: data.rows?.length ?? 0,
+            results: data.rows ?? [],
+            viz_hint: "table",
+            intent: "cinema showtimes",
+          });
+          setStage("done");
+        }
+      } catch (err: any) {
+        setIntentError({
+          error: "network_error",
+          understood: {},
+          missing: [],
+          message: err?.message ?? "Lost connection.",
+        });
+        setStage("error");
+      }
+      setLoadingStage(null);
+      return;
+    }
+
+    // All other actions — log for now
+    console.log("[chip]", chip.action, chip.args);
   };
 
   const { setExecuteQuery } = useDredgeStore();
@@ -1302,11 +1600,20 @@ export default function App() {
             />
           )}
 
-          {stage === "done" && result && (
+          {stage === "done" && clarification && (
+            <ClarificationPanel
+              request={clarification.request}
+              onSubmit={handleClarificationSubmit}
+              onDismiss={handleRefine}
+            />
+          )}
+
+          {stage === "done" && result && !clarification && (
             <ResultRenderer
               result={result}
               onRefine={handleRefine}
               onFollowUp={handleFollowUp}
+              onChipAction={handleChipAction}
             />
           )}
         </main>
@@ -1608,6 +1915,156 @@ const CSS = `
   .followup-chip:hover {
     background: rgba(245, 166, 35, 0.18);
     color: var(--text);
+  }
+
+  /* ── Clarification Panel (D.2) ── */
+
+  .clarification-panel {
+    border: 1px solid rgba(80, 200, 220, 0.25);
+    background: rgba(80, 200, 220, 0.04);
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .clarification-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .clarification-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: rgba(80, 200, 220, 0.7);
+  }
+
+  .clarification-intent {
+    font-size: 13px;
+    color: var(--text-mid);
+    margin: 0;
+  }
+
+  .clarification-intent strong {
+    color: var(--text);
+  }
+
+  .clarification-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .clarification-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .clarification-prompt {
+    font-size: 12px;
+    color: var(--text);
+    font-family: var(--mono);
+  }
+
+  .clarification-select,
+  .clarification-input {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 10px;
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .clarification-select:focus,
+  .clarification-input:focus {
+    outline: none;
+    border-color: rgba(80, 200, 220, 0.5);
+  }
+
+  .clarification-bool {
+    display: flex;
+    gap: 8px;
+  }
+
+  .clarification-bool-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 5px 18px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .clarification-bool-btn.selected {
+    background: rgba(80, 200, 220, 0.12);
+    border-color: rgba(80, 200, 220, 0.5);
+    color: rgba(80, 200, 220, 1);
+  }
+
+  .clarification-submit {
+    align-self: flex-start;
+    background: rgba(80, 200, 220, 0.1);
+    border: 1px solid rgba(80, 200, 220, 0.4);
+    color: rgba(80, 200, 220, 0.9);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 7px 20px;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: all 0.15s;
+  }
+
+  .clarification-submit:hover:not(:disabled) {
+    background: rgba(80, 200, 220, 0.2);
+    color: rgba(80, 200, 220, 1);
+  }
+
+  .clarification-submit:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  /* ── Action Chips (C.7) ── */
+
+  .action-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 0 2px;
+  }
+
+  .action-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(80, 200, 220, 0.06);
+    border: 1px solid rgba(80, 200, 220, 0.25);
+    color: rgba(80, 200, 220, 0.85);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 5px 12px;
+    cursor: pointer;
+    letter-spacing: 0.03em;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+
+  .action-chip:hover {
+    background: rgba(80, 200, 220, 0.14);
+    color: rgba(80, 200, 220, 1);
+    border-color: rgba(80, 200, 220, 0.5);
+  }
+
+  .action-chip-icon {
+    font-size: 10px;
+    opacity: 0.7;
   }
 
   /* ── Buttons ── */
