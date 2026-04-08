@@ -13,6 +13,11 @@
 > additions: `ClarificationRequest` response type, `ResultHandle` abstraction,
 > `ConversationMemory` expansion, regulatory adapter type, and clarification that
 > `DomainRelationship` is a ranking weight only — it does not drive chip generation.
+>
+> **v4 revision:** Updated after scrape pipeline implementation. Changes marked ◆◆◆.
+> Key additions: Two-track data architecture (persistent vs. ephemeral), dynamic scrape
+> pipeline replacing curated slug maps, URL+schema cache, two-step venue query pattern,
+> and revised Phase C sequencing.
 
 ---
 
@@ -39,6 +44,91 @@ must not conflate them.
 |---|---|
 | Data query (shows, crime, flood) | Return best result without clarification. Offer filter/refinement chips. The "all results" set is meaningful. |
 | Regulatory/eligibility query (hunting licence, food business) | Return `ClarificationRequest` first. There is no meaningful "all" result before eligibility attributes are known. |
+
+---
+
+## ◆◆◆ Two-Track Data Architecture
+
+Every data source in the system belongs to one of two tracks. This distinction
+drives storage, caching, discovery, and connected query behaviour throughout the
+entire stack.
+
+| | Track A — Persistent | Track B — Ephemeral Scrape |
+|---|---|---|
+| **Examples** | Crime, flood risk, cinema locations, planning applications | Showtimes, train times, bus times, live scores, pharmacy hours |
+| **Storage** | Stored in `query_results` | Discarded after delivery |
+| **Data cache** | Results cached, queryable across sessions | Never cached — always live |
+| **URL+schema cache** | N/A — URL is fixed at domain registration | Redis key `scrape:url:{intentSlug}:{locationSlug}`, TTL 7 days |
+| **Discovery** | Catalogue → sample → propose config → approval → registered domain | SerpAPI → URL resolved at query time → extraction prompt generated |
+| **Connected queries** | First-class `ResultHandle`, chips, map viz | Dependent result triggered by chip tap from a Track A result |
+| **Approval flow** | Telegram notification + admin `/approve` endpoint | None — fully automatic |
+
+### ◆◆◆ URL+Schema Cache (Track B)
+
+SerpAPI resolution and extraction prompt generation are expensive relative to the
+scrape itself. Both are stable: the ScotRail page for Paisley→Glasgow doesn't
+change URL or structure week to week. The cache separates stable discovery cost
+from volatile data cost:
+
+```
+Query: "train times Paisley to Glasgow"
+  → check scrape:url:train-times:paisley-glasgow → miss
+  → resolveUrlForQuery("train times Paisley Glasgow") → scotrail URL
+  → generateExtractionPrompt("train times Paisley to Glasgow") → prompt
+  → cache { url, prompt } TTL 7 days
+  → Stagehand scrapes live departures
+  → return rows, discard
+
+Second query same route:
+  → check scrape:url:train-times:paisley-glasgow → HIT
+  → skip SerpAPI + prompt generation entirely
+  → Stagehand scrapes live data directly
+  → return rows, discard
+```
+
+The data is always live. The discovery overhead is amortised across queries.
+
+### ◆◆◆ Two-Step Venue Query Pattern
+
+Venue-based intents (cinemas, restaurants, pharmacies, GP surgeries) split into
+two connected steps with different track assignments:
+
+**Step 1 — Venue locations** (Track A, persistent)
+- "cinemas in Glasgow" → map of venues with name, address, lat/lon, chain
+- Source: BFI cinema database, or a seeded one-time scrape
+- Stored in `query_results`, queryable by location polygon
+- Result: `ResultHandle` with `has_coordinates` capability
+- Chips generated: "What's on at Odeon Quay", "What's on at Cineworld Glasgow", etc.
+
+**Step 2 — Venue detail** (Track B, ephemeral)
+- "What's on at Odeon Quay" triggered by chip tap, not a new user query
+- SerpAPI resolves the specific cinema's page URL
+- Stagehand scrapes live showtimes
+- Result: ephemeral `ResultHandle`, discarded after delivery
+- Never stored — showtimes are not civic reference data
+
+This is the general pattern for any venue-based intent. The curated registry
+entry for cinema listings will eventually split into:
+- `cinemas` → Track A, locations only
+- `cinema showtimes` → Track B, triggered as connected query from cinema result
+
+### ◆◆◆ Domain Approval Scope
+
+The discovery and approval pipeline applies to **Track A only**. Ephemeral scrape
+sources never enter the approval flow — there is no schema to register, no data to
+store, and no value in human review of a URL that expires in 7 days.
+
+```
+Unknown intent
+  ├─ Has coordinates / structured schema → Track A
+  │     catalogue → sample → propose → approve → registered adapter
+  └─ No structured source found → Track B
+        SerpAPI → URL + prompt → cache 7 days → live scrape → discard
+```
+
+Background domain discovery is suppressed for scrape-type curated sources. The
+curated entry is the definitive source; running discovery in parallel would only
+surface irrelevant CKAN datasets.
 
 ---
 
@@ -438,6 +528,34 @@ score = (frequency_in_session_history × 0.4)
 ```
 
 Top 3 chips are shown. This prevents proliferation as domain count grows.
+
+**◆◆◆ Cold-start degradation (v4):**
+
+`frequency` and `domain_relationship_weight` both require aggregated data from
+past sessions — click-through rates and co-occurrence patterns from the event log
+pipeline (C.12). That pipeline does not exist at launch.
+
+At launch the formula degrades gracefully:
+
+```
+score = (0 × 0.4)              // frequency = 0, no history yet
+      + (spatial_relevance × 0.3)
+      + (recency_in_session × 0.2)
+      + (0 × 0.1)              // relationship_weight = 0, no entries seeded yet
+```
+
+Effective launch formula: `spatialRelevance×0.3 + recency×0.2`. This is still
+meaningful — results with coordinates rank travel chips above time-series chips,
+and chips from the most recent result rank above chips from earlier in the session.
+
+`frequency` and `relationshipWeight` activate incrementally as C.12 (log-based
+pattern discovery) delivers data. No code change is required — the formula is
+already in place, the inputs just default to zero until real signals exist.
+
+The five manually seeded `DomainRelationship` entries (C.5) provide non-zero
+`relationshipWeight` for the highest-value known flows (cinema→travel,
+flood→transport, crime→crime) from day one, partially compensating for the
+cold-start on `frequency`.
 
 **Seeded manually for the highest-value flows:**
 ```
@@ -853,23 +971,38 @@ Phase B — Spatial Tools (progressive registration)
     │   B.7 group_by_time                 ← register immediately (no external deps)
     │   B.8 UK rail reachable area        ← depends B.4
     │
-Phase C — Suggestions + Routing (overlaps B from B.1)
-    │   C.0 Define ConversationMemory, ResultHandle, Chip, ClarificationRequest ← prerequisite
-    │       types only — no implementation. All downstream phases import from here.
-    │   C.1 QueryRouter built first with stub tools ← routing proven before real tools
-    │   C.2 Result shape → capability inference → chip generation hook
-    │   C.3 Chip ranker: score all valid chips, return top 3
-    │   C.4 Seed DomainRelationship table (5 curated ranking entries)
-    │   C.5 suggest_followups post-result hook wired to C.2 + C.3 + C.4
-    │   C.6 Action chips in result UI
-    │   C.7 ConversationMemory store: expand session from location-only
+Phase C.0 — Dynamic scrape pipeline (prerequisite) ✅ COMPLETE
+    │   C.0.1 SerpAPI URL resolution replacing slug maps ✅
+    │   C.0.2 Generic items[] extraction schema ✅
+    │   C.0.3 Headless with user-agent spoofing ✅
+    │   C.0.4 Background discovery suppressed for scrape sources ✅
+    │   C.0.5 TABLE_ONLY_INTENTS viz hint ✅
+    │   C.0.6 SERPAPI_KEY typo fix ✅
+    │   C.0.7 Country fallback for bare queries ✅
+    │   ── REMAINING ──
+    │   C.0.8 URL+schema cache (Redis, TTL 7 days) — saves SerpAPI cost on repeat queries
+    │   C.0.9 Dynamic extraction prompt generation from natural language intent
+    │   C.0.10 Remove fixed intent slug list from intent parser
+    │
+Phase C — Connected Queries (overlaps B from B.1)
+    │   C.1 Types: ConversationMemory, ResultHandle, Chip, ClarificationRequest ✅
+    │       (in types/connected.ts — prerequisite for all downstream)
+    │   C.2 QueryRouter — refinement detection, template matching ✅
+    │   C.3 Result shape → capability inference → chip generation ✅
+    │   C.4 Chip ranker: score all valid chips, return top 3
+    │   C.5 Seed DomainRelationship table (5 curated ranking entries)
+    │   C.6 suggest_followups post-result hook wired to C.3 + C.4 + C.5
+    │   C.7 Action chips in result UI
+    │   C.8 ConversationMemory store — expand Redis session to full shape
     │       active_plan set on every successful execution
     │       result_stack updated (push, cap at N=5)
     │       active_filters accumulated across turns
-    │   C.8 Ephemeral ResultHandle: handle type where data lives in session
-    │   C.9 Log-based relationship pattern discovery
-    │   C.10 Spatial artifact snapshots (isochrone + route stored in createSnapshot)
-    │   ✓ STRESS TEST: cinema → travel, crime → trends
+    │   C.9 Ephemeral ResultHandle — Redis hash, 100 row cap, 1h TTL
+    │   C.10 cinemas persistent domain (Track A) — locations only, lat/lon, chain
+    │   C.11 cinema showtimes as connected query from cinema chip (Track B)
+    │   C.12 Log-based relationship pattern discovery
+    │   C.13 Spatial artifact snapshots (isochrone + route stored in createSnapshot)
+    │   ✓ STRESS TEST: cinema locations → showtime chip → scrape, crime → trends
     │
 Phase D — Clarification + Regulatory + Routing Maturity (weeks 8–12)
     │   D.1 ClarificationRequest response type in orchestrator
@@ -932,30 +1065,52 @@ Each tool registers immediately on completion. The QueryRouter can use it the sa
 
 ---
 
-### Phase C — Suggestions + routing (weeks 4–8, overlaps B from B.1)
+### Phase C.0 — Dynamic scrape pipeline (prerequisite)
 
-Suggestions are the primary UX investment. Begin with the type definitions (C.0)
-and the QueryRouter (C.1) with stub tools so routing logic is proven before real
-tools exist, then layer real tools in as Phase B delivers them.
+The scrape pipeline must be robust before connected queries can be built on top of it.
+Most items are complete from the `feature/scrape-pipeline-robustness` branch.
 
-| Item | What | Dependency |
+| Item | What | Status |
 |---|---|---|
-| **C.0** | **Define `ConversationMemory`, `ResultHandle`, `Chip`, `ChipAction`, `ClarificationRequest` types in `types/connected.ts`. Types only — no implementation. Prerequisite for all downstream items.** | None |
-| C.1 | QueryRouter — Tier 1 templates + Tier 2 relationship lookup + Tier 3 LLM fallback (stub tools initially) | C.0 |
-| C.2 | Result shape → capability inference → chip generation hook | C.0, B.1 |
-| C.3 | Chip ranker: score all valid chips, return top 3 | C.2 |
-| C.4 | Seed DomainRelationship table (5 ranking entries: cinema→travel, flood→transport, etc.) | C.1 |
-| C.5 | `suggest_followups` post-result hook wired to C.2 + C.3 + C.4 | C.2, C.3, C.4 |
-| C.6 | Action chips in result UI | C.5 |
-| C.7 | ConversationMemory store — expand Redis session to full `ConversationMemory` shape. Size limits enforced on write: `user_attributes` max 50 KV pairs (keys ≤ 64 chars, values ≤ 2,000 chars); `active_filters` max 20 KV pairs (same size limits); total serialised `ConversationMemory` max 64KB; session TTL 24h of inactivity. Writes exceeding limits log a warning and drop the offending key — never reject the write. | C.0 |
-| C.8 | Ephemeral ResultHandle — handle type where data lives in Redis (not `query_results`), capped at 100 rows, TTL 1h, evicted from result_stack when stack exceeds N=5 | C.0, C.7 |
-| C.9 | Log-based relationship pattern discovery (Tier 3 calls logged → promoted) | C.1 |
-| C.10 | Spatial artifact snapshots — extend `createSnapshot` to store isochrone polygons and route polylines | B.4 |
+| C.0.1 | SerpAPI URL resolution — `resolveUrlForQuery` replaces slug maps | ✅ Done |
+| C.0.2 | Generic `items[]` extraction schema — works for any domain | ✅ Done |
+| C.0.3 | Headless with user-agent spoofing — avoids bot detection | ✅ Done |
+| C.0.4 | Background discovery suppressed for scrape-type curated sources | ✅ Done |
+| C.0.5 | `TABLE_ONLY_INTENTS` viz hint — cinema/transport never shown as map | ✅ Done |
+| C.0.6 | `SERPAPI_KEY` typo fix | ✅ Done |
+| C.0.7 | Country fallback for bare queries (no location → append country name) | ✅ Done |
+| C.0.8 | URL+schema cache — Redis key `scrape:url:{intent}:{location}`, TTL 7 days | Pending |
+| C.0.9 | Dynamic extraction prompt generation from natural language intent | Pending |
+| C.0.10 | Remove fixed intent slug list from intent parser — return natural language intent | Pending |
+
+---
+
+### Phase C — Connected Queries (weeks 4–8, overlaps B from B.1)
+
+Suggestions are the primary UX investment. Type definitions and QueryRouter are
+already implemented. Remaining work starts at C.4 (chip ranker).
+
+| Item | What | Status | Dependency |
+|---|---|---|---|
+| C.1 | Types: `ConversationMemory`, `ResultHandle`, `Chip`, `ClarificationRequest` in `types/connected.ts` | ✅ Done | None |
+| C.2 | QueryRouter — refinement detection, template matching, `REFINEMENT_PATTERNS` | ✅ Done | C.1 |
+| C.3 | Result shape → capability inference → chip generation | ✅ Done | C.1 |
+| C.4 | Chip ranker: score all valid chips, return top `CHIP_DISPLAY_MAX` (3) | Pending | C.3 |
+| C.5 | Seed DomainRelationship table (5 ranking entries: cinema→travel, flood→transport, etc.) | Pending | C.2 |
+| C.6 | `suggest_followups` post-result hook wired to C.3 + C.4 + C.5 | Pending | C.3, C.4, C.5 |
+| C.7 | Action chips in result UI | Pending | C.6 |
+| C.8 | ConversationMemory Redis store — expand session to full shape, 24h TTL, size limits | Pending | C.1 |
+| C.9 | Ephemeral ResultHandle — Redis hash, 100 row cap, 1h TTL, eviction at N=5 | Pending | C.1, C.8 |
+| C.10 | `cinemas` persistent domain (Track A) — locations only, lat/lon, chain name | Pending | None |
+| C.11 | Cinema showtimes as connected query (Track B) — triggered by chip from cinema result, not standalone query | Pending | C.9, C.10 |
+| C.12 | Log-based relationship pattern discovery (Tier 3 calls logged → promoted) | Pending | C.2 |
+| C.13 | Spatial artifact snapshots — extend `createSnapshot` for isochrone + route polylines | Pending | B.4 |
 
 **Phase C acceptance criteria (stress tests):**
-- [ ] **Cinema → travel**: user queries cinema listings, clicks "Directions to [Venue]" chip, `calculate_travel` fires with resolved coordinates from `ResultHandle`, travel result returned
+- [ ] **Cinema locations → showtimes chip**: user queries "cinemas in Glasgow", gets map of venues, clicks "What's on at Odeon Quay" chip, ephemeral scrape fires, showtime table returned
 - [ ] **Crime → trends**: user queries crime in an area, clicks "Show trend over 6 months" chip, `group_by_time` fires, bar chart rendered with monthly breakdown
 - [ ] **Near-me chip**: user queries "crime near me", session carries location, chips include "Show last 6 months" — click uses `active_plan` from session to re-run with date range
+- [ ] **Refinement**: user queries cinema listings, then types "filter by 12A" — detected as `category_filter` refinement, re-queries same domain with certificate filter applied
 
 ---
 
