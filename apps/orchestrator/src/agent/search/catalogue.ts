@@ -7,6 +7,21 @@ const CATALOGUE_BY_COUNTRY: Record<string, string> = {
   GB: CATALOGUE_API,
 };
 
+/**
+ * Returns true if the dataset title or description contains at least one
+ * keyword from the intent string. Prevents irrelevant catalogue results
+ * (e.g. a vets directory for a "cinema listings" search) from being passed
+ * to the scraper.
+ */
+function isRelevant(intent: string, title: string, notes: string): boolean {
+  const keywords = intent
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2); // ignore short stop words
+  const haystack = `${title} ${notes}`.toLowerCase();
+  return keywords.some((kw) => haystack.includes(kw));
+}
+
 function inferFormat(format: string): DiscoveredSource["format"] {
   const f = format.toUpperCase();
   if (f === "CSV") return "csv";
@@ -60,6 +75,11 @@ export async function searchCatalogue(
         url === "N/A"
       )
         continue;
+
+      // Skip datasets with no topical relevance to the intent
+      const title = (dataset.title ?? "") as string;
+      const notes = (dataset.notes ?? "") as string;
+      if (!isRelevant(intent, title, notes)) continue;
 
       sources.push({
         url,
