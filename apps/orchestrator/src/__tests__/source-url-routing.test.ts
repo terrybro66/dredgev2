@@ -54,6 +54,10 @@ const { mockScrapeProviderCreate } = vi.hoisted(() => ({
 const { mockResolveUrlForQuery } = vi.hoisted(() => ({
   mockResolveUrlForQuery: vi.fn(),
 }));
+const { mockGetCachedScrapeUrl, mockSetCachedScrapeUrl } = vi.hoisted(() => ({
+  mockGetCachedScrapeUrl: vi.fn(),
+  mockSetCachedScrapeUrl: vi.fn(),
+}));
 
 const { mockPrisma } = vi.hoisted(() => ({
   mockPrisma: {
@@ -106,6 +110,10 @@ vi.mock("../providers/scrape-provider", () => ({
 vi.mock("../agent/search/serp", () => ({
   searchWithSerp: vi.fn().mockResolvedValue([]),
   resolveUrlForQuery: mockResolveUrlForQuery,
+}));
+vi.mock("../agent/search/scrape-url-cache", () => ({
+  getCachedScrapeUrl: mockGetCachedScrapeUrl,
+  setCachedScrapeUrl: mockSetCachedScrapeUrl,
 }));
 vi.mock("../enrichment/source-tag", () => ({
   tagRows: vi.fn((rows: unknown[]) => rows),
@@ -185,6 +193,8 @@ beforeEach(() => {
     fetchRows: vi.fn().mockResolvedValue([]),
   });
   mockResolveUrlForQuery.mockResolvedValue(null);
+  mockGetCachedScrapeUrl.mockResolvedValue(null);
+  mockSetCachedScrapeUrl.mockResolvedValue(undefined);
   mockParseIntent.mockResolvedValue(basePlan);
   mockDeriveVizHint.mockReturnValue("table");
   mockExpandDateRange.mockReturnValue(["2026-04"]);
@@ -278,6 +288,37 @@ describe("query pipeline — curated source URL resolution", () => {
       expect(mockResolveUrlForQuery).toHaveBeenCalledWith(
         expect.stringContaining("UK"),
         cinemaSource.searchStrategy.preferredDomains,
+      );
+    });
+
+    it("uses cached URL without calling resolveUrlForQuery on cache hit", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockGetCachedScrapeUrl.mockResolvedValue({
+        url: "https://www.odeon.co.uk/cinemas/sheffield/",
+        extractionPrompt: "Find all movies...",
+      });
+
+      const app = buildApp();
+      await request(app).post("/query/execute").send(executeBody);
+
+      expect(mockResolveUrlForQuery).not.toHaveBeenCalled();
+      expect(mockScrapeProviderCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ extractionPrompt: "Find all movies..." }),
+      );
+    });
+
+    it("calls setCachedScrapeUrl after resolving URL on cache miss", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockGetCachedScrapeUrl.mockResolvedValue(null);
+      mockResolveUrlForQuery.mockResolvedValue("https://www.odeon.co.uk/cinemas/sheffield/");
+
+      const app = buildApp();
+      await request(app).post("/query/execute").send(executeBody);
+
+      expect(mockSetCachedScrapeUrl).toHaveBeenCalledWith(
+        cinemaSource.intent,
+        expect.any(String),
+        expect.objectContaining({ url: "https://www.odeon.co.uk/cinemas/sheffield/" }),
       );
     });
   });

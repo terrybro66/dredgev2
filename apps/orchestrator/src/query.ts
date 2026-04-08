@@ -235,10 +235,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
                 await import("./agent/search/serp");
 
               let fetchUrl = source.url ?? "";
+              let extractionPrompt =
+                source.extractionPrompt ??
+                `Extract all data items from this page at ${fetchUrl}`;
 
               if ((source as any).searchStrategy) {
                 const strategy = (source as any)
                   .searchStrategy as SearchStrategy;
+                const {
+                  getCachedScrapeUrl,
+                  setCachedScrapeUrl,
+                } = await import("./agent/search/scrape-url-cache");
 
                 // Use resolved_location when available; fall back to country
                 // name so bare queries ("cinema listings") don't return US results
@@ -254,42 +261,64 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
                     ? resolved_location
                     : (COUNTRY_NAMES[country_code] ?? country_code);
 
-                const serpQuery = strategy.queryTemplate
-                  .replace("{intent}", source.intent)
-                  .replace("{location}", locationContext);
-
-                console.log(
-                  JSON.stringify({
-                    event: "scrape_url_resolving",
-                    query: serpQuery,
-                  }),
+                // Check cache first — saves a SerpAPI call on repeat queries
+                const cached = await getCachedScrapeUrl(
+                  source.intent,
+                  locationContext,
                 );
-                fetchUrl =
-                  (await resolveUrlForQuery(
-                    serpQuery,
-                    strategy.preferredDomains ?? [],
-                  )) ?? "";
 
-                if (!fetchUrl) {
-                  console.warn(
+                if (cached) {
+                  console.log(
                     JSON.stringify({
-                      event: "scrape_url_not_found",
+                      event: "scrape_url_cache_hit",
+                      url: cached.url,
+                      intent: source.intent,
+                      location: locationContext,
+                    }),
+                  );
+                  fetchUrl = cached.url;
+                  extractionPrompt = cached.extractionPrompt;
+                } else {
+                  const serpQuery = strategy.queryTemplate
+                    .replace("{intent}", source.intent)
+                    .replace("{location}", locationContext);
+
+                  console.log(
+                    JSON.stringify({
+                      event: "scrape_url_resolving",
                       query: serpQuery,
                     }),
                   );
-                  return [];
-                }
-                console.log(
-                  JSON.stringify({
-                    event: "scrape_url_resolved",
-                    url: fetchUrl,
-                  }),
-                );
-              }
+                  fetchUrl =
+                    (await resolveUrlForQuery(
+                      serpQuery,
+                      strategy.preferredDomains ?? [],
+                    )) ?? "";
 
-              const extractionPrompt =
-                source.extractionPrompt ??
-                `Extract all data items from this page at ${fetchUrl}`;
+                  if (!fetchUrl) {
+                    console.warn(
+                      JSON.stringify({
+                        event: "scrape_url_not_found",
+                        query: serpQuery,
+                      }),
+                    );
+                    return [];
+                  }
+
+                  console.log(
+                    JSON.stringify({
+                      event: "scrape_url_resolved",
+                      url: fetchUrl,
+                    }),
+                  );
+
+                  // Populate cache for next time
+                  await setCachedScrapeUrl(source.intent, locationContext, {
+                    url: fetchUrl,
+                    extractionPrompt,
+                  });
+                }
+              }
               const provider = createScrapeProvider({ extractionPrompt });
               return tagRows(
                 (await provider.fetchRows(fetchUrl)) as Record<
