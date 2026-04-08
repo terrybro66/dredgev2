@@ -12,10 +12,10 @@ export async function searchWithSerp(
   intent: string,
   country_code: string,
 ): Promise<DiscoveredSource[]> {
-  const apiKey = process.env.SERAPI_KEY;
+  const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
     console.warn(
-      JSON.stringify({ event: "serp_disabled", reason: "SERAPI_KEY not set" }),
+      JSON.stringify({ event: "serp_disabled", reason: "SERPAPI_KEY not set" }),
     );
     return [];
   }
@@ -55,7 +55,7 @@ export async function resolveUrlForQuery(
   query: string,
   preferredDomains: string[] = [],
 ): Promise<string | null> {
-  const apiKey = process.env.SERAPI_KEY;
+  const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) return null;
 
   const url =

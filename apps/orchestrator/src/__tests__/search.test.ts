@@ -9,11 +9,11 @@ vi.stubGlobal("fetch", mockFetch);
 describe("searchWithSerp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.SERAPI_KEY = "test-serp-key";
+    process.env.SERPAPI_KEY = "test-serp-key";
   });
 
-  it("returns empty array when SERAPI_KEY is not set", async () => {
-    delete process.env.SERAPI_KEY;
+  it("returns empty array when SERPAPI_KEY is not set", async () => {
+    delete process.env.SERPAPI_KEY;
     const { searchWithSerp } = await import("../agent/search/serp");
     const results = await searchWithSerp("car hire", "GB");
     expect(results).toEqual([]);

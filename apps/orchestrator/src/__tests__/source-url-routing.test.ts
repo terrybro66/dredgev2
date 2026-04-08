@@ -266,6 +266,20 @@ describe("query pipeline — curated source URL resolution", () => {
       expect(mockScrapeProviderCreate).not.toHaveBeenCalled();
       expect(res.status).toBe(200);
     });
+
+    it("falls back to country name when resolved_location is empty", async () => {
+      mockFindCuratedSource.mockReturnValue(cinemaSource);
+      mockResolveUrlForQuery.mockResolvedValue("https://www.odeon.co.uk/");
+
+      const bodyNoLocation = { ...executeBody, resolved_location: "" };
+      const app = buildApp();
+      await request(app).post("/query/execute").send(bodyNoLocation);
+
+      expect(mockResolveUrlForQuery).toHaveBeenCalledWith(
+        expect.stringContaining("UK"),
+        cinemaSource.searchStrategy.preferredDomains,
+      );
+    });
   });
 
   describe("REST source with static URL", () => {
