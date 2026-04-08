@@ -70,8 +70,9 @@ export interface ResultHandle {
 
 export const MAX_EPHEMERAL_ROWS = 100;
 export const RESULT_STACK_MAX = 5;
-export const EPHEMERAL_TTL_SECONDS = 3600;   // 1 hour
-export const SESSION_TTL_SECONDS = 86400;    // 24 hours (for location + ConversationMemory)
+export const EPHEMERAL_TTL_SECONDS = 3600;        // 1 hour
+export const SESSION_TTL_SECONDS = 86400;         // 24 hours (QueryContext)
+export const USER_PROFILE_TTL_SECONDS = 2592000;  // 30 days (UserProfile), refreshed on use
 
 // ── ClarificationField / ClarificationRequest ─────────────────────────────────
 
@@ -154,6 +155,8 @@ export interface Chip {
   action: ChipAction;
   args: ChipArgs;
   score?: number;                        // computed by chip ranker; top 3 shown
+  scoreBreakdown?: ChipScore;            // per-component scores for "Why this chip?" tooltip
+                                         // and dev-mode reasoning sidebar
 }
 
 // ── Chip ranking formula ──────────────────────────────────────────────────────
@@ -202,46 +205,84 @@ export interface DomainRelationship {
   weight: number;           // 0–1; used as relationshipWeight in ChipScore
 }
 
-// ── ConversationMemory ────────────────────────────────────────────────────────
+// ── QueryContext ──────────────────────────────────────────────────────────────
 
 /**
- * Full session state persisted per sessionId. Stored in Redis at
- * session:memory:{sessionId}, TTL SESSION_TTL_SECONDS.
+ * Query-scoped session state. Expires with the session.
+ *
+ * Redis key:  session:context:{sessionId}
+ * TTL:        SESSION_TTL_SECONDS (24h inactivity)
  *
  * Size limits enforced on every write:
- *   user_attributes   — max 50 KV pairs; keys ≤ 64 chars, values ≤ 2,000 chars
- *   active_filters    — max 20 KV pairs; keys ≤ 64 chars, values ≤ 2,000 chars
- *   result_stack      — max RESULT_STACK_MAX handles
- *   total serialised  — max 64KB; writes exceeding the limit log a warning and
- *                       drop the offending key — the write is never rejected
+ *   active_filters  — max 20 KV pairs; keys ≤ 64 chars, values ≤ 2,000 chars
+ *   result_stack    — max RESULT_STACK_MAX handles
+ *   total           — max 64KB; oversized writes log a warning and drop the
+ *                     offending key — the write is never rejected
+ *
+ * ResultHandle storage: stored as a Redis hash at
+ *   session:handles:{sessionId}
+ * with handleId as the field and serialised ResultHandle as the value.
+ * A single DEL clears all handles — no SCAN required.
  */
-export interface ConversationMemory {
+export interface QueryContext {
   location: SessionLocation | null;
 
-  /** The most recent successfully executed QueryPlan. Used by the QueryRouter to
-   *  detect refinement turns ("just burglaries" after a crime query) and merge
-   *  the new constraints rather than treating them as a new query. */
+  /** The most recent successfully executed QueryPlan. Used by the QueryRouter
+   *  to detect refinement turns and merge new constraints rather than treating
+   *  the follow-up as a new query. */
   active_plan: QueryPlan | null;
 
-  /** Last RESULT_STACK_MAX ResultHandles, newest first. Chips reference handles
-   *  by id. Ephemeral handles are backed by Redis keys; persistent handles point
-   *  into query_results rows. */
+  /** Last RESULT_STACK_MAX ResultHandle ids, newest first. Full handle data
+   *  lives in the session:handles:{sessionId} Redis hash. */
   result_stack: ResultHandle[];
 
-  /** Facts about the user that span the whole session and feed into eligibility
-   *  logic (age, residency, game species, business type). Populated by
-   *  ClarificationRequest answers with target: "user_attributes". */
-  user_attributes: Record<string, unknown>;
-
-  /** Current query constraints accumulated across turns. Populated by
-   *  ClarificationRequest answers with target: "active_filters" and by chip
-   *  filter_by actions. Replacement semantics per type:
+  /** Current query constraints accumulated across turns.
+   *  Replacement semantics per type:
    *    category, date, location  → replaces existing value of that key
    *    exclude / negation keys   → composes (AND); multiple exclusions stack */
   active_filters: Record<string, unknown>;
 }
 
-// ── active_filters merge semantics ───────────────────────────────────────────
+// ── UserProfile ───────────────────────────────────────────────────────────────
+
+/**
+ * User-scoped state that persists across sessions.
+ *
+ * Redis key:  user:profile:{userId}
+ * TTL:        USER_PROFILE_TTL_SECONDS (30 days, refreshed on use)
+ *
+ * user_attributes collected during ClarificationRequest flows (age, residency,
+ * game species, business type) are stored here so the system does not
+ * re-issue the same clarification questions when the user returns.
+ *
+ * Size limits:
+ *   user_attributes   — max 50 KV pairs; keys ≤ 64 chars, values ≤ 2,000 chars
+ *   location_history  — max 10 entries (home, work, recent places)
+ *   total             — max 32KB
+ */
+export interface UserProfile {
+  /** Facts about the user that feed into eligibility logic. Populated by
+   *  ClarificationRequest answers with target: "user_attributes". */
+  user_attributes: Record<string, unknown>;
+
+  /** Learned locations (home, work, recently searched). Used to personalise
+   *  "near me" resolution and chip spatial relevance scoring. */
+  location_history: SessionLocation[];
+}
+
+// ── ConversationMemory ────────────────────────────────────────────────────────
+
+/**
+ * Composed view of QueryContext + UserProfile. Used by code that needs
+ * both (e.g. the QueryRouter, chip ranker). Assembled from the two Redis
+ * stores — never persisted as a single key.
+ */
+export interface ConversationMemory {
+  context: QueryContext;
+  profile: UserProfile;
+}
+
+// ── active_filters merge semantics (QueryContext.active_filters) ──────────────
 
 /**
  * Keys whose values should compose (AND) rather than replace when a new value
@@ -333,4 +374,8 @@ export type OrchestratorResponse =
       type: "error";
       error: string;
       message: string;
+      /** Present when error === "stale_reference". A chip that re-runs the
+       *  original query so the user can recover with one click rather than
+       *  retyping their query. */
+      refresh_chip?: Chip;
     };

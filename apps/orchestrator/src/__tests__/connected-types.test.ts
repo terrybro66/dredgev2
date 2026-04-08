@@ -250,13 +250,19 @@ describe("type shapes", () => {
 
   it("ConversationMemory shape compiles correctly", () => {
     const mem: ConversationMemory = {
-      location: null,
-      active_plan: null,
-      result_stack: [],
-      user_attributes: {},
-      active_filters: {},
+      context: {
+        location: null,
+        active_plan: null,
+        result_stack: [],
+        active_filters: {},
+      },
+      profile: {
+        user_attributes: {},
+        location_history: [],
+      },
     };
-    expect(mem.result_stack).toHaveLength(0);
+    expect(mem.context.result_stack).toHaveLength(0);
+    expect(mem.profile.user_attributes).toEqual({});
   });
 
   it("Chip with clarify action compiles correctly", () => {
@@ -266,5 +272,38 @@ describe("type shapes", () => {
       args: { field: "game_species" },
     };
     expect(chip.action).toBe("clarify");
+  });
+
+  it("Chip accepts optional scoreBreakdown", () => {
+    const chip: Chip = {
+      label: "Show on map",
+      action: "show_map",
+      args: { ref: "qr_1" },
+      score: 0.72,
+      scoreBreakdown: {
+        frequency: 0.8,
+        spatialRelevance: 0.9,
+        recency: 0.5,
+        relationshipWeight: 0.2,
+      },
+    };
+    expect(chip.scoreBreakdown?.frequency).toBe(0.8);
+  });
+
+  it("stale_reference error accepts optional refresh_chip", () => {
+    const err: OrchestratorResponse = {
+      type: "error",
+      error: "stale_reference",
+      message: "This option is no longer available.",
+      refresh_chip: {
+        label: "Refresh search",
+        action: "fetch_domain",
+        args: { domain: "crime-uk" },
+      },
+    };
+    expect(err.type).toBe("error");
+    if (err.type === "error") {
+      expect(err.refresh_chip?.label).toBe("Refresh search");
+    }
   });
 });

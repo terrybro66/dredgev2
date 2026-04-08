@@ -22,14 +22,19 @@ function makePlan(overrides: Partial<QueryPlan> = {}): QueryPlan {
   };
 }
 
-function makeMemory(overrides: Partial<ConversationMemory> = {}): ConversationMemory {
+function makeMemory(contextOverrides: Partial<import("../types/connected").QueryContext> = {}): ConversationMemory {
   return {
-    location: null,
-    active_plan: null,
-    result_stack: [],
-    user_attributes: {},
-    active_filters: {},
-    ...overrides,
+    context: {
+      location: null,
+      active_plan: null,
+      result_stack: [],
+      active_filters: {},
+      ...contextOverrides,
+    },
+    profile: {
+      user_attributes: {},
+      location_history: [],
+    },
   };
 }
 

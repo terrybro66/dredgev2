@@ -1027,6 +1027,9 @@ and the highest-priority addition after capability chips and `ResultHandle`.
 | Autonomous tool discovery | Premature — tool library needs to stabilise first |
 | Feedback collection loop | Valuable eventually, not blocking anything now |
 | Tool composition error handling (`CompositeTool.partialResults`) | Real failure modes only emerge from production chains. Define the `warnings[]` partial-result pattern after Phase B tools are running against live data — not before. The individual `Tool.fallback` contract covers the single-tool case in the meantime. |
+| Pre-computed domain affinity index | Replace the hot-path `DomainRelationship` lookup with a nightly-computed Redis sorted set (`affinity:{domain_a}:{domain_b}` → co-occurrence score 0–1). Move scoring weights from hardcoded constants to a `ScoringConfig` object loaded at startup so they can be tuned without a deploy. Implement in Phase D after C.4 seeds the relationship table and real co-occurrence data exists to compute from. |
+| Refinement classifier cache (pgvector tier) | Add a Tier 2 between regex patterns and the LLM fallback: embed the query text and search for previously-classified refinements above a similarity threshold (e.g. 0.85). Reuses the existing pgvector infrastructure from the semantic classifier. Implement in Phase D.9 alongside relationship auto-discovery, once real refinement examples are in production. |
+| `FetchCoordinator` for parallel domain deduplication | Request-scoped identity map that deduplicates concurrent identical domain+params fetches and checks `result_stack` before hitting the network. Needed for Phase D.8 composite query decomposition (Story 6: cycle + crime). `inflight` map keyed on `domain + stableHash(params)`, cleared on promise settlement. |
 
 The itinerary generator from ideas.txt Phase 2.5 is **not** deferred — it is a
 workflow template in Phase D, which is the correct home for it.
@@ -1066,13 +1069,22 @@ transport routes" appears because the flood result `has_coordinates` — not bec
 a relationship entry exists. The relationship entry boosts that chip's rank above
 alternatives. If the entry is missing, the chip still appears with a lower score.
 
-**`ConversationMemory` expands session from location-only to full conversation state.**
+**Session memory is split into two stores with different lifecycles.**
+`QueryContext` (TTL 24h, expires with the session) holds `active_plan`,
+`result_stack`, `active_filters`, and `location`. `UserProfile` (TTL 30 days,
+refreshed on use) holds `user_attributes` and `location_history`. This separation
+means eligibility attributes collected during a hunting licence query (age,
+residency) are still present when the user returns next week — they do not expire
+with the session. `ConversationMemory` is the composed view of both, used by
+the QueryRouter and chip ranker. `ResultHandle` storage uses a single Redis hash
+(`session:handles:{sessionId}`) so all handles for a session are cleaned up with
+one `DEL` rather than a `SCAN + multi-delete`.
+
 `active_plan` enables free-text refinement merging via pattern-matching first, LLM
 fallback second — same three-tier principle as the QueryRouter. `result_stack` (last
-N handles) enables step-N chips that reference step-M results. `user_attributes`
-carry eligibility context (age, residency) across turns. `active_filters` follow
-replacement semantics per type: category, date, and location filters replace on each
-turn; only negation/exclusion filters compose.
+N handles) enables step-N chips that reference step-M results. `active_filters`
+follow replacement semantics per type: category, date, and location filters replace
+on each turn; only negation/exclusion filters compose.
 
 **Chips carry a validity guarantee.** Before executing any chip, the orchestrator
 validates that its `args.ref` handle is present in both `result_stack` and Redis. A

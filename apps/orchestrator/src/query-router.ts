@@ -190,6 +190,8 @@ export class QueryRouter {
    * those logs will graduate to Tier 1 templates or Tier 2 relationship entries.
    */
   async route(query: string, memory: ConversationMemory): Promise<RouteResult> {
+    const { context } = memory;
+
     // Tier 1 — template
     const template = matchTemplate(query);
     if (template) {
@@ -197,10 +199,10 @@ export class QueryRouter {
     }
 
     // Tier 2 — refinement
-    const refinementType = detectRefinement(query, memory.active_plan);
+    const refinementType = detectRefinement(query, context.active_plan);
     if (refinementType) {
       const mergedPlan = applyRefinement(
-        memory.active_plan!,
+        context.active_plan!,
         refinementType,
         query,
       );
@@ -222,12 +224,12 @@ export class QueryRouter {
       JSON.stringify({
         event: "query_router_fresh",
         query,
-        hasActivePlan: memory.active_plan !== null,
+        hasActivePlan: context.active_plan !== null,
       }),
     );
     return {
       type: "fresh_query",
-      clearActivePlan: memory.active_plan !== null,
+      clearActivePlan: context.active_plan !== null,
     };
   }
 }
