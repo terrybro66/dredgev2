@@ -23,6 +23,8 @@ import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
 import { buildClarificationRequest } from "./clarification";
+import { getRegulatoryAdapter } from "./regulatory-adapter";
+import { updateQueryContext } from "./conversation-memory";
 import { setUserLocation, getUserLocation } from "./session";
 
 export const queryRouter = Router();
@@ -38,6 +40,8 @@ const ExecuteBodySchema = z.object({
   intent: z.string().default("unknown"),
   months: z.array(z.string()),
   rawText: z.string().optional(),
+  // D.6 — user attributes collected via ClarificationRequest answers
+  user_attributes: z.record(z.unknown()).optional(),
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
@@ -147,17 +151,43 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     intent,
     months,
     rawText,
+    user_attributes,
   } = bodyResult.data;
 
-  // 0. Clarification check — regulatory/eligibility intents return questions
-  //    before any data fetch. Check raw text first (most expressive), then
-  //    the parsed intent/category.
+  const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
+  const userAttributes = user_attributes ?? {};
   const clarificationText = rawText ?? intent ?? plan.category ?? "";
-  const clarificationRequest = buildClarificationRequest(clarificationText);
-  if (clarificationRequest) {
+
+  // 0. Clarification check — regulatory/eligibility intents return questions
+  //    before any data fetch. Only run when the user has not yet answered;
+  //    once user_attributes are populated we skip straight to evaluation.
+  if (Object.keys(userAttributes).length === 0) {
+    const clarificationRequest = buildClarificationRequest(clarificationText);
+    if (clarificationRequest) {
+      return res.status(200).json({
+        type:    "clarification",
+        request: clarificationRequest,
+      });
+    }
+  }
+
+  // 0b. Regulatory adapter check — when user_attributes are present evaluate
+  //     eligibility and return a decision_result without fetching any data.
+  const regulatoryAdapter = getRegulatoryAdapter(clarificationText, country_code);
+  if (regulatoryAdapter && Object.keys(userAttributes).length > 0) {
+    const decision = await regulatoryAdapter.evaluate(userAttributes);
+
+    // D.6 — persist answered attributes to session context
+    if (sessionId) {
+      await updateQueryContext(sessionId, {
+        active_filters: { ...userAttributes },
+      });
+    }
+
     return res.status(200).json({
-      type:    "clarification",
-      request: clarificationRequest,
+      type:    "decision_result",
+      decision,
+      intent:  clarificationText,
     });
   }
 

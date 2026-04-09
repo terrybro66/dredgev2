@@ -114,6 +114,14 @@ interface ClarificationRequest {
   questions: ClarificationField[];
 }
 
+// D.3 — DecisionResult (returned by RegulatoryAdapter after attributes collected)
+interface DecisionResult {
+  eligibility: "eligible" | "conditional" | "ineligible";
+  conditions: string[];
+  next_questions: ClarificationField[];
+  references: string[];
+}
+
 interface ResultContext {
   status: "exact" | "fallback" | "empty";
   reason?: string;
@@ -477,6 +485,103 @@ export function ClarificationPanel({
       >
         Continue →
       </button>
+    </div>
+  );
+}
+
+// ── DecisionResultPanel — Phase D.3 ──────────────────────────────────────────
+
+export function DecisionResultPanel({
+  intent,
+  decision,
+  onDismiss,
+}: {
+  intent: string;
+  decision: DecisionResult;
+  onDismiss: () => void;
+}) {
+  const isEligible    = decision.eligibility === "eligible";
+  const isConditional = decision.eligibility === "conditional";
+
+  const badgeColor = isEligible
+    ? "var(--green, #3ddc84)"
+    : isConditional
+      ? "var(--amber, #f5a623)"
+      : "var(--red, #ff4d4d)";
+
+  const badgeLabel = isEligible
+    ? "ELIGIBLE"
+    : isConditional
+      ? "CONDITIONAL"
+      : "INELIGIBLE";
+
+  const badgeBg = isEligible
+    ? "rgba(61,220,132,0.12)"
+    : isConditional
+      ? "rgba(245,166,35,0.12)"
+      : "rgba(255,77,77,0.12)";
+
+  return (
+    <div className="decision-panel">
+      <div className="decision-header">
+        <div
+          className="decision-badge"
+          style={{ color: badgeColor, background: badgeBg, border: `1px solid ${badgeColor}` }}
+        >
+          {badgeLabel}
+        </div>
+        <button className="btn-ghost small" onClick={onDismiss}>✕ New query</button>
+      </div>
+
+      <div className="decision-intent">{intent}</div>
+
+      {decision.conditions.length > 0 && (
+        <div className="decision-section">
+          <div className="decision-section-label">REQUIREMENTS</div>
+          <ul className="decision-conditions">
+            {decision.conditions.map((c, i) => (
+              <li key={i} className="decision-condition">
+                <span className="decision-check" style={{ color: badgeColor }}>✓</span>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {decision.next_questions.length > 0 && (
+        <div className="decision-section">
+          <div className="decision-section-label">MORE INFORMATION NEEDED</div>
+          <ul className="decision-conditions">
+            {decision.next_questions.map((q) => (
+              <li key={q.field} className="decision-condition">
+                <span className="decision-check" style={{ color: "var(--amber, #f5a623)" }}>?</span>
+                {q.prompt}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {decision.references.length > 0 && (
+        <div className="decision-section">
+          <div className="decision-section-label">REFERENCES</div>
+          <ul className="decision-refs">
+            {decision.references.map((ref) => (
+              <li key={ref}>
+                <a
+                  href={ref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="decision-ref-link"
+                >
+                  {ref}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -1305,6 +1410,7 @@ export default function App() {
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
   const [clarification, setClarification] = useState<{ request: ClarificationRequest; executeBody: ExecuteBody } | null>(null);
+  const [decisionResult, setDecisionResult] = useState<{ decision: DecisionResult; intent: string } | null>(null);
   const [refineText, setRefineText] = useState("");
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [lastQueryId, setLastQueryId] = useState<string | null>(null);
@@ -1363,6 +1469,14 @@ export default function App() {
       // D.1 — clarification response
       if (data.type === "clarification") {
         setClarification({ request: data.request, executeBody: parseData as ExecuteBody });
+        setStage("done");
+        setLoadingStage(null);
+        return;
+      }
+
+      // D.3 — decision result (regulatory adapter returned eligibility)
+      if (data.type === "decision_result") {
+        setDecisionResult({ decision: data.decision, intent: data.intent ?? text });
         setStage("done");
         setLoadingStage(null);
         return;
@@ -1443,20 +1557,18 @@ export default function App() {
     setParsed(null);
     setIntentError(null);
     setClarification(null);
+    setDecisionResult(null);
     setRefineText("");
   };
 
-  // D.2 — user submitted clarification answers — re-execute with answers in rawText
+  // D.2/D.3 — user submitted clarification answers — re-execute with user_attributes
   const handleClarificationSubmit = async (answers: Record<string, string>) => {
     if (!clarification) return;
-    const answerText = Object.entries(answers)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join(", ");
-    // Re-run execute with answers appended to rawText so the orchestrator
-    // can match them against regulatory rules (D.4+)
+    // Send answers as structured user_attributes (D.4 wire-up reads these directly)
     const body = {
       ...clarification.executeBody,
-      rawText: `${clarification.request.intent} — ${answerText}`,
+      rawText: clarification.request.intent,
+      user_attributes: answers,
     };
     setStage("loading");
     setLoadingStage("fetching");
@@ -1468,7 +1580,12 @@ export default function App() {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok || data.error) {
+
+      // D.3 — regulatory adapter returned a decision
+      if (data.type === "decision_result") {
+        setDecisionResult({ decision: data.decision, intent: data.intent ?? clarification.request.intent });
+        setStage("done");
+      } else if (!res.ok || data.error) {
         setIntentError({
           error: data.error ?? "execute_error",
           understood: {},
@@ -1608,7 +1725,15 @@ export default function App() {
             />
           )}
 
-          {stage === "done" && result && !clarification && (
+          {stage === "done" && decisionResult && !clarification && (
+            <DecisionResultPanel
+              intent={decisionResult.intent}
+              decision={decisionResult.decision}
+              onDismiss={handleRefine}
+            />
+          )}
+
+          {stage === "done" && result && !clarification && !decisionResult && (
             <ResultRenderer
               result={result}
               onRefine={handleRefine}
@@ -2030,6 +2155,97 @@ const CSS = `
   .clarification-submit:disabled {
     opacity: 0.35;
     cursor: not-allowed;
+  }
+
+  /* ── Decision Result Panel (D.3) ── */
+
+  .decision-panel {
+    border: 1px solid rgba(61, 220, 132, 0.2);
+    background: rgba(61, 220, 132, 0.03);
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .decision-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .decision-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 3px;
+  }
+
+  .decision-intent {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    text-transform: capitalize;
+  }
+
+  .decision-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .decision-section-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+  }
+
+  .decision-conditions {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+  }
+
+  .decision-condition {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-mid);
+    line-height: 1.5;
+  }
+
+  .decision-check {
+    font-size: 12px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .decision-refs {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .decision-ref-link {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: rgba(80, 200, 220, 0.7);
+    text-decoration: none;
+  }
+
+  .decision-ref-link:hover {
+    color: rgba(80, 200, 220, 1);
+    text-decoration: underline;
   }
 
   /* ── Action Chips (C.7) ── */

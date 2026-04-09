@@ -133,6 +133,11 @@ app.get("/health", (_req, res) => {
 
 async function start() {
   await loadDomains();
+
+  // Register regulatory adapters (D.4/D.5)
+  const { registerRegulatoryAdapter } = await import("./regulatory-adapter");
+  const { foodBusinessGbAdapter } = await import("./domains/food-business-gb/index");
+  registerRegulatoryAdapter(foodBusinessGbAdapter);
   checkRedisHealth().catch((err) =>
     console.warn("Redis health check failed:", err),
   );
