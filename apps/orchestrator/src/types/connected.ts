@@ -113,6 +113,9 @@ export interface DecisionResult {
   conditions: string[];                    // "Must complete Food Hygiene Level 2"
   next_questions: ClarificationField[];    // further attributes needed; may be empty
   references: string[];                    // links to official guidance
+  /** Optional chips surfaced after a decision — e.g. "Find hunting zones near me".
+   *  Rendered by DecisionResultPanel and dispatched via handleChipAction. */
+  suggested_chips?: Chip[];
 }
 
 // ── Chip ──────────────────────────────────────────────────────────────────────
@@ -379,3 +382,107 @@ export type OrchestratorResponse =
        *  retyping their query. */
       refresh_chip?: Chip;
     };
+
+// ── WorkflowTemplate — Phase D.7 ─────────────────────────────────────────────
+
+/**
+ * A WorkflowInputField is a single question asked of the user before a
+ * workflow begins. Answers are passed into the first step's input_mappings
+ * under source: "workflow_input".
+ */
+export interface WorkflowInputField {
+  field:      string;
+  prompt:     string;
+  input_type: "text" | "number" | "select";
+  options?:   string[];
+  required:   boolean;
+}
+
+/**
+ * Maps a step's domain-adapter input field to either a user-supplied workflow
+ * input or the output of a previous step.
+ *
+ *   source: "workflow_input"  → from is a key in WorkflowTemplate.input_schema
+ *   source: "step_output"     → from is "stepId.fieldPath"
+ *                               (dot-path into a previous step's ResultHandle)
+ */
+export interface WorkflowStepInput {
+  targetField: string;
+  source:      "workflow_input" | "step_output";
+  from:        string;
+}
+
+/**
+ * A single step in a workflow. Each step maps to one domain adapter call.
+ * output_key is the name under which the step's ResultHandle is stored in
+ * workflow state for subsequent steps to reference.
+ */
+export interface WorkflowStep {
+  id:             string;
+  domain:         string;
+  description:    string;
+  input_mappings: WorkflowStepInput[];
+  output_key:     string;
+  optional?:      boolean;   // step is skipped when its required inputs are absent
+}
+
+/**
+ * A named, reusable multi-step query flow.
+ *
+ * WorkflowTemplates are pure data — they declare structure but contain no
+ * async logic. The execution engine (D.8) interprets them at runtime.
+ *
+ * trigger_intents: free-text patterns that cause the chip ranker to surface
+ * a "Run workflow" chip. Matching is substring, case-insensitive.
+ *
+ * required_domains: domain slugs that must be registered before this workflow
+ * is offered. An empty array means the workflow is always available.
+ */
+export interface WorkflowTemplate {
+  id:               string;
+  name:             string;
+  description:      string;
+  trigger_intents:  string[];
+  input_schema:     WorkflowInputField[];
+  steps:            WorkflowStep[];
+  required_domains: string[];
+}
+
+// ── WorkflowResult — Phase D.8 ────────────────────────────────────────────────
+
+/**
+ * Result of a single executed workflow step.
+ *
+ * status:
+ *   success  — adapter returned rows; handle is populated
+ *   skipped  — step.optional === true and a required input was absent
+ *   error    — adapter threw; error message recorded; workflow continues if optional
+ *   not_implemented — domain slug not registered; step skipped gracefully
+ */
+export interface WorkflowStepResult {
+  step_id:    string;
+  output_key: string;
+  status:     "success" | "skipped" | "error" | "not_implemented";
+  handle?:    ResultHandle;
+  /** Raw rows kept in executor state for downstream step_output mappings. */
+  rows?:      Record<string, unknown>[];
+  error?:     string;
+}
+
+/**
+ * Final result returned by executeWorkflow().
+ *
+ * status:
+ *   complete — all non-optional steps succeeded
+ *   partial  — at least one optional step was skipped or failed
+ *   failed   — a required step failed
+ *
+ * handles contains only the success-step handles, in step order.
+ * The frontend renders them as a stacked result set.
+ */
+export interface WorkflowResult {
+  workflow_id:  string;
+  status:       "complete" | "partial" | "failed";
+  step_results: WorkflowStepResult[];
+  handles:      ResultHandle[];
+}

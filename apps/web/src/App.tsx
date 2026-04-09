@@ -495,10 +495,12 @@ export function DecisionResultPanel({
   intent,
   decision,
   onDismiss,
+  onChipAction,
 }: {
   intent: string;
   decision: DecisionResult;
   onDismiss: () => void;
+  onChipAction?: (label: string) => void;
 }) {
   const isEligible    = decision.eligibility === "eligible";
   const isConditional = decision.eligibility === "conditional";
@@ -580,6 +582,26 @@ export function DecisionResultPanel({
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {decision.suggested_chips && decision.suggested_chips.length > 0 && onChipAction && (
+        <div className="decision-section">
+          <div className="decision-section-label">SUGGESTED NEXT STEPS</div>
+          <div className="chip-row" style={{ marginTop: "0.5rem" }}>
+            {decision.suggested_chips.map((chip) => (
+              <button
+                key={chip.label}
+                className="chip"
+                onClick={() => {
+                  onDismiss();
+                  onChipAction(chip.label);
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -1730,6 +1752,7 @@ export default function App() {
               intent={decisionResult.intent}
               decision={decisionResult.decision}
               onDismiss={handleRefine}
+              onChipAction={handleQuery}
             />
           )}
 

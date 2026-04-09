@@ -110,6 +110,23 @@ export const CURATED_SOURCES: CuratedSource[] = [
     },
   },
 
+  // ── Hunting / game management zones (persistent) ───────────────────────────
+  {
+    intent:        "hunting zones",
+    countryCodes:  ["GB"],
+    name:          "Natural England CRoW Open Access Land",
+    url:           "https://environment.data.gov.uk/arcgis/rest/services/NE/CRoW_Open_Access_Land/FeatureServer/0/query",
+    type:          "rest",
+    storeResults:  true,
+    refreshPolicy: "weekly",
+    fieldMap: {
+      NAME:        "description",
+      COUNTY:      "location",
+      CATEGORY:    "category",
+      Shape_Area:  "value",
+    },
+  },
+
   // ── ONS data (persistent) ───────────────────────────────────────────────────
   {
     intent: "population statistics",

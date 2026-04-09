@@ -54,4 +54,19 @@ export const DOMAIN_RELATIONSHIPS: ReadonlyArray<DomainRelationship> = [
     relationshipType: "complements",
     weight:           0.5,
   },
+
+  // D.10 — hunting zones → transport (need travel to reach zones)
+  {
+    fromDomain:       "hunting-zones-gb",
+    toDomain:         "transport",
+    relationshipType: "complements",
+    weight:           0.9,
+  },
+  // D.10 — hunting zones → weather (conditions affect a day's shoot)
+  {
+    fromDomain:       "hunting-zones-gb",
+    toDomain:         "weather",
+    relationshipType: "complements",
+    weight:           0.7,
+  },
 ];

@@ -8,8 +8,8 @@ import { describe, it, expect } from "vitest";
 import { DOMAIN_RELATIONSHIPS } from "../domain-relationships";
 
 describe("DOMAIN_RELATIONSHIPS seed data", () => {
-  it("contains exactly 5 entries", () => {
-    expect(DOMAIN_RELATIONSHIPS).toHaveLength(5);
+  it("contains exactly 7 entries", () => {
+    expect(DOMAIN_RELATIONSHIPS).toHaveLength(7);
   });
 
   it("every entry has valid weight (0 < weight ≤ 1)", () => {
