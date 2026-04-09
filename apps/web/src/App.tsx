@@ -760,6 +760,74 @@ function WorkflowResultPanel({
 }) {
   const color = STATUS_COLOR[result.status];
 
+  // E.3 — hunting-day-plan renders an itinerary instead of raw step output
+  const travelStep = result.step_results.find((s) => s.step_id === "compute-travel-times");
+  const zoneStep   = result.step_results.find((s) => s.step_id === "fetch-zones");
+  const isHunting  = result.workflow_id === "hunting-day-plan"
+    && travelStep?.status === "success"
+    && (travelStep.rows?.length ?? 0) > 0;
+
+  if (isHunting) {
+    const travelRows  = travelStep!.rows!;
+    const zoneRows    = zoneStep?.rows ?? [];
+    const closestZone = travelRows[0] as Record<string, unknown>;
+    const zoneDetail  = zoneRows.find(
+      (z) => z.lat === closestZone.lat && z.lon === closestZone.lon,
+    ) as Record<string, unknown> | undefined;
+
+    return (
+      <div className="decision-panel">
+        <div className="decision-header">
+          <div className="decision-badge" style={{ color: "var(--green, #3ddc84)", background: "rgba(61,220,132,0.12)", border: "1px solid var(--green, #3ddc84)" }}>
+            ITINERARY READY
+          </div>
+          <button className="btn-ghost small" onClick={onDismiss}>✕ New query</button>
+        </div>
+
+        <div className="decision-intent">
+          {String(closestZone.name ?? "Hunting zone")} — {String(closestZone.distance_km ?? "?")} km away
+        </div>
+
+        <div className="decision-section">
+          <div className="decision-section-label">YOUR DAY</div>
+          <ul className="decision-conditions">
+            <li className="decision-condition">
+              <span className="decision-check" style={{ color: "var(--green,#3ddc84)" }}>→</span>
+              <span><strong>07:00</strong> — Depart, {String(closestZone.travel_time_minutes ?? "?")} min travel by {String(closestZone.transport_mode ?? "")}</span>
+            </li>
+            <li className="decision-condition">
+              <span className="decision-check" style={{ color: "var(--green,#3ddc84)" }}>◉</span>
+              <span><strong>Arrive</strong> — {String(closestZone.name ?? "Zone")}{zoneDetail?.location ? `, ${String(zoneDetail.location)}` : ""}</span>
+            </li>
+            {zoneDetail?.value && (
+              <li className="decision-condition">
+                <span className="decision-check" style={{ color: "var(--muted,#888)" }}>·</span>
+                <span>{String(zoneDetail.value)} ha open access land · {String(zoneDetail.category ?? "Open Access Land")}</span>
+              </li>
+            )}
+          </ul>
+        </div>
+
+        {travelRows.length > 1 && (
+          <div className="decision-section">
+            <div className="decision-section-label">OTHER ZONES IN RANGE</div>
+            <ul className="decision-conditions">
+              {travelRows.slice(1, 4).map((r, i) => {
+                const row = r as Record<string, unknown>;
+                return (
+                  <li key={i} className="decision-condition">
+                    <span className="decision-check" style={{ color: "var(--muted,#888)" }}>·</span>
+                    <span>{String(row.name ?? "Zone")} — {String(row.distance_km ?? "?")} km ({String(row.travel_time_minutes ?? "?")} min)</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="decision-panel">
       <div className="decision-header">
@@ -802,12 +870,6 @@ function WorkflowResultPanel({
           ))}
         </ul>
       </div>
-
-      {result.status === "partial" && (
-        <div className="decision-section" style={{ color: "var(--muted, #888)", fontSize: "0.85em" }}>
-          Some steps require domains not yet implemented (transport, geocoder). Results will improve as more adapters are registered.
-        </div>
-      )}
     </div>
   );
 }
@@ -2000,6 +2062,30 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("[chip:calculate_travel]", err);
+      }
+      return;
+    }
+
+    // E.3 — fetch_domain: hunting-day-plan → show workflow input form
+    if (chip.action === "fetch_domain" && chip.args.domain === "hunting-day-plan") {
+      try {
+        const res = await fetch(`${API}/query/chip`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "fetch_domain", args: { domain: "hunting-day-plan" } }),
+        });
+        const data = await res.json();
+        if (data.type === "workflow_input_required") {
+          setWorkflowInput({
+            workflow_id:   data.workflow_id,
+            workflow_name: data.workflow_name,
+            description:   data.description,
+            input_schema:  data.input_schema,
+          });
+          setStage("done");
+        }
+      } catch (err: any) {
+        console.error("[chip:hunting-day-plan]", err);
       }
       return;
     }

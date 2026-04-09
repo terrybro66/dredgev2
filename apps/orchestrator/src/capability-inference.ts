@@ -51,7 +51,7 @@ function checkTimeSeries(rows: unknown[]): boolean {
   const hasNumeric = rows.some((r) => {
     const v = getField(r, "value");
     const c = getField(r, "count");
-    return (typeof v === "number") || (typeof c === "number");
+    return typeof v === "number" || typeof c === "number";
   });
   if (!hasNumeric) return false;
   const dates = new Set<string>();
@@ -76,7 +76,7 @@ function checkPolygon(rows: unknown[]): boolean {
 function checkSchedule(rows: unknown[]): boolean {
   return rows.some((r) => {
     const start = getField(r, "start_time");
-    const end   = getField(r, "end_time");
+    const end = getField(r, "end_time");
     return start != null && end != null;
   });
 }
@@ -101,11 +101,11 @@ function checkCategory(rows: unknown[]): boolean {
  */
 export function inferCapabilities(rows: unknown[]): Capability[] {
   const caps: Capability[] = [];
-  if (checkCoordinates(rows))  caps.push("has_coordinates");
-  if (checkTimeSeries(rows))   caps.push("has_time_series");
-  if (checkPolygon(rows))      caps.push("has_polygon");
-  if (checkSchedule(rows))     caps.push("has_schedule");
-  if (checkCategory(rows))     caps.push("has_category");
+  if (checkCoordinates(rows)) caps.push("has_coordinates");
+  if (checkTimeSeries(rows)) caps.push("has_time_series");
+  if (checkPolygon(rows)) caps.push("has_polygon");
+  if (checkSchedule(rows)) caps.push("has_schedule");
+  if (checkCategory(rows)) caps.push("has_category");
   return caps;
 }
 
@@ -187,6 +187,13 @@ const DOMAIN_CHIPS: Record<string, ChipTemplate[]> = {
       label: "What's on here?",
       action: "fetch_domain",
       args: { domain: "cinema-showtimes" },
+    },
+  ],
+  "hunting-zones-gb": [
+    {
+      label: "Plan a day here",
+      action: "fetch_domain",
+      args: { domain: "hunting-day-plan" },
     },
   ],
 };

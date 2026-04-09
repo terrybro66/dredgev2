@@ -18,8 +18,8 @@ import {
 // ── Registry completeness ─────────────────────────────────────────────────────
 
 describe("WORKFLOW_TEMPLATES registry", () => {
-  it("contains exactly 3 templates", () => {
-    expect(WORKFLOW_TEMPLATES).toHaveLength(3);
+  it("contains exactly 4 templates", () => {
+    expect(WORKFLOW_TEMPLATES).toHaveLength(4);
   });
 
   it("contains reachable-area", () => {

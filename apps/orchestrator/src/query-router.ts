@@ -21,6 +21,8 @@ import {
   type RefinementType,
   type ConversationMemory,
 } from "./types/connected";
+import type { PrismaClient } from "@prisma/client";
+import { classifyIntent } from "./semantic/classifier";
 
 // ── Template matching ─────────────────────────────────────────────────────────
 
@@ -124,7 +126,11 @@ function applyDateShift(plan: QueryPlan, query: string): QueryPlan | null {
 
   // Convert everything to months
   const shiftMonths =
-    unit === "year" ? amount * 12 : unit === "week" ? Math.ceil(amount / 4) : amount;
+    unit === "year"
+      ? amount * 12
+      : unit === "week"
+        ? Math.ceil(amount / 4)
+        : amount;
 
   // Parse date_to as the anchor (end of the range we're shifting from)
   const [toYear, toMonth] = plan.date_to.split("-").map(Number);
@@ -145,7 +151,8 @@ function applyDateShift(plan: QueryPlan, query: string): QueryPlan | null {
 
 // ── location_shift ────────────────────────────────────────────────────────────
 
-const LOCATION_RE = /\b(?:in|near|around|for)\s+([A-Z][a-zA-Z\s]+?)(?:\s*$|[,.])/;
+const LOCATION_RE =
+  /\b(?:in|near|around|for)\s+([A-Z][a-zA-Z\s]+?)(?:\s*$|[,.])/;
 
 function applyLocationShift(plan: QueryPlan, query: string): QueryPlan | null {
   const m = query.match(LOCATION_RE);
@@ -172,7 +179,18 @@ function applyCategoryFilter(plan: QueryPlan, query: string): QueryPlan | null {
 export type RouteResult =
   | { type: "refinement"; mergedPlan: QueryPlan }
   | { type: "template"; template: TemplateMatch }
+  | {
+      type: "similarity_route";
+      domain: string;
+      intent: string;
+      confidence: number;
+    }
   | { type: "fresh_query"; clearActivePlan: boolean };
+
+// ── Similarity threshold — E.2 ───────────────────────────────────────────────
+// Minimum cosine similarity for a pgvector result to be trusted as a route.
+// Below this the query falls through to fresh_query.
+const SIMILARITY_THRESHOLD = 0.65;
 
 // ── QueryRouter ───────────────────────────────────────────────────────────────
 
@@ -189,7 +207,11 @@ export class QueryRouter {
    * queries fall through to fresh_query and are logged. Recurring patterns in
    * those logs will graduate to Tier 1 templates or Tier 2 relationship entries.
    */
-  async route(query: string, memory: ConversationMemory): Promise<RouteResult> {
+  async route(
+    query: string,
+    memory: ConversationMemory,
+    prisma?: PrismaClient,
+  ): Promise<RouteResult> {
     const { context } = memory;
 
     // Tier 1 — template
@@ -209,17 +231,38 @@ export class QueryRouter {
       if (mergedPlan) {
         return { type: "refinement", mergedPlan };
       }
-      // apply returned null — cannot merge, fall through as fresh query
       console.log(
-        JSON.stringify({
-          event: "refinement_unresolvable",
-          refinementType,
-          query,
-        }),
+        JSON.stringify({ event: "refinement_unresolvable", refinementType, query }),
       );
     }
 
-    // Tier 3 — fresh query (LLM fallback stub — patterns logged for future promotion)
+    // Tier 3 — pgvector similarity routing (E.2)
+    if (prisma) {
+      try {
+        const result = await classifyIntent(query, prisma);
+        if (result.domain && result.confidence >= SIMILARITY_THRESHOLD) {
+          console.log(
+            JSON.stringify({
+              event: "query_router_similarity",
+              query,
+              domain: result.domain,
+              intent: result.intent,
+              confidence: result.confidence,
+            }),
+          );
+          return {
+            type: "similarity_route",
+            domain: result.domain,
+            intent: result.intent,
+            confidence: result.confidence,
+          };
+        }
+      } catch {
+        // classifier failure is non-fatal — fall through to fresh_query
+      }
+    }
+
+    // Tier 3 fallback — fresh query
     console.log(
       JSON.stringify({
         event: "query_router_fresh",

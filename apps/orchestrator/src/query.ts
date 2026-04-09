@@ -1124,6 +1124,20 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
       input_schema: template.input_schema,
     });
   }
+  // ── fetch_domain: hunting-day-plan — E.3 ─────────────────────────────────
+  if (action === "fetch_domain" && args.domain === "hunting-day-plan") {
+    const template = getWorkflowById("hunting-day-plan");
+    if (!template) {
+      return res.status(404).json({ error: "workflow_not_found" });
+    }
+    return res.json({
+      type: "workflow_input_required",
+      workflow_id: template.id,
+      workflow_name: template.name,
+      description: template.description,
+      input_schema: template.input_schema,
+    });
+  }
 
   // ── Unhandled action ─────────────────────────────────────────────────────
   return res.status(400).json({

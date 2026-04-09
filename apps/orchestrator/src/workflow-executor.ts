@@ -70,10 +70,10 @@ function substituteDomain(
  * stepIdToState: map of step.id → output_key for the same.
  */
 function resolveInputs(
-  mappings:     WorkflowStepInput[],
-  inputs:       Record<string, unknown>,
-  stepState:    Map<string, { rows: Record<string, unknown>[] }>,
-  stepIdToKey:  Map<string, string>,
+  mappings: WorkflowStepInput[],
+  inputs: Record<string, unknown>,
+  stepState: Map<string, { rows: Record<string, unknown>[] }>,
+  stepIdToKey: Map<string, string>,
 ): Record<string, unknown> {
   const resolved: Record<string, unknown> = {};
 
@@ -83,10 +83,11 @@ function resolveInputs(
     } else {
       // step_output: "stepId.fieldPath"
       const dotIndex = mapping.from.indexOf(".");
-      const stepId   = dotIndex === -1 ? mapping.from : mapping.from.slice(0, dotIndex);
+      const stepId =
+        dotIndex === -1 ? mapping.from : mapping.from.slice(0, dotIndex);
       const fieldPath = dotIndex === -1 ? "" : mapping.from.slice(dotIndex + 1);
 
-      const key   = stepIdToKey.get(stepId);
+      const key = stepIdToKey.get(stepId);
       const state = key ? stepState.get(key) : undefined;
 
       if (!state) {
@@ -118,17 +119,17 @@ function resolveInputs(
 // ── Build a synthetic QueryPlan for an adapter call ───────────────────────────
 
 function buildSyntheticPlan(
-  domain:   string,
+  domain: string,
   resolved: Record<string, unknown>,
 ): Record<string, unknown> {
   const now = new Date().toISOString().slice(0, 7);
   return {
-    category:  domain,
-    location:  resolved.location ?? resolved.origin ?? "",
+    category: domain,
+    location: resolved.location ?? resolved.origin ?? "",
     date_from: resolved.date ?? now,
-    date_to:   resolved.date ?? now,
-    lat:       resolved.lat,
-    lon:       resolved.lon,
+    date_to: resolved.date ?? now,
+    lat: resolved.lat,
+    lon: resolved.lon,
     ...resolved,
   };
 }
@@ -136,40 +137,48 @@ function buildSyntheticPlan(
 // ── Single step executor ──────────────────────────────────────────────────────
 
 async function executeStep(
-  step:       WorkflowStep,
-  inputs:     Record<string, unknown>,
-  stepState:  Map<string, { rows: Record<string, unknown>[] }>,
+  step: WorkflowStep,
+  inputs: Record<string, unknown>,
+  stepState: Map<string, { rows: Record<string, unknown>[] }>,
   stepIdToKey: Map<string, string>,
 ): Promise<WorkflowStepResult> {
   const resolvedDomain = substituteDomain(step.domain, inputs);
-  const resolved       = resolveInputs(step.input_mappings, inputs, stepState, stepIdToKey);
+  const resolved = resolveInputs(
+    step.input_mappings,
+    inputs,
+    stepState,
+    stepIdToKey,
+  );
 
   // Patch handle_id references now that we have the state
   for (const mapping of step.input_mappings) {
-    if (mapping.source === "step_output" && mapping.from.endsWith(".handle_id")) {
+    if (
+      mapping.source === "step_output" &&
+      mapping.from.endsWith(".handle_id")
+    ) {
       const stepId = mapping.from.split(".")[0];
-      const key    = stepIdToKey.get(stepId);
+      const key = stepIdToKey.get(stepId);
       // handle_id is stored separately in stepHandles — executor patches below
       void key; // no-op for now; handle_id patching happens in executeWorkflow
     }
   }
 
   // Special domains that have no registered adapter are not-implemented
-  const VIRTUAL_DOMAINS = new Set(["geocoder", "transport", "overlay"]);
+  const VIRTUAL_DOMAINS = new Set(["transport", "overlay"]);
   if (VIRTUAL_DOMAINS.has(resolvedDomain)) {
     if (step.optional) {
       return {
-        step_id:    step.id,
+        step_id: step.id,
         output_key: step.output_key,
-        status:     "not_implemented",
-        error:      `Domain '${resolvedDomain}' is not yet registered (D.10+)`,
+        status: "not_implemented",
+        error: `Domain '${resolvedDomain}' is not yet registered (D.10+)`,
       };
     }
     return {
-      step_id:    step.id,
+      step_id: step.id,
       output_key: step.output_key,
-      status:     "not_implemented",
-      error:      `Required domain '${resolvedDomain}' is not registered`,
+      status: "not_implemented",
+      error: `Required domain '${resolvedDomain}' is not registered`,
     };
   }
 
@@ -178,10 +187,10 @@ async function executeStep(
     // Unregistered domain is always not_implemented, never a runtime error.
     // status: "error" is reserved for adapters that exist but throw.
     return {
-      step_id:    step.id,
+      step_id: step.id,
       output_key: step.output_key,
-      status:     "not_implemented",
-      error:      `Domain '${resolvedDomain}' is not registered`,
+      status: "not_implemented",
+      error: `Domain '${resolvedDomain}' is not registered`,
     };
   }
 
@@ -193,27 +202,28 @@ async function executeStep(
 
   if (requiredMissing.length > 0 && step.optional) {
     return {
-      step_id:    step.id,
+      step_id: step.id,
       output_key: step.output_key,
-      status:     "skipped",
-      error:      `Missing inputs: ${requiredMissing.join(", ")}`,
+      status: "skipped",
+      error: `Missing inputs: ${requiredMissing.join(", ")}`,
     };
   }
 
   try {
-    const plan     = buildSyntheticPlan(resolvedDomain, resolved);
-    const location = (resolved.location as string | undefined)
-      ?? (resolved.origin as string | undefined)
-      ?? "";
+    const plan = buildSyntheticPlan(resolvedDomain, resolved);
+    const location =
+      (resolved.location as string | undefined) ??
+      (resolved.origin as string | undefined) ??
+      "";
 
     const rawRows = await adapter.fetchData(plan, location);
-    const rows    = rawRows.map((r) => adapter.flattenRow(r));
-    const handle  = createEphemeralHandle(rows, resolvedDomain);
+    const rows = rawRows.map((r) => adapter.flattenRow(r));
+    const handle = createEphemeralHandle(rows, resolvedDomain);
 
     return {
-      step_id:    step.id,
+      step_id: step.id,
       output_key: step.output_key,
-      status:     "success",
+      status: "success",
       handle,
       rows,
     };
@@ -221,10 +231,10 @@ async function executeStep(
     const message = err instanceof Error ? err.message : String(err);
     if (step.optional) {
       return {
-        step_id:    step.id,
+        step_id: step.id,
         output_key: step.output_key,
-        status:     "error",
-        error:      message,
+        status: "error",
+        error: message,
       };
     }
     throw new Error(`Step '${step.id}' failed: ${message}`);
@@ -246,15 +256,15 @@ async function executeStep(
  */
 export async function executeWorkflow(
   template: WorkflowTemplate,
-  inputs:   Record<string, unknown>,
+  inputs: Record<string, unknown>,
 ): Promise<WorkflowResult> {
   // stepState keyed by output_key
-  const stepState  = new Map<string, { rows: Record<string, unknown>[] }>();
+  const stepState = new Map<string, { rows: Record<string, unknown>[] }>();
   // Map step.id → step.output_key for step_output mapping resolution
   const stepIdToKey = new Map<string, string>();
 
   const stepResults: WorkflowStepResult[] = [];
-  const handles:     ResultHandle[]        = [];
+  const handles: ResultHandle[] = [];
 
   for (const step of template.steps) {
     stepIdToKey.set(step.id, step.output_key);
@@ -266,14 +276,14 @@ export async function executeWorkflow(
       // Required step threw — workflow fails
       const message = err instanceof Error ? err.message : String(err);
       stepResults.push({
-        step_id:    step.id,
+        step_id: step.id,
         output_key: step.output_key,
-        status:     "error",
-        error:      message,
+        status: "error",
+        error: message,
       });
       return {
-        workflow_id:  template.id,
-        status:       "failed",
+        workflow_id: template.id,
+        status: "failed",
         step_results: stepResults,
         handles,
       };
@@ -293,9 +303,8 @@ export async function executeWorkflow(
   );
   const hasSkipped = stepResults.some((r) => r.status === "skipped");
 
-  const status: WorkflowResult["status"] = hasFailure || hasSkipped
-    ? "partial"
-    : "complete";
+  const status: WorkflowResult["status"] =
+    hasFailure || hasSkipped ? "partial" : "complete";
 
   return {
     workflow_id: template.id,
