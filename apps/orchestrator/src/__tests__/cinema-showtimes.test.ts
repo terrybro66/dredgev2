@@ -205,7 +205,7 @@ describe("POST /query/chip — fetch_domain: cinema-showtimes", () => {
     const app = buildApp();
     const res = await request(app)
       .post("/query/chip")
-      .send({ action: "calculate_travel", args: {} });
+      .send({ action: "overlay_spatial", args: {} });
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("unsupported_chip_action");

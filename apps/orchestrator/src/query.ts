@@ -24,8 +24,46 @@ import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
 import { buildClarificationRequest } from "./clarification";
 import { getRegulatoryAdapter } from "./regulatory-adapter";
-import { updateQueryContext } from "./conversation-memory";
+import {
+  updateQueryContext,
+  getQueryContext,
+  pushResultHandle,
+  createEphemeralHandle,
+} from "./conversation-memory";
+import { recordCoOccurrence } from "./co-occurrence-log";
 import { setUserLocation, getUserLocation } from "./session";
+import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
+import { executeWorkflow } from "./workflow-executor";
+
+// ── Co-occurrence recording helper — D.13 ────────────────────────────────────
+//
+// Fire-and-forget — never throws, never blocks a response.
+// Call after every successful domain fetch so the learning system accumulates
+// real co-occurrence signal from user sessions.
+
+async function recordDomainCoOccurrence(
+  sessionId: string | null,
+  currentDomain: string,
+): Promise<void> {
+  if (!sessionId) return;
+  try {
+    const ctx = await getQueryContext(sessionId);
+    const priorDomains = (ctx?.result_stack ?? [])
+      .map((h) => h.domain)
+      .filter((d): d is string => typeof d === "string" && d.length > 0)
+      .slice(0, 3);
+
+    if (priorDomains.length > 0) {
+      await recordCoOccurrence([currentDomain, ...priorDomains]);
+    }
+
+    // Push a lightweight marker so subsequent queries can see this domain
+    const handle = createEphemeralHandle([], currentDomain);
+    await pushResultHandle(sessionId, handle);
+  } catch {
+    // Non-fatal — co-occurrence failure must never affect the query response
+  }
+}
 
 export const queryRouter = Router();
 
@@ -121,6 +159,17 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
   const viz_hint = deriveVizHint(plan, text, intent ?? "unknown");
   const months = expandDateRange(plan.date_from, plan.date_to);
 
+  const suggestedWorkflows = findWorkflowsForIntent(text);
+  const suggested_workflow =
+    suggestedWorkflows.length > 0
+      ? {
+          workflow_id: suggestedWorkflows[0].id,
+          workflow_name: suggestedWorkflows[0].name,
+          description: suggestedWorkflows[0].description,
+          input_schema: suggestedWorkflows[0].input_schema,
+        }
+      : undefined;
+
   return res.json({
     plan,
     poly: geocoded.poly,
@@ -129,6 +178,7 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     country_code: geocoded.country_code,
     intent,
     months,
+    ...(suggested_workflow ? { suggested_workflow } : {}),
   });
 });
 
@@ -165,7 +215,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     const clarificationRequest = buildClarificationRequest(clarificationText);
     if (clarificationRequest) {
       return res.status(200).json({
-        type:    "clarification",
+        type: "clarification",
         request: clarificationRequest,
       });
     }
@@ -173,7 +223,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   // 0b. Regulatory adapter check — when user_attributes are present evaluate
   //     eligibility and return a decision_result without fetching any data.
-  const regulatoryAdapter = getRegulatoryAdapter(clarificationText, country_code);
+  const regulatoryAdapter = getRegulatoryAdapter(
+    clarificationText,
+    country_code,
+  );
   if (regulatoryAdapter && Object.keys(userAttributes).length > 0) {
     const decision = await regulatoryAdapter.evaluate(userAttributes);
 
@@ -185,9 +238,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
 
     return res.status(200).json({
-      type:    "decision_result",
+      type: "decision_result",
       decision,
-      intent:  clarificationText,
+      intent: clarificationText,
     });
   }
 
@@ -284,13 +337,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               if ((source as any).searchStrategy) {
                 const strategy = (source as any)
                   .searchStrategy as SearchStrategy;
-                const {
-                  getCachedScrapeUrl,
-                  setCachedScrapeUrl,
-                } = await import("./agent/search/scrape-url-cache");
-                const { generateExtractionPrompt } = await import(
-                  "./agent/search/extraction-prompt-generator"
-                );
+                const { getCachedScrapeUrl, setCachedScrapeUrl } =
+                  await import("./agent/search/scrape-url-cache");
+                const { generateExtractionPrompt } =
+                  await import("./agent/search/extraction-prompt-generator");
 
                 // Use resolved_location when available; fall back to country
                 // name so bare queries ("cinema listings") don't return US results
@@ -380,10 +430,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               // Fallback: generate prompt for static-URL scrape sources
               // that have no curated extractionPrompt and no searchStrategy
               if (!extractionPrompt) {
-                const { generateExtractionPrompt } = await import(
-                  "./agent/search/extraction-prompt-generator"
+                const { generateExtractionPrompt } =
+                  await import("./agent/search/extraction-prompt-generator");
+                extractionPrompt = await generateExtractionPrompt(
+                  source.intent,
                 );
-                extractionPrompt = await generateExtractionPrompt(source.intent);
                 console.log(
                   JSON.stringify({
                     event: "scrape_prompt_generated_static",
@@ -647,7 +698,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: {
-        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        context: {
+          location: null,
+          active_plan: plan,
+          result_stack: [],
+          active_filters: {},
+        },
         profile: { user_attributes: {}, location_history: [] },
       },
     });
@@ -659,6 +715,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     };
 
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
+
+    recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
 
     return res.json({
       query_id: queryRecord.id,
@@ -937,7 +995,12 @@ FROM (
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: {
-        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        context: {
+          location: null,
+          active_plan: plan,
+          result_stack: [],
+          active_filters: {},
+        },
         profile: { user_attributes: {}, location_history: [] },
       },
     });
@@ -948,6 +1011,8 @@ FROM (
         : fallback
           ? { status: "fallback", fallback, followUps, confidence: "medium" }
           : { status: "exact", followUps, confidence: "high" };
+
+    recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
 
     return res.json({
       query_id: queryRecord.id,
@@ -992,20 +1057,22 @@ FROM (
 // as the connected query pipeline grows.
 
 const ChipBodySchema = z.object({
-  action:      z.string(),
-  args:        z.object({
-    domain:      z.string().optional(),
-    ref:         z.string().optional(),
-    cinemaName:  z.string().optional(),
-    cacheKey:    z.string().optional(),
+  action: z.string(),
+  args: z.object({
+    domain: z.string().optional(),
+    ref: z.string().optional(),
+    cinemaName: z.string().optional(),
+    cacheKey: z.string().optional(),
   }),
-  sessionId:   z.string().optional(),
+  sessionId: z.string().optional(),
 });
 
 queryRouter.post("/chip", async (req: Request, res: Response) => {
   const parsed = ChipBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "validation_error", details: parsed.error.errors });
+    return res
+      .status(400)
+      .json({ error: "validation_error", details: parsed.error.errors });
   }
 
   const { action, args, sessionId } = parsed.data;
@@ -1019,9 +1086,11 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
 
     try {
       const { fetchShowtimes } = await import("./domains/cinemas-gb/showtimes");
-      const { createEphemeralHandle, pushResultHandle } = await import("./conversation-memory");
+      const { createEphemeralHandle, pushResultHandle } =
+        await import("./conversation-memory");
 
-      const cacheKey = args.cacheKey ?? cinemaName.toLowerCase().replace(/\s+/g, "-");
+      const cacheKey =
+        args.cacheKey ?? cinemaName.toLowerCase().replace(/\s+/g, "-");
       const rows = await fetchShowtimes(cinemaName, cacheKey);
       const handle = createEphemeralHandle(rows, "cinema-showtimes");
 
@@ -1030,23 +1099,73 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
       }
 
       return res.json({
-        type:     "ephemeral",
+        type: "ephemeral",
         handle,
         rows,
         viz_hint: "table",
       });
     } catch (err: any) {
-      return res.status(500).json({ error: "chip_execution_error", message: err.message });
+      return res
+        .status(500)
+        .json({ error: "chip_execution_error", message: err.message });
     }
+  }
+
+  // ── calculate_travel — D.12 ─────────────────────────────────────────────
+  if (action === "calculate_travel") {
+    const template = getWorkflowById("reachable-area");
+    if (!template) {
+      return res.status(404).json({ error: "workflow_not_found" });
+    }
+    return res.json({
+      type: "workflow_input_required",
+      workflow_id: template.id,
+      workflow_name: template.name,
+      input_schema: template.input_schema,
+    });
   }
 
   // ── Unhandled action ─────────────────────────────────────────────────────
   return res.status(400).json({
-    error:   "unsupported_chip_action",
+    error: "unsupported_chip_action",
     action,
-    domain:  args.domain ?? null,
+    domain: args.domain ?? null,
     message: `Chip action '${action}' (domain: ${args.domain ?? "none"}) is not yet implemented.`,
   });
+});
+
+// ── POST /workflow — D.12 ─────────────────────────────────────────────────────
+
+const WorkflowBodySchema = z.object({
+  workflow_id: z.string().min(1),
+  inputs: z.record(z.unknown()),
+});
+
+queryRouter.post("/workflow", async (req: Request, res: Response) => {
+  const parsed = WorkflowBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: "validation_error", details: parsed.error.errors });
+  }
+
+  const { workflow_id, inputs } = parsed.data;
+  const template = getWorkflowById(workflow_id);
+
+  if (!template) {
+    return res.status(404).json({
+      error: "workflow_not_found",
+      message: `No workflow with id '${workflow_id}'`,
+    });
+  }
+
+  try {
+    const result = await executeWorkflow(template, inputs);
+    return res.json({ type: "workflow_result", result });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: "workflow_execution_error", message });
+  }
 });
 
 // ── GET /history ──────────────────────────────────────────────────────────────
