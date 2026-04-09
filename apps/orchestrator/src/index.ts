@@ -134,10 +134,14 @@ app.get("/health", (_req, res) => {
 async function start() {
   await loadDomains();
 
-  // Register regulatory adapters (D.4/D.5)
+  // Register regulatory adapters (D.4/D.5/D.11)
   const { registerRegulatoryAdapter } = await import("./regulatory-adapter");
-  const { foodBusinessGbAdapter } = await import("./domains/food-business-gb/index");
+  const { foodBusinessGbAdapter } =
+    await import("./domains/food-business-gb/index");
+  const { huntingLicenceGbAdapter } =
+    await import("./domains/hunting-licence-gb/index");
   registerRegulatoryAdapter(foodBusinessGbAdapter);
+  registerRegulatoryAdapter(huntingLicenceGbAdapter);
   checkRedisHealth().catch((err) =>
     console.warn("Redis health check failed:", err),
   );
@@ -145,4 +149,5 @@ async function start() {
     console.log(`dredge orchestrator running on http://localhost:${PORT}`);
   });
 }
+
 start().catch(console.error);

@@ -2,10 +2,13 @@ import { DomainConfig, FallbackInfo } from "@dredge/schemas";
 import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
+import { huntingZonesGbAdapter } from "./hunting-zones-gb/index";
 import { createGenericAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
 import { prisma } from "../db";
+import { geocoderAdapter } from "./geocoder/index";
+import { travelEstimatorAdapter } from "./travel-estimator/index";
 
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
@@ -54,7 +57,14 @@ export function getDomainByName(name: string): DomainAdapter | undefined {
 
 export async function loadDomains(): Promise<void> {
   // 1. Built-in static adapters
-  const adapters = [crimeUkAdapter, weatherAdapter, cinemasGbAdapter];
+  const adapters = [
+    crimeUkAdapter,
+    weatherAdapter,
+    cinemasGbAdapter,
+    huntingZonesGbAdapter,
+    geocoderAdapter,
+    travelEstimatorAdapter,
+  ];
   for (const adapter of adapters) {
     registerDomain(adapter);
 
