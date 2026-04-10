@@ -17,6 +17,23 @@ import {
 } from "./components/QueryHistoryCarousel";
 import { useDredgeStore } from "./store";
 
+// ── Session ──────────────────────────────────────────────────────────────────
+
+function getSessionId(): string {
+  const KEY = "dredge_session_id";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
+const SESSION_HEADERS: Record<string, string> = {
+  "Content-Type": "application/json",
+  "x-session-id": getSessionId(),
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type VizHint = "map" | "bar" | "table" | "dashboard";
@@ -1751,7 +1768,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/parse`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
@@ -1797,7 +1814,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ ...(parseData as object), rawText: text }),
       });
       const data = await res.json();
@@ -1857,7 +1874,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify(query),
       });
       const data = await res.json();
@@ -1914,7 +1931,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -2004,7 +2021,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({
             action: "fetch_domain",
             args: { domain: "cinema-showtimes", cinemaName, ref: chip.args.ref },
@@ -2048,7 +2065,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({ action: "calculate_travel", args: chip.args }),
         });
         const data = await res.json();
@@ -2071,7 +2088,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({ action: "fetch_domain", args: { domain: "hunting-day-plan" } }),
         });
         const data = await res.json();
@@ -2103,7 +2120,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/workflow`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ workflow_id: workflowInput.workflow_id, inputs }),
       });
       const data = await res.json();

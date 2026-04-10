@@ -27,6 +27,13 @@ export interface DomainAdapter {
     prisma: any,
   ) => Promise<{ data: unknown[]; fallback: FallbackInfo } | null>;
   onLoad?: () => void | Promise<void>;
+  /**
+   * Optional: normalise a raw parsed plan before it is used for cache hashing,
+   * fetching, and storage.  Adapters that need to map LLM-returned category
+   * strings to canonical API slugs (e.g. crime-uk) implement this so that
+   * "crime statistics" and "all-crime" share the same cache key.
+   */
+  normalizePlan?: (plan: any) => any;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────

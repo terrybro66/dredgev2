@@ -30,15 +30,15 @@ import { computeChipScore, CHIP_DISPLAY_MAX } from "./types/connected";
 
 /**
  * Frequency: how often chips of this action type have been clicked in the
- * current session. Requires ConversationMemory click-history (C.8).
- * Returns 0 until that store is implemented.
+ * current session. Normalised to [0, 1] — 10 clicks = 1.0.
  */
 function computeFrequency(
-  _chip: Chip,
+  chip: Chip,
   _memory: ConversationMemory,
+  clickCounts: Record<string, number>,
 ): number {
-  // TODO C.8 — populate from session click_history
-  return 0;
+  const count = clickCounts[chip.action] ?? 0;
+  return Math.min(count / 10, 1.0);
 }
 
 /**
@@ -102,6 +102,8 @@ export interface RankChipsInput {
   memory: ConversationMemory;
   /** Domain relationship weights from C.5 seed data. Empty list is safe. */
   domainRelationships?: DomainRelationship[];
+  /** Per-action click counts from the session's chip_clicks Redis hash (C.8). */
+  clickCounts?: Record<string, number>;
 }
 
 /**
@@ -109,11 +111,11 @@ export interface RankChipsInput {
  * CHIP_DISPLAY_MAX chips sorted by score descending.
  */
 export function rankChips(input: RankChipsInput): Chip[] {
-  const { chips, handle, memory, domainRelationships = [] } = input;
+  const { chips, handle, memory, domainRelationships = [], clickCounts = {} } = input;
 
   const scored: Chip[] = chips.map((chip) => {
     const scoreBreakdown: ChipScore = {
-      frequency:          computeFrequency(chip, memory),
+      frequency:          computeFrequency(chip, memory, clickCounts),
       spatialRelevance:   computeSpatialRelevance(chip, memory),
       recency:            computeRecency(chip, memory),
       relationshipWeight: computeRelationshipWeight(chip, handle, domainRelationships),

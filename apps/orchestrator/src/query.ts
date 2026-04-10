@@ -29,9 +29,16 @@ import {
   getQueryContext,
   pushResultHandle,
   createEphemeralHandle,
+  loadMemory,
 } from "./conversation-memory";
 import { recordCoOccurrence } from "./co-occurrence-log";
-import { setUserLocation, getUserLocation } from "./session";
+import {
+  setUserLocation,
+  getUserLocation,
+  recordChipClick,
+  getChipClickCounts,
+} from "./session";
+import { QueryRouter } from "./query-router";
 import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
 
@@ -193,7 +200,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   }
 
   const {
-    plan,
     poly,
     viz_hint,
     resolved_location,
@@ -203,10 +209,27 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     rawText,
     user_attributes,
   } = bodyResult.data;
+  let plan = bodyResult.data.plan;
 
   const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
   const userAttributes = user_attributes ?? {};
   const clarificationText = rawText ?? intent ?? plan.category ?? "";
+
+  // Load session memory once — used for Tier 2 refinement (C.1) and chip
+  // ranking (C.4/C.8). Non-blocking guard: only when sessionId is present.
+  const memory = sessionId ? await loadMemory(sessionId) : null;
+  const clickCounts = sessionId ? await getChipClickCounts(sessionId) : {};
+
+  // C.1 — Tier 2 refinement: if rawText narrows an active plan (e.g. "just
+  // vehicle crime"), replace plan with the merged plan before routing to the
+  // adapter. Chip-triggered re-executes have no rawText and are unaffected.
+  if (rawText && memory) {
+    const router = new QueryRouter();
+    const routeResult = await router.route(rawText, memory, prisma);
+    if (routeResult.type === "refinement") {
+      plan = routeResult.mergedPlan;
+    }
+  }
 
   // 0. Clarification check — regulatory/eligibility intents return questions
   //    before any data fetch. Only run when the user has not yet answered;
@@ -539,6 +562,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
   }
 
+  // 1d. Normalise plan via adapter — ensures LLM category variants ("crime
+  //     statistics") map to canonical API slugs before cache hashing and fetching.
+  if (adapter.normalizePlan) {
+    plan = adapter.normalizePlan(plan);
+  }
+
   // 2. Ephemeral adapters bypass cache, storage and snapshots entirely
   const isEphemeral = adapter.config.storeResults === false;
 
@@ -704,15 +733,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       domain: adapter.config.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
-      memory: {
-        context: {
-          location: null,
-          active_plan: plan,
-          result_stack: [],
-          active_filters: {},
-        },
+      memory: memory ?? {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
         profile: { user_attributes: {}, location_history: [] },
       },
+      clickCounts,
     });
 
     const resultContext: ResultContext = {
@@ -724,6 +749,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    if (sessionId) {
+      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+    }
 
     return res.json({
       query_id: queryRecord.id,
@@ -1001,15 +1029,11 @@ FROM (
       domain: adapter.config.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
-      memory: {
-        context: {
-          location: null,
-          active_plan: plan,
-          result_stack: [],
-          active_filters: {},
-        },
+      memory: memory ?? {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
         profile: { user_attributes: {}, location_history: [] },
       },
+      clickCounts,
     });
 
     const resultContext: ResultContext =
@@ -1020,6 +1044,9 @@ FROM (
           : { status: "exact", followUps, confidence: "high" };
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    if (sessionId) {
+      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+    }
 
     return res.json({
       query_id: queryRecord.id,
@@ -1083,6 +1110,11 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
   }
 
   const { action, args, sessionId } = parsed.data;
+
+  // C.8 — record this chip click so chip ranking improves over the session
+  if (sessionId) {
+    recordChipClick(sessionId, action).catch(() => {});
+  }
 
   // ── fetch_domain: cinema-showtimes ────────────────────────────────────────
   if (action === "fetch_domain" && args.domain === "cinema-showtimes") {

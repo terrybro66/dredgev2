@@ -14,11 +14,11 @@ export async function recoverWithLatestMonth(
   plan: QueryPlan,
   poly: string,
 ): Promise<RecoveryResult | null> {
-  const latest = getLatestMonth("police-uk");
+  const latest = await getLatestMonth("police-uk");
   if (!latest) return null;
 
   // Month exists in availability — just no data there, don't substitute
-  if (isMonthAvailable("police-uk", plan.date_from)) return null;
+  if (await isMonthAvailable("police-uk", plan.date_from)) return null;
 
   const fallbackPlan: QueryPlan = {
     ...plan,

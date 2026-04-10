@@ -33,6 +33,8 @@ export interface SuggestFollowupsInput {
   ephemeral: boolean;
   /** Current session memory — used for recency and spatial relevance scoring. */
   memory: ConversationMemory;
+  /** Per-action chip click counts from the session (C.8). Empty object is safe. */
+  clickCounts?: Record<string, number>;
 }
 
 /**
@@ -40,7 +42,7 @@ export interface SuggestFollowupsInput {
  * and return the top CHIP_DISPLAY_MAX (3) chips ready to send to the frontend.
  */
 export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
-  const { rows, domain, handleId, ephemeral, memory } = input;
+  const { rows, domain, handleId, ephemeral, memory, clickCounts = {} } = input;
 
   const capabilities = inferCapabilities(rows);
 
@@ -63,5 +65,6 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
     handle,
     memory,
     domainRelationships: DOMAIN_RELATIONSHIPS as DomainRelationship[],
+    clickCounts,
   });
 }

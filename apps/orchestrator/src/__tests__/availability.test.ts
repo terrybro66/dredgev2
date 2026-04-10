@@ -131,12 +131,12 @@ describe("getLatestMonth", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(getLatestMonth("police-uk")).toBe("2025-10");
+    expect(await getLatestMonth("police-uk")).toBe("2025-10");
   });
 
   it("returns null when the source has never been loaded", async () => {
     const { getLatestMonth } = await import("../availability");
-    expect(getLatestMonth("never-loaded-source")).toBeNull();
+    expect(await getLatestMonth("never-loaded-source")).toBeNull();
   });
 
   it("returns null when the source was loaded but returned an empty array", async () => {
@@ -146,7 +146,7 @@ describe("getLatestMonth", () => {
 
     await loadAvailability("empty-source", POLICE_URL, (d) => d as string[]);
 
-    expect(getLatestMonth("empty-source")).toBeNull();
+    expect(await getLatestMonth("empty-source")).toBeNull();
   });
 });
 
@@ -160,7 +160,7 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-09")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-09")).toBe(true);
   });
 
   it("returns false when the month is not in the loaded list", async () => {
@@ -170,12 +170,12 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-01")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "2025-01")).toBe(false);
   });
 
   it("returns true when the source has never been loaded (fail open)", async () => {
     const { isMonthAvailable } = await import("../availability");
-    expect(isMonthAvailable("unknown-source", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("unknown-source", "2025-10")).toBe(true);
   });
 
   it("returns true when the source was loaded with an empty list (fail open)", async () => {
@@ -185,7 +185,7 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-10")).toBe(true);
   });
 
   it("month string format must match exactly — 2025-10 does not match 2025-9 or october-2025", async () => {
@@ -195,9 +195,9 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-9")).toBe(false);
-    expect(isMonthAvailable("police-uk", "october-2025")).toBe(false);
-    expect(isMonthAvailable("police-uk", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-9")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "october-2025")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "2025-10")).toBe(true);
   });
 });
 
