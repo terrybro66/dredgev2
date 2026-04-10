@@ -1,537 +1,266 @@
 # DREDGE — Project Guide for Claude
 
-> This file gives a new Claude session everything it needs to continue work on this project without re-reading every source file. Read this before asking for files.
+> Read this before asking for files. Covers architecture, pipeline, domains, and current state.
 
 ---
 
 ## What DREDGE Is
 
-DREDGE is a natural language query engine for public and commercial data. A user types a plain English question — "burglaries in Camden last month", "what's on at Odeon Braehead", "flood risk in Bristol" — and the platform finds a relevant data source, fetches the data, optionally stores it, and renders an appropriate visualisation.
-
-The architecture is designed around one constraint: **adding a new data domain must require zero changes to existing core pipeline code.**
+A natural language query engine for public data. Users type plain English ("burglaries in Camden", "flood risk in Bristol") and the platform routes to the right domain adapter, fetches data, and renders map/chart/table. **Core constraint: adding a new domain requires zero changes to pipeline code.**
 
 ---
 
 ## Monorepo Structure
 
 ```
-dredge/
-  apps/
-    orchestrator/          ← Express API server (main backend)
-      src/
-        __mocks__/
-          prisma.ts        ← Vitest mock for all Prisma models
-          setup.ts         ← Global beforeEach reset for mocks
-        __tests__/         ← All test files
-          crime/
-            fetcher.test.ts
-            store.test.ts
-          database-v5.test.ts       ← Real DB tests (hits actual Postgres)
-          database-hybrid.test.ts   ← Real DB tests for hybrid table (new, red)
-          execution-ephemeral.test.ts ← Mock tests for storeResults bypass (new, red)
-          domain-discovery.test.ts
-          query.test.ts
-          ... (37 test files total)
-        agent/
-          domain-discovery.ts       ← Discovery pipeline orchestrator
-          shadow-adapter.ts         ← Recovery via alternative sources
-          search/
-            catalogue.ts            ← data.gov.uk catalogue search
-            serp.ts                 ← SerpAPI search
-          workflows/
-            domain-discovery-workflow.ts  ← discoverSources, sampleSource, proposeDomainConfig
-            shadow-recovery.ts
-        domains/                    ← One folder per domain (no special casing)
-          crime-uk/
-            fetcher.ts              ← Calls police.uk API
-            store.ts                ← Writes to crime_results (transitional)
-            recovery.ts             ← Fallback strategies
-            index.ts                ← crimeUkAdapter — implements DomainAdapter
-          weather/
-            index.ts                ← weatherAdapter — implements DomainAdapter
-          registry.ts               ← DomainAdapter interface + registry Map
-        semantic/
-          classifier.ts             ← pgvector cosine similarity intent classifier
-          embedding.ts
-        enrichment/
-          deduplication.ts
-          scheduler.ts
-          source-tag.ts
-        providers/                  ← Transport layer (REST, CSV, XLSX, PDF)
-          rest-provider.ts
-          csv-provider.ts
-          xlsx-provider.ts
-          pdf-provider.ts
-          types.ts
-        availability.ts             ← Tracks which months are available per source
-        db.ts                       ← PrismaClient singleton
-        execution-model.ts          ← createSnapshot — QueryRun + DatasetSnapshot
-        export.ts
-        followups.ts
-        geocoder.ts                 ← Nominatim + GeocoderCache
-        index.ts                    ← Express app entry point
-        intent.ts                   ← parseIntent, deriveVizHint, expandDateRange
-        query.ts                    ← POST /parse and POST /execute handlers
-        rateLimiter.ts
-        redis.ts
-        schema.ts                   ← evolveSchema (dead code — no longer called)
-        workspace.ts
-    web/                            ← React frontend
-  packages/
-    database/
-      prisma/
-        schema.prisma               ← Source of truth for all models
-      index.ts                      ← Re-exports PrismaClient
-    schemas/
-      src/index.ts                  ← Zod schemas + TypeScript types shared across apps
-  docker/
-    Dockerfile.postgres
-  docker-compose.yml
-  turbo.json
+apps/
+  orchestrator/               ← Express API (port 3001)
+    src/
+      __mocks__/              ← prismaMock + global beforeEach reset
+      __tests__/              ← ~75 test files (vitest)
+      agent/
+        domain-discovery.ts   ← agentic source discovery
+        shadow-adapter.ts     ← fallback recovery
+        search/catalogue.ts   ← data.gov.uk search
+        search/serp.ts        ← SerpAPI search
+        workflows/
+          domain-discovery-workflow.ts  ← discoverSources, sampleSource, proposeDomainConfig
+          shadow-recovery.ts
+      domains/
+        crime-uk/             ← police.uk API, time-series, GB only
+        weather/              ← Open-Meteo, global
+        cinemas-gb/           ← Overpass API, persistent Track A
+        hunting-zones-gb/     ← NE ArcGIS CRoW open access land, GB
+        food-business-gb/     ← regulatory adapter (eligibility only)
+        hunting-licence-gb/   ← regulatory adapter
+        geocoder/             ← wraps geocodeToCoordinates, ephemeral
+        travel-estimator/     ← haversine + speed table, ephemeral
+        registry.ts           ← DomainAdapter interface + Map
+      semantic/
+        classifier.ts         ← pgvector cosine similarity routing
+        embedding.ts
+        pattern-store.ts      ← recordSuccessfulPattern (E.2, not yet wired)
+      types/
+        connected.ts          ← Chip, ResultHandle, WorkflowTemplate etc.
+      providers/              ← rest, csv, xlsx, pdf, scrape
+      enrichment/             ← deduplication, scheduler, source-tag, source-scoring
+      availability.ts         ← tracks available months per source
+      capability-inference.ts ← inferCapabilities, generateChips, DOMAIN_CHIPS
+      clarification.ts        ← buildClarificationRequest
+      co-occurrence-log.ts
+      conversation-memory.ts  ← ResultHandle store, session result_stack
+      curated-registry.ts
+      db.ts                   ← PrismaClient singleton
+      execution-model.ts      ← createSnapshot
+      export.ts
+      followups.ts
+      geocoder.ts             ← Nominatim + GeocoderCache
+      index.ts                ← Express entry, loadDomains, police availability load
+      intent.ts               ← parseIntent, deriveVizHint, expandDateRange
+      itinerary-assembler.ts  ← pure fn, hunting day schedule (E.3)
+      query-router.ts         ← 3-tier router (template / refinement / similarity)
+      query.ts                ← POST /parse and POST /execute
+      rateLimiter.ts
+      redis.ts
+      regulatory-adapter.ts   ← RegulatoryAdapter registry
+      session.ts              ← getUserLocation / setUserLocation (Redis, 24h TTL)
+      suggest-followups.ts
+      workflow-executor.ts    ← executeWorkflow, step I/O mapping
+      workflow-templates.ts   ← WORKFLOW_TEMPLATES (4 templates)
+  web/                        ← React frontend (port 5173), App.tsx is monolithic
+packages/
+  database/prisma/schema.prisma  ← source of truth for all DB models
+  schemas/src/index.ts           ← Zod schemas shared across apps
 ```
 
 ---
 
-## Starting the Project (Fresh Clone)
+## Quick Start
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Copy environment variables
-cp .env.example .env
-# Fill in: DATABASE_URL, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, REDIS_URL
-# DATABASE_URL format: postgresql://postgres:postgres@localhost:5432/dredge
-
-# 3. Start Docker (Postgres + Redis)
+cp .env.example .env   # fill DATABASE_URL, DEEPSEEK_API_KEY, OPENROUTER_API_KEY, REDIS_URL
 docker-compose up -d
-
-# 4. Generate Prisma client
-cd packages/database
-npx prisma generate
-cd ../..
-
-# 5. Build shared packages (schemas must be built before orchestrator starts)
-cd packages/schemas
-npm run build
-cd ../..
-
-# 6. Run database migrations
-cd packages/database
-npx prisma migrate deploy
-cd ../..
-
-# 7. Start dev server
+cd packages/database && npx prisma generate && npx prisma migrate deploy && cd ../..
+cd packages/schemas && npm run build && cd ../..
 npx turbo run dev
-# Orchestrator runs on http://localhost:3001
-# Web frontend runs on http://localhost:5173
 ```
 
 ---
 
 ## Database Operations
 
-### Run migrations
-
 ```bash
+# Migrations
 cd packages/database
+npx prisma migrate deploy          # apply pending (production-safe)
+npx prisma migrate dev --name foo  # create new migration after schema edit
+npx prisma generate                # regenerate client after migrate
 
-# Apply all pending migrations (production-safe)
-npx prisma migrate deploy
-
-# Create a new migration after editing schema.prisma
-npx prisma migrate dev --name descriptive_name_here
-
-# Reset database completely (dev only — destroys all data)
-npx prisma migrate reset
-```
-
-### View and edit the database
-
-```bash
-# Open Prisma Studio — browser-based GUI for viewing/editing all tables
-cd packages/database
-npx prisma studio
-# Opens at http://localhost:5555
-
-# Direct psql access
+# Inspect
+npx prisma studio                  # browser GUI at http://localhost:5555
 docker exec -it dredge-postgres-1 psql -U postgres -d dredge
-
-# Useful psql queries
-\dt                          -- list all tables
-\d query_results             -- describe a table
-SELECT * FROM domain_discovery WHERE status = 'requires_review';
-SELECT * FROM data_sources WHERE enabled = true;
 ```
 
-### Schema location
-
-All schema changes go in `packages/database/prisma/schema.prisma`. After editing:
-
-```bash
-cd packages/database
-npx prisma migrate dev --name your_migration_name
-npx prisma generate
-```
-
-The generated client is in `node_modules/.prisma/client`. Always run `prisma generate` after `prisma migrate` so the TypeScript types stay in sync.
+All schema changes go in `packages/database/prisma/schema.prisma`. Always run `prisma generate` after `prisma migrate`.
 
 ---
 
 ## Running Tests
 
 ```bash
-# Run all tests (from repo root)
-npm test --workspace=apps/orchestrator
-
-# Run a specific test file
-npm test --workspace=apps/orchestrator -- run src/__tests__/query.test.ts
-
-# Run multiple specific files
-npm test --workspace=apps/orchestrator -- run src/__tests__/query.test.ts src/__tests__/domain-discovery.test.ts
-
-# Run in watch mode during development
-npm test --workspace=apps/orchestrator -- --watch
-
-# Run only real DB tests (requires running Postgres)
-npm test --workspace=apps/orchestrator -- run src/__tests__/database-v5.test.ts src/__tests__/database-hybrid.test.ts
+cd apps/orchestrator && npx vitest run              # all tests
+npx vitest run src/__tests__/query.test.ts          # single file
+npx vitest run src/__tests__/e3-adapters.test.ts    # E.3 specific
 ```
 
-### Two types of tests
+**Mock tests** use `prismaMock` from `@mocks/prisma` — never touch the real DB, fast.
+**Real DB tests** (`database-v5.test.ts`) require Docker running.
 
-**Mock tests** (most tests) — use `prismaMock` from `@mocks/prisma`, never touch real database, fast.
-
-**Real DB tests** (`database-v5.test.ts`, `database-hybrid.test.ts`) — use a real `PrismaClient` against the dev database. Each test cleans up after itself using `afterEach` with `deleteMany`. Requires Docker running.
-
-### Test infrastructure
-
-`src/__mocks__/prisma.ts` — mock for all Prisma models. Every model has `findUnique`, `findMany`, `create`, `update`, `upsert`, `delete`, `count` as `vi.fn()`. Import in tests as:
-```ts
-import { prismaMock } from "@mocks/prisma";
-```
-
-`src/__mocks__/setup.ts` — registered as `setupFiles` in `vitest.config.ts`. Calls `resetPrismaMocks()` in a global `beforeEach` so individual test files don't need to reset manually.
-
-`vitest.config.ts` — key config:
-```ts
-resolve: { alias: { "@mocks": path.resolve(__dirname, "src/__mocks__") } }
-setupFiles: ["dotenv/config", "./src/__mocks__/setup.ts"]  // dotenv loaded at config level via import
-```
+Test infrastructure:
+- `src/__mocks__/prisma.ts` — all Prisma models as `vi.fn()`. Import as `import { prismaMock } from "@mocks/prisma"`
+- `src/__mocks__/setup.ts` — global `beforeEach` reset, registered in `vitest.config.ts` `setupFiles`
+- `vi.hoisted()` — required when `vi.mock` factory references variables (avoids TDZ errors)
+- `beforeEach(() => mockFn.mockClear())` — required when mock call counts accumulate across tests
 
 ---
 
-## The Query Pipeline (How Data Flows)
+## The Query Pipeline
 
-Every user query follows two HTTP calls:
+### POST /query/parse
 
-### Step 1: POST /query/parse
+1. Detect `"where am I"` pattern → return `{ type: "location_info", location }` ← **not yet implemented**
+2. `parseIntent(text)` → `{ category, date_from, date_to, location }` via DeepSeek
+3. Substitute "near me" from `getUserLocation(sessionId)` if present
+4. `geocodeToPolygon(location)` → `{ poly, display_name, country_code }`, cached in `geocoder_cache`
+5. `setUserLocation(sessionId, ...)` — store for future near-me queries
+6. `classifyIntent(text, prisma)` → pgvector similarity; if confidence ≥ 0.5 set `intent`
+7. `findWorkflowsForIntent(text)` → if match, attach `suggested_workflow` to response
+8. Return `{ plan, poly, viz_hint, resolved_location, country_code, intent, months, suggested_workflow? }`
 
-**Input:** `{ text: "burglaries in Cambridge last month" }`
+**D.15 intercept:** if `suggested_workflow` present, frontend shows `WorkflowInputForm` instead of calling `/execute`.
 
-**Flow:**
-1. `parseIntent(text)` — sends to DeepSeek LLM, returns `{ category, date_from, date_to, location }`
-2. `geocodeToPolygon(location)` — Nominatim lookup, returns `{ poly, display_name, country_code }`, cached in `geocoder_cache` table
-3. `classifyIntent(text)` — pgvector cosine similarity against domain embeddings, returns `{ intent, domain, confidence }`
-4. If confidence ≥ 0.5: `intent` is set to the classified domain slug
-5. If confidence < 0.5 or classifier fails: `intent` remains `undefined`
-6. `deriveVizHint(plan, text, intent)` — deterministic rule: single month → map, multi-month → bar, "list"/"show me" → table, weather → dashboard
-7. `expandDateRange(date_from, date_to)` — expands to array of `["2024-01", "2024-02", ...]`
+### POST /query/execute
 
-**Output:** `{ plan, poly, viz_hint, resolved_location, country_code, intent, months }`
+1. **Clarification check** — `buildClarificationRequest(text)` returns questions if regulatory intent and no `user_attributes` yet
+2. **Regulatory adapter** — if `getRegulatoryAdapter(text)` matches and `user_attributes` present → return `DecisionResult`
+3. **Intent routing** — `CATEGORY_TO_INTENT` normalises LLM variants (`"cinema listings"→"cinemas"`, `"crime statistics"→"crime"`) → `getDomainForQuery(country_code, routingIntent)`
+4. If no adapter → check curated registry → build on-the-fly adapter or trigger `domainDiscovery.run()`
+5. Hash check → rate limiter → `adapter.fetchData(plan, poly)`
+6. If empty → `adapter.recoverFromEmpty()` → `shadowAdapter.recover()`
+7. `adapter.storeResults()` → `createSnapshot()`
+8. `suggestFollowups()` → `generateChips()` → chip ranking → return with `suggested_chips`
+9. `recordDomainCoOccurrence(sessionId, domain)` — fire-and-forget
 
-The frontend shows this to the user for confirmation before executing.
+### POST /query/workflow
 
-### Step 2: POST /query/execute
+`executeWorkflow(workflowId, input, prisma)` — runs steps sequentially, maps I/O between steps, returns `WorkflowResult`.
 
-**Input:** The full parse output plus the original body.
+### Discovery pipeline (when no adapter matches)
 
-**Flow:**
-1. `getDomainForQuery(country_code, intent)` — looks up registered adapter in the domain registry Map
-2. If no adapter found: triggers `domainDiscovery.run()` if enabled, returns `400 unsupported_region`
-3. Compute deterministic `query_hash` from domain + category + dates + location
-4. Check `queryCache` — if hit and within TTL, return cached results immediately
-5. `acquire(adapter.config)` — Redis-backed token bucket rate limiter
-6. `adapter.fetchData(plan, poly)` — calls the domain-specific fetch implementation
-7. If empty: `adapter.recoverFromEmpty()` — tries date fallback, radius reduction, category broadening
-8. If still empty: `shadowAdapter.recover()` — finds alternative sources via discovery workflow
-9. `adapter.storeResults(queryId, rows, prisma)` — writes to `query_results`
-10. `createSnapshot()` — seals `QueryRun` + `DatasetSnapshot` with SHA-256 checksum
-11. Query stored results from DB, apply viz transforms (aggregate for map, group for bar, slice for table)
-12. Write `QueryCache` entry
-13. Return results with `resultContext` (exact / fallback / empty)
-
-**Key invariant:** `query.ts` never contains domain-specific logic. It calls adapter hooks only.
-
-### The Discovery Pipeline (when no adapter matches)
-
-Triggered when `getDomainForQuery` returns `undefined`:
-
-1. `discoverSources(intent, country_code)`:
-   - Try `searchCatalogue()` — data.gov.uk API, instant, confidence 0.8
-   - Try `searchWithSerp()` — SerpAPI, confidence 0.5
-   - Fall back to `discoverWithBrowser()` — StagehandCrawler + Bing search
+1. `discoverSources(intent, country_code)` — tries catalogue → SerpAPI → headless browser
 2. `sampleSource(url)` — fetch 5 rows, parse JSON/CSV/XLSX
-3. `proposeDomainConfig(intent, country_code, source, rows)` — LLM proposes:
-   - Domain name (kebab-case)
-   - Field map (`source_field → standard_field` or `source_field → extras.key`)
-   - Confidence score
-   - `storeResults` (persistent vs ephemeral)
-   - `refreshPolicy` (realtime/daily/weekly/static)
-   - `ephemeralRationale`
-4. Save `DomainDiscovery` record with `status: "requires_review"`
-5. Return `null` — **never auto-registers**. Human approval required via admin endpoint.
+3. `proposeDomainConfig(...)` — LLM proposes name, fieldMap, storeResults, refreshPolicy
+4. Save `DomainDiscovery` with `status: "requires_review"` — **never auto-registers**
+5. Human approves via `POST /admin/discovery/:id/approve`
 
 ---
 
-## How Domains Work Now
+## Domains
 
-### The DomainAdapter interface
+| Domain | Intent(s) | Source | Viz | Notes |
+|---|---|---|---|---|
+| `crime-uk` | `"crime"` | police.uk API | map / bar | recovery: date shift, smaller radius, all-crime |
+| `weather` | `"weather"` | Open-Meteo | table | global |
+| `cinemas-gb` | `"cinemas"` | Overpass API | map | persistent Track A; showtimes via Track B chip |
+| `hunting-zones-gb` | `"hunting zones"` | NE ArcGIS CRoW | map | ⚠ lat/lon swap bug — on fix list |
+| `food-business-gb` | regulatory | — | decision | RegulatoryAdapter, no data fetch |
+| `hunting-licence-gb` | regulatory | — | decision | leads to zones chip on eligible result |
+| `geocoder` | workflow step | Nominatim | — | ephemeral, `storeResults: false` |
+| `travel-estimator` | workflow step | haversine | — | ephemeral, `storeResults: false` |
 
-Every domain implements this interface in `src/domains/registry.ts`:
+**Curated registry** (`curated-registry.ts`): cinema listings (scrape, Track B), flood risk, transport, others.
+
+### DomainAdapter interface
 
 ```ts
 interface DomainAdapter {
-  config: DomainConfig;           // name, tableName, prismaModel, countries, intents, etc.
+  config: DomainConfig;           // name, countries, intents, storeResults, temporality, etc.
   fetchData(plan, poly): Promise<unknown[]>;
   flattenRow(row): Record<string, unknown>;
   storeResults(queryId, rows, prisma): Promise<void>;
   recoverFromEmpty?(plan, poly, prisma): Promise<{ data, fallback } | null>;
-  onLoad?(): void | Promise<void>;  // called at startup after registration
+  onLoad?(): void | Promise<void>;
 }
 ```
 
-### Current domains
+### Adding a new domain
 
-**crime-uk** (`src/domains/crime-uk/index.ts`):
-- Countries: `["GB"]`, Intents: `["crime"]`
-- Fetches from `https://data.police.uk/api/crimes-street/{category}`
-- Stores to `query_results` table via `queryResult.createMany`
-- `onLoad` calls `loadAvailability("police-uk", ...)` to cache available months
-- Recovery: date fallback → smaller radius → all-crime broadening
+**Option A — manual:** create `src/domains/your-domain/index.ts` implementing `DomainAdapter`, add to `loadDomains()` in `registry.ts`. Set `temporality: "time-series"` (date-bound) or `"static"` (timeless). No migration needed — all results go to `query_results`.
 
-**weather** (`src/domains/weather/index.ts`):
-- Countries: `[]` (global), Intents: `["weather"]`
-- Fetches from Open-Meteo API (archive or forecast depending on date)
-- Stores to `query_results` table via `queryResult.createMany`
-- Recovery: future date → falls back to today
-
-### Domain registry
-
-`src/domains/registry.ts` holds a `Map<string, DomainAdapter>`. At startup:
-```ts
-async function loadDomains() {
-  for (const adapter of [crimeUkAdapter, weatherAdapter]) {
-    registerDomain(adapter);
-    if (adapter.onLoad) await adapter.onLoad();
-  }
-}
-```
-
-`getDomainForQuery(countryCode, intent)` iterates the Map, matches on both `intents` array and `countries` array (empty countries = global).
+**Option B — via discovery:** user submits unknown query → pipeline creates `DomainDiscovery` record → admin approves → adapter auto-registered. `storeResults: false` = ephemeral; `storeResults: true` = persistent `GenericAdapter`.
 
 ---
 
-## How Adding a New Domain Will Work (Post-Migration)
+## Workflow Templates
 
-Once the hybrid `query_results` table and registration step are built, adding a domain will work like this:
-
-### Option A — Manual (code a known stable source)
-
-1. Create `src/domains/your-domain/index.ts` implementing `DomainAdapter`
-2. Set `config.storeResults = true/false` as appropriate
-3. Set `config.defaultOrderBy` (typically `{ date: "asc" }`)
-4. Set `config.temporality` to `"time-series"` (date-bound queries) or `"static"` (timeless queries like cinema, car-hire)
-5. Add to `loadDomains()` in `registry.ts`
-6. No migration needed — all results go to `query_results`
-
-### Option B — Via discovery pipeline (automatic)
-
-1. User submits query with unknown intent
-2. Discovery pipeline runs, creates `DomainDiscovery` record with `status: "requires_review"`
-3. Admin calls `POST /admin/discovery/:id/approve` (optionally with overrides)
-4. Registration step creates `DataSource` record
-5. If `storeResults: false`: registers ephemeral fetch-and-discard adapter
-6. If `storeResults: true`: registers full `GenericAdapter` writing to `query_results`
-7. Future identical queries take the fast path (cache → adapter → return)
-
-### DomainConfig fields relevant to hybrid table
-
-```ts
-{
-  name: "cinema-listings-gb",
-  storeResults: false,               // controls pipeline bypass
-  defaultOrderBy: { date: "asc" },   // object form required by Zod schema
-  refreshPolicy: "realtime",         // scheduler uses this
-  temporality: "static",             // "static" → effectiveMonths = [] (no date constraint passed to adapter)
-  intents: ["cinema listings"],
-  countries: ["GB"],
-  // all adapters write to query_results / queryResult
-}
-```
-
----
-
-## Current TDD Cycle
-
-### The rule
-
-**Tests first. Code to pass. Stop and run before proceeding.**
-
-Never write implementation before tests exist for it. Never move to the next block until the current block is green.
-
-### Branch convention
-
-```
-feat/hybrid-table                  ← merged to main
-feat/export-fix                    ← merged to main
-feat/store-to-query-results        ← merged to main
-feat/query-history-carousel        ← merged to main
-feat/static-domain-temporality     ← merged to main
-feat/shadow-adapter-fix            ← next
-```
-
-### Current state
-
-All tests green. The following major work has landed on main since the last CLAUDE.md update:
-
-- **Unified storage**: crime-uk and weather adapters both write to `query_results` via `queryResult.createMany`
-- **Domain-agnostic export**: `GET /export/:id` reads only from `query_results` (GeoJSON + CSV)
-- **`evolveSchema` removed**: no longer called in `query.ts`; the function still exists in `schema.ts` but is dead code
-- **Static domain temporality**: `DomainConfig.temporality` field added; `"static"` domains receive `effectiveMonths: []` so date constraints are not passed to the adapter
-- **Query history carousel**: `GET /query/history` endpoint + `QueryHistoryCarousel` React component
-
-**Active branch:** `main` (all recent features merged)
-
-**Key files added/changed since last CLAUDE.md update:**
-- `src/query.ts` — `resolvedIntent` + `CATEGORY_TO_INTENT` map, `GET /query/history` route, `intent` stored on Query records, `evolveSchema` removed, `effectiveMonths` gated on `temporality`
-- `src/export.ts` — reads only `queryResult.findMany`, domain-agnostic GeoJSON + CSV
-- `src/domains/crime-uk/store.ts` — writes to `queryResult.createMany` (not `crime_results`)
-- `src/domains/weather/index.ts` — writes to `queryResult.createMany` (not `weather_results`), `temporality: "time-series"`, `defaultOrderBy: { date: "asc" }`
-- `src/domains/crime-uk/index.ts` — `temporality: "time-series" as const`
-- `packages/schemas/src/index.ts` — `temporality: z.enum(["time-series", "static"]).optional()` added to `DomainConfigSchema`
-- `src/intent.ts` — system prompt updated with UK place name disambiguation rule
-- `src/agent/search/catalogue.ts` — dead-link filter (datapress.com URLs skipped)
-- `apps/web/src/store.ts` — Zustand store with `executeQuery` action
-- `apps/web/src/components/QueryHistoryCarousel.tsx` — TanStack Query + Zustand, no prop drilling
-- `apps/web/src/main.tsx` — wrapped in `QueryClientProvider`
-- `apps/web/src/components/ResultRenderer.tsx` — domain-agnostic renderers, ephemeral badge
-- `apps/web/src/App.tsx` — generic renderers, header, empty state, `setExecuteQuery` on mount
-
-**Deleted files:**
-- `src/domains/weather.ts` (duplicate; canonical copy is `domains/weather/index.ts`)
-- `src/domains/crime-uk.ts` (old top-level adapter)
-- `src/crime/` (entire directory — fetcher, store, recovery, index)
-
-### Full baseline check (run before committing)
-
-```bash
-npm test --workspace=apps/orchestrator -- run \
-  src/__tests__/query.test.ts \
-  src/__tests__/index.test.ts \
-  src/__tests__/availability.test.ts \
-  src/__tests__/startup.test.ts \
-  src/__tests__/semantic-classifier.test.ts \
-  src/__tests__/execution-model.test.ts \
-  src/__tests__/crime-uk-intent.test.ts \
-  src/__tests__/domain-discovery.test.ts
-```
-
-These 8 files are the baseline — all 101+ tests must remain green throughout.
-
-### Commit and push pattern
-
-```bash
-# After tests pass
-git add -A
-git commit -m "feat: hybrid query_results table + ephemeral pipeline bypass"
-git push origin feat/hybrid-table
-
-# Then open PR or merge to main
-# Then start next branch
-git checkout main && git pull
-git checkout -b feat/next-thing
-```
-
----
-
-## Key Architectural Constraints
-
-These must not be violated:
-
-1. **`query.ts` is domain-agnostic** — no domain names, no domain-specific field names, no crime/weather logic
-2. **`raw` is never lost** — every result row stores the full original payload in `raw` JSONB
-3. **Discovery never auto-registers** — `domainDiscovery.run()` always returns `null`; registration requires human approval
-4. **Ephemeral enforcement before ephemeral sources** — the `storeResults: false` bypass must be proven before any ephemeral sources are added to the curated registry
-5. **LLM output is always a proposal** — all LLM responses pass Zod schema validation before use
-6. **Failures in non-critical paths never propagate** — classifier, shadow adapter, discovery failures return `undefined`/`null`, never throw to the user
-7. **Workspace snapshots are immutable** — `createSnapshot` only appends, never mutates
-
----
-
-## Current Status and Known Issues
-
-### Browser Testing Findings (March 2026)
-
-End-to-end browser testing exposed a class of data shape problems not covered by unit tests. The system has no contract between what a source returns and what a domain expects.
-
-#### Active bugs
-
-| Bug | Severity | Status |
-|---|---|---|
-| Shadow adapter accepts irrelevant sources (Plymouth 2003 CSV for Bury St Edmunds crime query) | High | Open — fix planned (see below) |
-| Shadow adapter writes to `crime_results` via crime-uk `storeResults`, fails on missing `category` field | High | Open — fix planned |
-| `evolveSchema` adds columns for garbage rows before shape validation | Medium | Open — fix planned |
-| Ambiguous UK place names geocode incorrectly ("Bury" → "Bury St Edmunds" not "Bury, Gtr Manchester") | Medium | Partially fixed — system prompt updated, old queries still cached |
-| `src/schema.ts` contains dead `evolveSchema` function | Low | Open — safe to delete if confirmed no imports |
-
-#### Fixed this session
-
-| Fix | Description |
+| id | Steps |
 |---|---|
-| `ADD COLUMN IF NOT EXISTS` | `evolveSchema` no longer crashes on duplicate column names |
-| `resolvedIntent` fallback | Crime subcategories ("burglary") now route to crime-uk adapter correctly |
-| `CATEGORY_TO_INTENT` map | All crime category slugs map to the "crime" intent slug |
-| Discovery intent | Raw query text no longer passed to discovery pipeline |
-| `GET /query/history` | History endpoint added, returns `poly`, `country_code`, `intent` |
-| `intent` on Query record | Stored at execute time for correct carousel re-runs |
-| Carousel crash fix | `poly` and `country_code` now taken from history entry, not hardcoded |
-| UK geocoder prompt | System prompt instructs LLM to include county for ambiguous place names |
+| `reachable-area` | geocode-origin → compute-isochrone |
+| `itinerary` | geocode-origin → discover-pois → optimise-route → compute-travel-times |
+| `cross-domain-overlay` | fetch-layer-a → fetch-layer-b → spatial-join |
+| `hunting-day-plan` | geocode-origin → fetch-zones → compute-travel-times |
+
+`hunting-day-plan` result → `assembleHuntingItinerary()` → `Itinerary` with timed stops. Frontend renders via `WorkflowResultPanel`.
 
 ---
 
-### Planned Fixes — Shadow Adapter Data Shape (next branch: `feat/shadow-adapter-fix`)
+## Connected Queries / Chips
 
-The shadow adapter has no contract between what a source returns and what the domain expects. Five fixes needed in dependency order:
+`capability-inference.ts`:
+- `inferCapabilities(rows)` — detects `has_coordinates`, `has_time_series`, `has_polygon`, `has_schedule`, `has_category`
+- `generateChips(handle)` — maps capabilities to chips; `DOMAIN_CHIPS` adds domain-specific overrides (`"cinemas-gb"` → "What's on here?", `"hunting-zones-gb"` → "Plan a day here")
 
-**Fix 1 — Shape validation before accepting a source** (`shadow-adapter.ts`)
+Chip actions in `App.tsx`: `show_map`, `show_chart`, `filter_by`, `calculate_travel`, `cinema-showtimes`, `hunting-day-plan`.
 
-After sampling rows, validate they contain the minimum fields the domain needs. For crime: at least one of `category`/`type` and one of `month`/`date`. Reject sources that don't meet this — return `null` so the pipeline continues to "no results" rather than storing garbage.
+---
 
-```ts
-function isValidCrimeShape(rows: unknown[]): boolean {
-  if (rows.length === 0) return false;
-  const first = rows[0] as Record<string, unknown>;
-  const hasCategory = "category" in first || "type" in first || "offence" in first;
-  const hasDate = "month" in first || "date" in first;
-  return hasCategory && hasDate;
-}
-```
+## Semantic Routing (E.2)
 
-**Fix 2 — Shadow adapter writes to `query_results`, not domain table** (`shadow-adapter.ts`)
+`QueryRouter` (`query-router.ts`) has three tiers:
+1. **Template match** — `findWorkflowsForIntent(query)`
+2. **Refinement** — `REFINEMENT_PATTERNS` regex
+3. **pgvector similarity** — `classifyIntent(query, prisma)`, threshold 0.65
 
-Shadow-recovered rows should write to the hybrid `query_results` table, not `crime_results`. Crime-uk `storeResults` requires exact crime API field names. Shadow data should use the generic `queryResult.createMany` path instead.
+`classifyIntent` also called in `/parse` at threshold 0.5. Embeddings seeded on startup via `registerDomainEmbeddings` (requires `DEEPSEEK_API_KEY`).
 
-**Fix 3 — Apply fieldMap at fetch time** (`generic-adapter.ts`, `shadow-adapter.ts`)
+`recordSuccessfulPattern` in `pattern-store.ts` — exists but **not yet wired** to call sites (fix list item 4).
 
-The LLM proposes a `fieldMap` in `proposeDomainConfig` but it's stored and never applied. Both the generic adapter and shadow adapter need to transform source field names to canonical names using the fieldMap before calling `storeResults`.
+---
 
-**Fix 4 — Geography relevance check** (`shadow-adapter.ts`)
+## Current Fix List
 
-Reject sources whose URL or description doesn't contain something related to the query location. A Plymouth dataset for a Bury St Edmunds query should be filtered out. Simple heuristic: check if the query location's county or region appears in the source URL or description.
+| # | Fix | Status |
+|---|---|---|
+| 1 | `"where am I"` → location info response | Pending |
+| 2 | Hunting zones ArcGIS lat/lon swap in `polyToBbox` | Pending |
+| 3 | Leeds/SE1 crime still routing to domain discovery | Pending |
+| 4 | Wire `recordSuccessfulPattern` call sites — E.4.1 | Pending |
+| 5 | Workflow result handle — store itinerary in session result_stack — E.4.2 | Pending |
+| 6 | Workflow refinement chips — E.4.3 | Pending |
 
-**Fix 5 — ~~Move `evolveSchema` after shape validation~~** — Moot
+Applied this session: police availability load on startup, `"cinema listings"→"cinemas"` in `CATEGORY_TO_INTENT`.
 
-`evolveSchema` has been removed from `query.ts` entirely. All adapters now write to the fixed `query_results` schema, so no dynamic ALTER TABLE logic runs. The function still exists in `schema.ts` as dead code.
+---
+
+## Key Architectural Rules
+
+1. `query.ts` is domain-agnostic — no domain names or domain-specific fields
+2. `raw` is never lost — full payload stored in JSONB
+3. Discovery never auto-registers — human approval required via `/admin/discovery/:id/approve`
+4. Non-critical path failures never propagate — classifier, shadow adapter, co-occurrence are fire-and-forget
+5. LLM output always passes Zod validation before use
+6. `createSnapshot` only appends, never mutates
 
 ---
 
@@ -539,48 +268,16 @@ Reject sources whose URL or description doesn't contain something related to the
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/dredge
-DEEPSEEK_API_KEY=...          # Intent parsing (parseIntent)
-OPENROUTER_API_KEY=...        # Domain config proposal (proposeDomainConfig) + Stagehand
+DEEPSEEK_API_KEY=...         # intent parsing + embeddings
+OPENROUTER_API_KEY=...       # domain discovery + Stagehand
 REDIS_URL=redis://localhost:6379
-DOMAIN_DISCOVERY_ENABLED=true # Set to enable discovery pipeline
-OPENWEATHER_API_KEY=...       # Required for weather adapter to run
+DOMAIN_DISCOVERY_ENABLED=true
+SERPAPI_KEY=...              # URL resolution for scrape pipeline
 AVAILABILITY_CACHE_TTL_SECONDS=3600
 ```
 
 ---
 
-## Roadmap Summary
+## Branch State
 
-| Item | Status |
-|---|---|
-| 1.1 Remove crime-as-default intent | ✅ Done |
-| 1.2 Move intent utils out of crime/ | ✅ Done |
-| 1.3 Eliminate src/crime/ directory | ✅ Done |
-| 1.4 loadAvailability → onLoad hook | ✅ Done |
-| 2.1 Hybrid storage model decision | ✅ Decided |
-| 2.2 Hybrid model governance rules | ✅ Documented |
-| 3.0 proposeDomainConfig ephemeral fields | ✅ Done |
-| 3.1 Hybrid query_results migration | ✅ Done |
-| 3.2 DataSource model | ✅ Done |
-| 3.3 Admin approval endpoint | ✅ Done |
-| 3.4 Registration — ephemeral path | ✅ Done |
-| 3.5 Ephemeral pipeline enforcement | ✅ Done |
-| 3.6 Registration — persistent path | ✅ Done |
-| 3.7 Curated source registry | ✅ Done |
-| 3.8 ScrapeProvider | ✅ Done |
-| 3.9 Source scoring | ✅ Done |
-| 3.10 Auto-approval threshold | ✅ Done |
-| 3.11 Source-level URL routing | ✅ Done |
-| 3.12 Frontend ephemeral label | ✅ Done |
-| 4.1 Query history carousel | ✅ Done |
-| 4.1a Unified query_results storage (crime-uk + weather) | ✅ Done |
-| 4.1b Domain-agnostic export endpoint | ✅ Done |
-| 4.1c Remove evolveSchema from pipeline | ✅ Done |
-| 4.1d Static domain temporality (`temporality` flag) | ✅ Done |
-| 4.2 Shadow adapter shape validation | ⬜ Next |
-| 4.3 Shadow adapter → query_results | ⬜ Blocked on 4.2 |
-| 4.4 FieldMap applied at fetch time | ⬜ Blocked on 4.3 |
-| 4.5 Geography relevance filter | ⬜ Blocked on 4.2 |
-| 4.6 evolveSchema after validation | ⬜ Moot — evolveSchema removed from pipeline |
-
-Full detail on each item is in `guides/DREDGE_ROADMAP.md`.
+**`main`** is current and contains all Phase D + E work. Phase E.4 (learning loop closure) is next.

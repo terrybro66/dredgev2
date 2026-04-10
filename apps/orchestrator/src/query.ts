@@ -276,6 +276,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "public-order": "crime",
     "theft-from-the-person": "crime",
     "other-crime": "crime",
+    "crime statistics": "crime",
+    "cinema listings": "cinemas",
+    "cinema showtimes": "cinemas",
+    "films showing": "cinemas",
+    "hunting zones": "hunting zones",
+    "open access land": "hunting zones",
+    "game management areas": "hunting zones",
   };
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;

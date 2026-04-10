@@ -22,24 +22,24 @@ const BASE_URL =
 const MAX_RESULTS = 100;
 
 export interface HuntingZoneRow {
-  name:        string;
-  county:      string | null;
-  area_ha:     number | null;
-  lat:         number | null;
-  lon:         number | null;
-  access_type: string | null;   // "Open Country", "Registered Common Land", etc.
-  source_id:   string;
+  name: string;
+  county: string | null;
+  area_ha: number | null;
+  lat: number | null;
+  lon: number | null;
+  access_type: string | null; // "Open Country", "Registered Common Land", etc.
+  source_id: string;
 }
 
 interface ArcGISFeature {
   attributes: Record<string, unknown>;
-  centroid?:  { x: number; y: number };
-  geometry?:  { x?: number; y?: number; rings?: number[][][] };
+  centroid?: { x: number; y: number };
+  geometry?: { x?: number; y?: number; rings?: number[][][] };
 }
 
 interface ArcGISResponse {
   features?: ArcGISFeature[];
-  error?:    { message?: string };
+  error?: { message?: string };
 }
 
 /**
@@ -52,12 +52,12 @@ export async function fetchHuntingZones(
   poly: string | null,
 ): Promise<HuntingZoneRow[]> {
   const params = new URLSearchParams({
-    where:          "1=1",
-    outFields:      "OBJECTID,NAME,COUNTY,CATEGORY,Shape_Area",
-    outSR:          "4326",
+    where: "1=1",
+    outFields: "OBJECTID,NAME,COUNTY,CATEGORY,Shape_Area",
+    outSR: "4326",
     returnCentroid: "true",
     resultRecordCount: String(MAX_RESULTS),
-    f:              "json",
+    f: "json",
   });
 
   // When a polygon is provided, add a simple geometry envelope filter.
@@ -66,7 +66,10 @@ export async function fetchHuntingZones(
   if (poly && poly.trim()) {
     const bbox = polyToBbox(poly);
     if (bbox) {
-      params.set("geometry", `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`);
+      params.set(
+        "geometry",
+        `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`,
+      );
       params.set("geometryType", "esriGeometryEnvelope");
       params.set("spatialRel", "esriSpatialRelIntersects");
       params.set("inSR", "4326");
@@ -74,9 +77,9 @@ export async function fetchHuntingZones(
   }
 
   const url = `${BASE_URL}?${params.toString()}`;
-  const res  = await fetch(url, {
+  const res = await fetch(url, {
     headers: { Accept: "application/json" },
-    signal:  AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(10_000),
   });
 
   if (!res.ok) {
@@ -88,9 +91,9 @@ export async function fetchHuntingZones(
     throw new Error(`NE ArcGIS API error: ${json.error.message ?? "unknown"}`);
   }
 
-  return (json.features ?? []).map(featureToRow).filter(
-    (r): r is HuntingZoneRow => r !== null,
-  );
+  return (json.features ?? [])
+    .map(featureToRow)
+    .filter((r): r is HuntingZoneRow => r !== null);
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -118,16 +121,16 @@ function featureToRow(feature: ArcGISFeature): HuntingZoneRow | null {
 
   // area_ha: Shape_Area is in m² (projected); divide by 10,000
   const shapeArea = typeof a.Shape_Area === "number" ? a.Shape_Area : null;
-  const area_ha   = shapeArea !== null ? Math.round(shapeArea / 10_000) : null;
+  const area_ha = shapeArea !== null ? Math.round(shapeArea / 10_000) : null;
 
   return {
     name,
-    county:      (a.COUNTY as string | undefined) ?? null,
+    county: (a.COUNTY as string | undefined) ?? null,
     area_ha,
     lat,
     lon,
     access_type: (a.CATEGORY as string | undefined) ?? null,
-    source_id:   String(a.OBJECTID ?? ""),
+    source_id: String(a.OBJECTID ?? ""),
   };
 }
 
@@ -151,8 +154,8 @@ function polyToBbox(
   const lats: number[] = [];
   const lons: number[] = [];
   for (let i = 0; i < nums.length - 1; i += 2) {
-    lats.push(nums[i]);
-    lons.push(nums[i + 1]);
+    lons.push(nums[i]);
+    lats.push(nums[i + 1]);
   }
 
   return {
