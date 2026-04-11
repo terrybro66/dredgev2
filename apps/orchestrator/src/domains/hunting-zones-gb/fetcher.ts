@@ -16,6 +16,8 @@
  * or returned as a national sample (up to MAX_RESULTS) when not.
  */
 
+import { parsePoly } from "../../poly";
+
 const BASE_URL =
   "https://environment.data.gov.uk/arcgis/rest/services/NE/CRoW_Open_Access_Land/FeatureServer/0/query";
 
@@ -60,20 +62,13 @@ export async function fetchHuntingZones(
     f: "json",
   });
 
-  // When a polygon is provided, add a simple geometry envelope filter.
-  // The polygon string from the geocoder is space-separated lat/lon pairs;
-  // we derive a rough bbox from the min/max values.
+  // When a polygon is provided, add a geometry envelope filter.
+  // ArcGIS REST expects geometry as a JSON object string.
   if (poly && poly.trim()) {
-    const bbox = polyToBbox(poly);
-    if (bbox) {
-      params.set(
-        "geometry",
-        `${bbox.xmin},${bbox.ymin},${bbox.xmax},${bbox.ymax}`,
-      );
-      params.set("geometryType", "esriGeometryEnvelope");
-      params.set("spatialRel", "esriSpatialRelIntersects");
-      params.set("inSR", "4326");
-    }
+    params.set("geometry", parsePoly(poly).toArcGisEnvelope());
+    params.set("geometryType", "esriGeometryEnvelope");
+    params.set("spatialRel", "esriSpatialRelIntersects");
+    params.set("inSR", "4326");
   }
 
   const url = `${BASE_URL}?${params.toString()}`;
@@ -134,34 +129,3 @@ function featureToRow(feature: ArcGISFeature): HuntingZoneRow | null {
   };
 }
 
-/**
- * Extract a WGS84 bounding box from the geocoder polygon string.
- * The polygon format is a sequence of "lat lon" pairs joined by spaces.
- * Returns null if the string cannot be parsed.
- */
-function polyToBbox(
-  poly: string,
-): { xmin: number; ymin: number; xmax: number; ymax: number } | null {
-  const nums = poly
-    .replace(/[()POLYGON]/gi, "")
-    .split(/[\s,]+/)
-    .map(Number)
-    .filter((n) => !Number.isNaN(n));
-
-  if (nums.length < 4) return null;
-
-  // Alternate lat/lon pairs
-  const lats: number[] = [];
-  const lons: number[] = [];
-  for (let i = 0; i < nums.length - 1; i += 2) {
-    lons.push(nums[i]);
-    lats.push(nums[i + 1]);
-  }
-
-  return {
-    xmin: Math.min(...lons),
-    ymin: Math.min(...lats),
-    xmax: Math.max(...lons),
-    ymax: Math.max(...lats),
-  };
-}

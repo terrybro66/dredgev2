@@ -45,6 +45,16 @@ export interface CuratedSource {
   refreshPolicy: "realtime" | "daily" | "weekly" | "static";
   /** Maps source-specific field names to canonical query_results column names */
   fieldMap: Record<string, string>;
+  /**
+   * Optional: inject resolved lat/lon into the REST URL as query params.
+   * When present, the fetchData closure appends these before calling the API.
+   */
+  locationParams?: {
+    latParam: string;
+    lonParam: string;
+    radiusParam?: string;
+    radiusKm?: number;
+  };
 }
 
 export const CURATED_SOURCES: CuratedSource[] = [
@@ -92,6 +102,12 @@ export const CURATED_SOURCES: CuratedSource[] = [
       severityLevel: "extras.severityLevel",
       timeRaised: "date",
       eaRegionName: "extras.region",
+    },
+    locationParams: {
+      latParam: "lat",
+      lonParam: "long",
+      radiusParam: "dist",
+      radiusKm: 20,
     },
   },
 

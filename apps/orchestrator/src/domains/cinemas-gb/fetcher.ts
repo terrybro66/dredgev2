@@ -13,6 +13,8 @@
  * between retries only.
  */
 
+import { parsePoly } from "../../poly";
+
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 
 // Known chain name normalisations (lowercase match → display name)
@@ -50,11 +52,7 @@ export interface CinemaRow {
 
 function buildQuery(poly: string | null): string {
   if (poly) {
-    // Convert "lat1,lon1:lat2,lon2:..." to Overpass poly format "lat1 lon1 lat2 lon2 ..."
-    const polyStr = poly
-      .split(":")
-      .map((pair) => pair.replace(",", " "))
-      .join(" ");
+    const polyStr = parsePoly(poly).toOverpassPoly();
     return `
 [out:json][timeout:25];
 (

@@ -19,6 +19,7 @@ import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
 import { findCuratedSource, SearchStrategy } from "./curated-registry";
+import { parsePoly } from "./poly";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
@@ -492,7 +493,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               );
             }
 
-            const restUrl = source.url ?? "";
+            let restUrl = source.url ?? "";
+            if (source.locationParams && poly) {
+              const { lat, lon } = parsePoly(poly).centroid();
+              const params = new URLSearchParams();
+              params.set(source.locationParams.latParam, String(lat));
+              params.set(source.locationParams.lonParam, String(lon));
+              if (source.locationParams.radiusParam && source.locationParams.radiusKm) {
+                params.set(source.locationParams.radiusParam, String(source.locationParams.radiusKm));
+              }
+              restUrl = `${restUrl}?${params.toString()}`;
+            }
             const provider = createRestProvider({ url: restUrl });
             const rows = await provider.fetchRows();
             return tagRows(rows as Record<string, unknown>[], restUrl);
@@ -513,6 +524,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           if (!source.storeResults || rows.length === 0) return;
           await prismaClient.queryResult.createMany({
             data: (rows as Record<string, unknown>[]).map((row) => ({
+              query_id: queryId,
               domain_name: source.name,
               source_tag:
                 (row._sourceTag as string) ??
@@ -940,25 +952,25 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     if (isEphemeral || isShadowRecovery) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
-      if (adapter.config.tableName === "crime_results") {
+      if (adapter.config.spatialAggregation) {
         const bins = await prisma.$queryRaw<AggregatedBin[]>`
 SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
   SELECT
-    ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
+    ST_Centroid(ST_Collect(ST_MakePoint(lon, lat))) AS centroid,
     COUNT(*)::int AS count
-  FROM crime_results
+  FROM query_results
   WHERE query_id = ${queryRecord.id}
-    AND latitude IS NOT NULL
-    AND longitude IS NOT NULL
-  GROUP BY ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002)
+    AND lat IS NOT NULL
+    AND lon IS NOT NULL
+  GROUP BY ST_SnapToGrid(ST_MakePoint(lon, lat), 0.002)
 ) grouped
 `;
         storedResults = bins;
       } else {
-        // Generic path — reads from query_results using domain_name
+        // Generic path — reads from query_results filtered by query_id
         storedResults = await prisma.queryResult.findMany({
-          where: { domain_name: adapter.config.name },
+          where: { query_id: queryRecord.id },
           orderBy: { created_at: "desc" },
           take: 500,
         });
