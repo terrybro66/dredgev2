@@ -1,5 +1,5 @@
 import { DomainAdapter } from "../registry";
-import { fetchCrimes } from "./fetcher";
+import { fetchCrimes, normalizeCrimeCategory } from "./fetcher";
 import { storeResults } from "./store";
 import { recoverFromEmpty } from "./recovery";
 
@@ -21,6 +21,7 @@ export const crimeUkAdapter: DomainAdapter = {
     rateLimit: { requestsPerMinute: 30 },
     cacheTtlHours: null,
     temporality: "time-series" as const,
+    sourceLabel: "data.police.uk",
   },
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),
   flattenRow: (row: unknown) => row as Record<string, unknown>,
@@ -28,4 +29,8 @@ export const crimeUkAdapter: DomainAdapter = {
     storeResults(queryId, rows as any[], prisma),
   recoverFromEmpty: (plan: any, poly: string, prisma: any) =>
     recoverFromEmpty(plan, poly, prisma),
+  normalizePlan: (plan: any) => ({
+    ...plan,
+    category: normalizeCrimeCategory(plan.category),
+  }),
 };

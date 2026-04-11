@@ -131,12 +131,12 @@ describe("getLatestMonth", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(getLatestMonth("police-uk")).toBe("2025-10");
+    expect(await getLatestMonth("police-uk")).toBe("2025-10");
   });
 
   it("returns null when the source has never been loaded", async () => {
     const { getLatestMonth } = await import("../availability");
-    expect(getLatestMonth("never-loaded-source")).toBeNull();
+    expect(await getLatestMonth("never-loaded-source")).toBeNull();
   });
 
   it("returns null when the source was loaded but returned an empty array", async () => {
@@ -146,7 +146,28 @@ describe("getLatestMonth", () => {
 
     await loadAvailability("empty-source", POLICE_URL, (d) => d as string[]);
 
-    expect(getLatestMonth("empty-source")).toBeNull();
+    expect(await getLatestMonth("empty-source")).toBeNull();
+  });
+
+  it("F3: reads from Redis when in-memory cache is cold and returns correct month", async () => {
+    const { loadAvailability, getLatestMonth, clearInMemoryStore } =
+      await import("../availability");
+    mockedAxios.get.mockResolvedValue({ data: MOCK_MONTHS_UNSORTED });
+
+    // Load into both in-memory and Redis
+    await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
+
+    // Simulate server restart: clear only in-memory store, leave Redis intact
+    clearInMemoryStore();
+
+    // Should recover from Redis
+    expect(await getLatestMonth("police-uk")).toBe("2025-10");
+  });
+
+  it("F3: returns null on full cold miss (neither in-memory nor Redis has data)", async () => {
+    const { getLatestMonth } = await import("../availability");
+    // resetStore in beforeEach cleared both — source was never loaded
+    expect(await getLatestMonth("never-loaded-source")).toBeNull();
   });
 });
 
@@ -160,7 +181,7 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-09")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-09")).toBe(true);
   });
 
   it("returns false when the month is not in the loaded list", async () => {
@@ -170,12 +191,12 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-01")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "2025-01")).toBe(false);
   });
 
   it("returns true when the source has never been loaded (fail open)", async () => {
     const { isMonthAvailable } = await import("../availability");
-    expect(isMonthAvailable("unknown-source", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("unknown-source", "2025-10")).toBe(true);
   });
 
   it("returns true when the source was loaded with an empty list (fail open)", async () => {
@@ -185,7 +206,7 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-10")).toBe(true);
   });
 
   it("month string format must match exactly — 2025-10 does not match 2025-9 or october-2025", async () => {
@@ -195,9 +216,26 @@ describe("isMonthAvailable", () => {
 
     await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
 
-    expect(isMonthAvailable("police-uk", "2025-9")).toBe(false);
-    expect(isMonthAvailable("police-uk", "october-2025")).toBe(false);
-    expect(isMonthAvailable("police-uk", "2025-10")).toBe(true);
+    expect(await isMonthAvailable("police-uk", "2025-9")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "october-2025")).toBe(false);
+    expect(await isMonthAvailable("police-uk", "2025-10")).toBe(true);
+  });
+
+  it("F3: reads from Redis when in-memory cache is cold", async () => {
+    const { loadAvailability, isMonthAvailable, clearInMemoryStore } =
+      await import("../availability");
+    mockedAxios.get.mockResolvedValue({ data: ["2025-10", "2025-09"] });
+
+    // Load into both in-memory and Redis
+    await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
+
+    // Simulate server restart
+    clearInMemoryStore();
+
+    // Should recover from Redis — month is in list
+    expect(await isMonthAvailable("police-uk", "2025-09")).toBe(true);
+    // Month not in list should return false (not fail-open)
+    expect(await isMonthAvailable("police-uk", "2020-01")).toBe(false);
   });
 });
 

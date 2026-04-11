@@ -125,11 +125,6 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
       action: "calculate_travel",
       args: {},
     },
-    {
-      label: "Show nearby transport",
-      action: "fetch_domain",
-      args: { domain: "transport" },
-    },
   ],
   has_time_series: [
     {

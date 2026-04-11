@@ -133,11 +133,7 @@ export const weatherAdapter: DomainAdapter = {
   },
 
   async fetchData(plan: any): Promise<unknown[]> {
-    if (!process.env.OPENWEATHER_API_KEY) {
-      throw new Error(
-        "OPENWEATHER_API_KEY is not set. Add it to your .env file.",
-      );
-    }
+    // Open-Meteo is free / no key required — no env-var check needed.
 
     // plan.date_from may be YYYY-MM (from crime pipeline) or YYYY-MM-DD
     // Normalise to full dates for Open-Meteo

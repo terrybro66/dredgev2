@@ -17,6 +17,23 @@ import {
 } from "./components/QueryHistoryCarousel";
 import { useDredgeStore } from "./store";
 
+// ── Session ID ───────────────────────────────────────────────────────────────
+
+function getSessionId(): string {
+  const KEY = "dredge_session_id";
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
+const SESSION_HEADERS: Record<string, string> = {
+  "Content-Type": "application/json",
+  "x-session-id": getSessionId(),
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type VizHint = "map" | "bar" | "table" | "dashboard";
@@ -178,6 +195,9 @@ interface ExecuteResult {
   intent: string;
   chips?: Chip[];
   activeFilter?: { field: string; value: string };
+  source_label?: string | null;
+  data_freshness?: string | null;
+  empty_suggestion?: string | null;
 }
 
 interface IntentError {
@@ -936,28 +956,28 @@ export function EmptyResults({
   onRefine,
   resultContext,
   onFollowUp,
+  suggestion,
 }: {
   plan: QueryPlan;
   onRefine: () => void;
   resultContext: ResultContext;
   onFollowUp: (query: ExecuteBody) => void;
+  suggestion?: string | null;
 }) {
   return (
     <div className="empty-panel">
       <div className="empty-icon">○</div>
       <div className="empty-title">No results found</div>
       <p className="empty-message">
-        No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
-        {plan.date_from === plan.date_to
-          ? formatMonth(plan.date_from)
-          : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
-        .
+        {resultContext.reason
+          ? resultContext.reason
+          : <>No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
+            {plan.date_from === plan.date_to
+              ? formatMonth(plan.date_from)
+              : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}.</>}
       </p>
-      {resultContext.reason && (
-        <p className="empty-reason">{resultContext.reason}</p>
-      )}
       <p className="empty-hint">
-        Try adjusting the date range or rephrasing your query.
+        {suggestion ?? "Try adjusting the date range or rephrasing your query."}
       </p>
       <FollowUpChips
         followUps={resultContext.followUps}
@@ -1633,8 +1653,8 @@ function ResultRenderer({
   onFollowUp: (query: ExecuteBody) => void;
   onChipAction: (chip: Chip) => void;
 }) {
-  const { plan, viz_hint, count, months_fetched, results, resultContext } =
-    result;
+  const { plan, viz_hint, count, months_fetched, results, resultContext,
+    source_label, data_freshness, empty_suggestion } = result;
 
   const safeContext: ResultContext = resultContext ?? {
     status: "exact",
@@ -1651,8 +1671,8 @@ function ResultRenderer({
         <div className="result-summary">
           <span className="result-count">{count}</span>
           <span className="result-desc">
-            {result.intent === "weather"
-              ? `day${count !== 1 ? "s" : ""}`
+            {result.intent?.startsWith("weather") || plan.category?.startsWith("weather")
+              ? `day${count !== 1 ? "s" : ""} of weather data for ${plan.location}`
               : `${formatCategory(plan.category).toLowerCase()} result${count !== 1 ? "s" : ""}`}
           </span>
         </div>
@@ -1671,6 +1691,7 @@ function ResultRenderer({
           onRefine={onRefine}
           resultContext={safeContext}
           onFollowUp={onFollowUp}
+          suggestion={empty_suggestion}
         />
       ) : viz_hint === "dashboard" ? (
         <DashboardView results={results} />
@@ -1715,6 +1736,13 @@ function ResultRenderer({
       {count > 0 && chips.length > 0 && (
         <ActionChips chips={chips} onAction={onChipAction} />
       )}
+
+      {(source_label || data_freshness) && (
+        <div className="result-attribution">
+          {data_freshness && <span className="data-freshness">Last updated: {data_freshness}</span>}
+          {source_label && <span className="source-label">Source: {source_label}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1751,7 +1779,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/parse`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ text }),
       });
       const data = await res.json();
@@ -1797,7 +1825,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ ...(parseData as object), rawText: text }),
       });
       const data = await res.json();
@@ -1857,7 +1885,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify(query),
       });
       const data = await res.json();
@@ -1914,7 +1942,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify(body),
       });
       const data = await res.json();
@@ -2004,7 +2032,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({
             action: "fetch_domain",
             args: { domain: "cinema-showtimes", cinemaName, ref: chip.args.ref },
@@ -2048,7 +2076,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({ action: "calculate_travel", args: chip.args }),
         });
         const data = await res.json();
@@ -2071,7 +2099,7 @@ export default function App() {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: SESSION_HEADERS,
           body: JSON.stringify({ action: "fetch_domain", args: { domain: "hunting-day-plan" } }),
         });
         const data = await res.json();
@@ -2103,7 +2131,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}/query/workflow`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: SESSION_HEADERS,
         body: JSON.stringify({ workflow_id: workflowInput.workflow_id, inputs }),
       });
       const data = await res.json();
@@ -2242,7 +2270,7 @@ export default function App() {
                   {
                     method: "POST",
                     headers: {
-                      "Content-Type": "application/json",
+                      ...SESSION_HEADERS,
                       "x-user-id": "local-user",
                     },
                     body: JSON.stringify({

@@ -38,8 +38,8 @@ const MOCK_SMALLER_POLY = "52.0,0.0:52.05,0.05";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGetLatestMonth.mockReturnValue("2025-10");
-  mockIsMonthAvailable.mockReturnValue(false); // date_from not in availability → eligible
+  mockGetLatestMonth.mockResolvedValue("2025-10");
+  mockIsMonthAvailable.mockResolvedValue(false); // date_from not in availability → eligible
   mockFetchCrimes.mockResolvedValue(MOCK_CRIMES);
   mockGeocodeToPolygon.mockResolvedValue({ poly: MOCK_SMALLER_POLY });
 });
@@ -48,12 +48,12 @@ beforeEach(() => {
 
 describe("recoverWithLatestMonth", () => {
   it("returns null when getLatestMonth returns null (availability not loaded)", async () => {
-    mockGetLatestMonth.mockReturnValue(null);
+    mockGetLatestMonth.mockResolvedValue(null);
     expect(await recoverWithLatestMonth(MOCK_PLAN, MOCK_POLY)).toBeNull();
   });
 
   it("returns null when isMonthAvailable returns true for plan.date_from (month exists, just no data)", async () => {
-    mockIsMonthAvailable.mockReturnValue(true);
+    mockIsMonthAvailable.mockResolvedValue(true);
     expect(await recoverWithLatestMonth(MOCK_PLAN, MOCK_POLY)).toBeNull();
   });
 
@@ -163,7 +163,7 @@ describe("recoverFromEmpty", () => {
 
   it("when strategy 1 returns null and strategy 2 succeeds, returns strategy 2's result", async () => {
     // Make strategy 1 fail: mark month as available (no date substitution)
-    mockIsMonthAvailable.mockReturnValue(true);
+    mockIsMonthAvailable.mockResolvedValue(true);
 
     const result = await recoverFromEmpty(MOCK_PLAN, MOCK_POLY, MOCK_PRISMA);
     expect(result!.fallback.field).toBe("radius");
@@ -171,7 +171,7 @@ describe("recoverFromEmpty", () => {
   });
 
   it("when strategies 1 and 2 return null, strategy 3 succeeds and is returned", async () => {
-    mockIsMonthAvailable.mockReturnValue(true); // strategy 1 → null
+    mockIsMonthAvailable.mockResolvedValue(true); // strategy 1 → null
     mockGeocodeToPolygon.mockRejectedValue(new Error("no geocode")); // strategy 2 → null
 
     const result = await recoverFromEmpty(MOCK_PLAN, MOCK_POLY, MOCK_PRISMA);
@@ -179,7 +179,7 @@ describe("recoverFromEmpty", () => {
   });
 
   it("when all three strategies return null, returns null", async () => {
-    mockIsMonthAvailable.mockReturnValue(true); // strategy 1 → null
+    mockIsMonthAvailable.mockResolvedValue(true); // strategy 1 → null
     mockGeocodeToPolygon.mockRejectedValue(new Error("no geocode")); // strategy 2 → null
     const allCrimePlan = { ...MOCK_PLAN, category: "all-crime" as const }; // strategy 3 → null
 
@@ -189,7 +189,7 @@ describe("recoverFromEmpty", () => {
 
   it("strategies are always tried in order 1 → 2 → 3", async () => {
     // Force strategies 1 and 2 to return null, verify strategy 3 is reached
-    mockIsMonthAvailable.mockReturnValue(true);
+    mockIsMonthAvailable.mockResolvedValue(true);
     mockFetchCrimes
       .mockResolvedValueOnce([]) // strategy 2 fetch → null
       .mockResolvedValueOnce(MOCK_CRIMES); // strategy 3 fetch → success

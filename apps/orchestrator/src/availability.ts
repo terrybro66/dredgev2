@@ -60,11 +60,26 @@ export async function loadAvailability(
 /**
  * Returns the most recent month string for `source`, or `null` if the source
  * has never been loaded or was loaded with an empty array.
+ *
+ * On in-memory miss (e.g. after a server restart), reads from Redis and
+ * repopulates the in-memory store so subsequent calls are fast.
  */
-export function getLatestMonth(source: string): string | null {
+export async function getLatestMonth(source: string): Promise<string | null> {
   const months = store.get(source);
-  if (!months || months.length === 0) return null;
-  return months[0];
+  if (months && months.length > 0) return months[0];
+
+  // In-memory cache cold — try Redis
+  try {
+    const cached = await getAvailabilityCache().get(source);
+    if (cached && cached.length > 0) {
+      store.set(source, cached);
+      return cached[0];
+    }
+  } catch {
+    // Redis unavailable — fall through to null
+  }
+
+  return null;
 }
 
 // ── isMonthAvailable ──────────────────────────────────────────────────────────
@@ -73,9 +88,28 @@ export function getLatestMonth(source: string): string | null {
  * Returns `true` when `month` is in the loaded list for `source`.
  * Falls open: returns `true` when the source has never been loaded,
  * or when it was loaded with an empty array (assume available).
+ *
+ * On in-memory miss, reads from Redis before falling open.
  */
-export function isMonthAvailable(source: string, month: string): boolean {
-  const months = store.get(source);
+export async function isMonthAvailable(
+  source: string,
+  month: string,
+): Promise<boolean> {
+  let months = store.get(source);
+
+  if (!months) {
+    // In-memory cache cold — try Redis
+    try {
+      const cached = await getAvailabilityCache().get(source);
+      if (cached) {
+        store.set(source, cached);
+        months = cached;
+      }
+    } catch {
+      // Redis unavailable — fall open
+    }
+  }
+
   if (!months || months.length === 0) return true;
   return months.includes(month);
 }
@@ -101,6 +135,11 @@ interface AvailabilityCache {
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
+
+/** Clears only the in-memory store, leaving Redis untouched. For use in tests only (simulates server restart). */
+export function clearInMemoryStore(): void {
+  store.clear();
+}
 
 /** Resets all in-memory state. For use in tests only. */
 export async function resetStore(): Promise<void> {

@@ -26,6 +26,7 @@ export interface DomainAdapter {
     locationArg: string,
     prisma: any,
   ) => Promise<{ data: unknown[]; fallback: FallbackInfo } | null>;
+  normalizePlan?: (plan: any) => any;
   onLoad?: () => void | Promise<void>;
 }
 

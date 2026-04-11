@@ -129,7 +129,12 @@ export async function getQueryContext(
     const raw = await getRedisClient().get(ctxKey(sessionId));
     if (!raw) return null;
     return JSON.parse(raw) as QueryContext;
-  } catch {
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_read_error",
+      key: "QueryContext",
+      error: err instanceof Error ? err.message : String(err),
+    }));
     return null;
   }
 }
@@ -141,10 +146,22 @@ export async function setQueryContext(
   try {
     const clean = sanitiseContext(context);
     const serialised = JSON.stringify(clean);
-    if (!checkSize(serialised, MAX_CONTEXT_BYTES, "QueryContext")) return;
+    if (!checkSize(serialised, MAX_CONTEXT_BYTES, "QueryContext")) {
+      console.error(JSON.stringify({
+        event: "session_payload_too_large",
+        key: "QueryContext",
+        bytes: Buffer.byteLength(serialised, "utf8"),
+        limit: MAX_CONTEXT_BYTES,
+      }));
+      return;
+    }
     await getRedisClient().set(ctxKey(sessionId), serialised, "EX", SESSION_TTL_SECONDS);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "QueryContext",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }
 
@@ -180,8 +197,12 @@ export async function storeResultHandle(
     const redis = getRedisClient();
     await redis.hset(handlesKey(sessionId), handle.id, JSON.stringify(handle));
     await redis.expire(handlesKey(sessionId), SESSION_TTL_SECONDS);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "ResultHandle",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }
 
@@ -193,7 +214,12 @@ export async function getResultHandle(
     const raw = await getRedisClient().hget(handlesKey(sessionId), handleId);
     if (!raw) return null;
     return JSON.parse(raw) as ResultHandle;
-  } catch {
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_read_error",
+      key: "ResultHandle",
+      error: err instanceof Error ? err.message : String(err),
+    }));
     return null;
   }
 }
@@ -205,8 +231,12 @@ export async function deleteResultHandle(
 ): Promise<void> {
   try {
     await getRedisClient().hdel(handlesKey(sessionId), handleId);
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "ResultHandle.delete",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }
 
@@ -214,8 +244,12 @@ export async function deleteResultHandle(
 export async function clearResultHandles(sessionId: string): Promise<void> {
   try {
     await getRedisClient().del(handlesKey(sessionId));
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "ResultHandles.clear",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }
 
@@ -231,7 +265,12 @@ export async function getUserProfile(
     // Refresh TTL on every read
     await redis.expire(profileKey(userId), USER_PROFILE_TTL_SECONDS);
     return JSON.parse(raw) as UserProfile;
-  } catch {
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_read_error",
+      key: "UserProfile",
+      error: err instanceof Error ? err.message : String(err),
+    }));
     return null;
   }
 }
@@ -243,15 +282,27 @@ export async function setUserProfile(
   try {
     const clean = sanitiseProfile(profile);
     const serialised = JSON.stringify(clean);
-    if (!checkSize(serialised, MAX_PROFILE_BYTES, "UserProfile")) return;
+    if (!checkSize(serialised, MAX_PROFILE_BYTES, "UserProfile")) {
+      console.error(JSON.stringify({
+        event: "session_payload_too_large",
+        key: "UserProfile",
+        bytes: Buffer.byteLength(serialised, "utf8"),
+        limit: MAX_PROFILE_BYTES,
+      }));
+      return;
+    }
     await getRedisClient().set(
       profileKey(userId),
       serialised,
       "EX",
       USER_PROFILE_TTL_SECONDS,
     );
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "UserProfile",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }
 
@@ -357,7 +408,11 @@ export async function pushResultHandle(
     // Persist updated context (strip data from stack entries to keep context small)
     const stackMeta = stack.map((h) => ({ ...h, data: null }));
     await setQueryContext(sessionId, { ...ctx, result_stack: stackMeta });
-  } catch {
-    // non-fatal
+  } catch (err) {
+    console.warn(JSON.stringify({
+      event: "redis_write_error",
+      key: "pushResultHandle",
+      error: err instanceof Error ? err.message : String(err),
+    }));
   }
 }

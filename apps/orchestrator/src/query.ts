@@ -35,6 +35,68 @@ import { setUserLocation, getUserLocation } from "./session";
 import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
 
+// ── B2: Data freshness + source attribution helpers ───────────────────────────
+
+/**
+ * Derive the most recent date string from result rows.
+ * Returns "YYYY-MM" formatted as "Month YYYY" (e.g. "March 2025"), or null.
+ */
+function deriveDataFreshness(rows: Record<string, unknown>[]): string | null {
+  if (rows.length === 0) return null;
+  let latest: string | null = null;
+  for (const row of rows) {
+    const d = row["date"] ?? row["month"] ?? row["ratingDate"] ?? row["created_at"];
+    if (typeof d === "string" && d.length >= 7) {
+      const candidate = d.slice(0, 7); // YYYY-MM
+      if (!latest || candidate > latest) latest = candidate;
+    }
+  }
+  if (!latest) return null;
+  const [year, month] = latest.split("-");
+  const monthName = new Date(`${year}-${month}-01`).toLocaleString("en-GB", {
+    month: "long",
+    year: "numeric",
+  });
+  return monthName;
+}
+
+// ── B3: Empty state reason ────────────────────────────────────────────────────
+
+const CRIME_DATA_START = "2010-12";
+
+/**
+ * Classify why a query returned 0 rows so the frontend can show
+ * a meaningful message rather than a blank panel.
+ */
+function deriveEmptyReason(
+  plan: { date_from?: string; date_to?: string; category?: string; location?: string },
+  months: string[],
+): { code: string; message: string; suggestion: string } {
+  const dateFrom = plan.date_from ?? "";
+
+  if (dateFrom && dateFrom < CRIME_DATA_START) {
+    return {
+      code: "date_out_of_range",
+      message: `No data available before December 2010.`,
+      suggestion: `Try a date from December 2010 onwards.`,
+    };
+  }
+
+  if (months.length === 0) {
+    return {
+      code: "no_data_for_area",
+      message: `No data available for this area.`,
+      suggestion: `Try a nearby city or a different location.`,
+    };
+  }
+
+  return {
+    code: "no_results",
+    message: `No ${plan.category ?? "results"} found for this area and time period.`,
+    suggestion: `Try broadening your search — a larger area or different date range.`,
+  };
+}
+
 // ── Co-occurrence recording helper — D.13 ────────────────────────────────────
 //
 // Fire-and-forget — never throws, never blocks a response.
@@ -60,8 +122,14 @@ async function recordDomainCoOccurrence(
     // Push a lightweight marker so subsequent queries can see this domain
     const handle = createEphemeralHandle([], currentDomain);
     await pushResultHandle(sessionId, handle);
-  } catch {
-    // Non-fatal — co-occurrence failure must never affect the query response
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "co_occurrence_failed",
+        domain: currentDomain,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
 
@@ -151,8 +219,13 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
           }),
         );
       }
-    } catch {
-      // classifier failure is non-fatal — intent remains undefined, triggering discovery
+    } catch (err) {
+      console.warn(
+        JSON.stringify({
+          event: "semantic_classifier_failed",
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     }
   }
 
@@ -276,6 +349,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "public-order": "crime",
     "theft-from-the-person": "crime",
     "other-crime": "crime",
+    "weather forecast": "weather",
+    "weather data": "weather",
+    "temperature": "weather",
+    "forecast": "weather",
+    "precipitation": "weather",
   };
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
@@ -297,7 +375,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       if (domainDiscovery.isEnabled() && curatedSource.type !== "scrape") {
         domainDiscovery
           .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
-          .catch(() => {}); // non-fatal
+          .catch((err: unknown) => {
+            console.warn(JSON.stringify({
+              event: "discovery_run_failed",
+              intent: routingIntent ?? plan.category,
+              error: err instanceof Error ? err.message : String(err),
+            }));
+          });
       }
 
       // Build an on-the-fly adapter from the curated source
@@ -457,7 +541,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
             const provider = createRestProvider({ url: restUrl });
             const rows = await provider.fetchRows();
             return tagRows(rows as Record<string, unknown>[], restUrl);
-          } catch {
+          } catch (err) {
+            console.warn(
+              JSON.stringify({
+                event: "discovery_adapter_fetch_failed",
+                source: source.intent,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
             return [];
           }
         },
@@ -511,7 +602,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         // Non-blocking — don't await so the user gets a fast response
         domainDiscovery
           .run({ intent: discoveryIntent, country_code }, prisma)
-          .catch(() => {});
+          .catch((err: unknown) => {
+            console.warn(JSON.stringify({
+              event: "discovery_run_failed",
+              intent: discoveryIntent,
+              error: err instanceof Error ? err.message : String(err),
+            }));
+          });
       }
       return res.status(200).json({
         error: "not_supported",
@@ -614,6 +711,28 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
   }
 
+  // 2b. Normalize plan (e.g. category slug correction) before cache hash
+  if (adapter.normalizePlan) {
+    plan = adapter.normalizePlan(plan);
+  }
+
+  // 2c. Clamp date_to to the current month so future dates never hit APIs
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  if (plan.date_to > currentMonth) {
+    console.log(
+      JSON.stringify({
+        event: "date_clamped",
+        original_date_to: plan.date_to,
+        clamped_to: currentMonth,
+      }),
+    );
+    plan = { ...plan, date_to: currentMonth };
+  }
+  if (plan.date_from > currentMonth) {
+    plan = { ...plan, date_from: currentMonth };
+  }
+
   // 3. Compute deterministic cache hash (persistent adapters only)
   const hashInput = JSON.stringify({
     domain: adapter.config.name,
@@ -708,11 +827,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       },
     });
 
-    const resultContext: ResultContext = {
-      status: "exact",
-      followUps,
-      confidence: "high",
-    };
+    const cachedEmptyReason = cached.result_count === 0
+      ? deriveEmptyReason(plan, months)
+      : null;
+
+    const resultContext: ResultContext = cached.result_count === 0
+      ? { status: "empty", reason: cachedEmptyReason?.message, followUps, confidence: "low" }
+      : { status: "exact", followUps, confidence: "high" };
 
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
@@ -731,6 +852,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       aggregated,
       chips,
       resultContext,
+      source_label: adapter.config.sourceLabel ?? null,
+      data_freshness: deriveDataFreshness(cached.results as Record<string, unknown>[]),
+      empty_suggestion: cachedEmptyReason?.suggestion ?? null,
     });
   }
 
@@ -1005,12 +1129,19 @@ FROM (
       },
     });
 
+    const emptyReason = storedResults.length === 0
+      ? deriveEmptyReason(plan, effectiveMonths)
+      : null;
+
     const resultContext: ResultContext =
       storedResults.length === 0
-        ? { status: "empty", followUps, confidence: "low" }
+        ? { status: "empty", reason: emptyReason?.message, followUps, confidence: "low" }
         : fallback
           ? { status: "fallback", fallback, followUps, confidence: "medium" }
           : { status: "exact", followUps, confidence: "high" };
+
+    const data_freshness = deriveDataFreshness(storedResults as Record<string, unknown>[]);
+    const source_label = adapter.config.sourceLabel ?? null;
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
 
@@ -1027,6 +1158,9 @@ FROM (
       aggregated,
       chips,
       resultContext,
+      source_label,
+      data_freshness,
+      empty_suggestion: emptyReason?.suggestion ?? null,
     });
   } catch (err: any) {
     await prisma.queryJob.update({
