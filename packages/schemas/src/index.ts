@@ -182,6 +182,7 @@ export const DomainConfigSchema = z.object({
   cacheTtlHours: z.number().nonnegative().nullable().optional(),
   temporality: z.enum(["time-series", "static"]).optional(),
   spatialAggregation: z.boolean().optional(),
+  sourceLabel: z.string().optional(),
 });
 export type DomainConfig = z.infer<typeof DomainConfigSchema>;
 

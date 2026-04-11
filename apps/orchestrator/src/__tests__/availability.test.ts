@@ -148,6 +148,27 @@ describe("getLatestMonth", () => {
 
     expect(await getLatestMonth("empty-source")).toBeNull();
   });
+
+  it("F3: reads from Redis when in-memory cache is cold and returns correct month", async () => {
+    const { loadAvailability, getLatestMonth, clearInMemoryStore } =
+      await import("../availability");
+    mockedAxios.get.mockResolvedValue({ data: MOCK_MONTHS_UNSORTED });
+
+    // Load into both in-memory and Redis
+    await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
+
+    // Simulate server restart: clear only in-memory store, leave Redis intact
+    clearInMemoryStore();
+
+    // Should recover from Redis
+    expect(await getLatestMonth("police-uk")).toBe("2025-10");
+  });
+
+  it("F3: returns null on full cold miss (neither in-memory nor Redis has data)", async () => {
+    const { getLatestMonth } = await import("../availability");
+    // resetStore in beforeEach cleared both — source was never loaded
+    expect(await getLatestMonth("never-loaded-source")).toBeNull();
+  });
 });
 
 // ── isMonthAvailable ──────────────────────────────────────────────────────────
@@ -198,6 +219,23 @@ describe("isMonthAvailable", () => {
     expect(await isMonthAvailable("police-uk", "2025-9")).toBe(false);
     expect(await isMonthAvailable("police-uk", "october-2025")).toBe(false);
     expect(await isMonthAvailable("police-uk", "2025-10")).toBe(true);
+  });
+
+  it("F3: reads from Redis when in-memory cache is cold", async () => {
+    const { loadAvailability, isMonthAvailable, clearInMemoryStore } =
+      await import("../availability");
+    mockedAxios.get.mockResolvedValue({ data: ["2025-10", "2025-09"] });
+
+    // Load into both in-memory and Redis
+    await loadAvailability("police-uk", POLICE_URL, (d) => d as string[]);
+
+    // Simulate server restart
+    clearInMemoryStore();
+
+    // Should recover from Redis — month is in list
+    expect(await isMonthAvailable("police-uk", "2025-09")).toBe(true);
+    // Month not in list should return false (not fail-open)
+    expect(await isMonthAvailable("police-uk", "2020-01")).toBe(false);
   });
 });
 

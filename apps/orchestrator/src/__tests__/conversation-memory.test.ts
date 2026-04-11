@@ -370,3 +370,77 @@ describe("pushResultHandle", () => {
     expect(entry?.data).toBeNull();
   });
 });
+
+// ── A2: Redis failure logging ─────────────────────────────────────────────────
+
+describe("Redis failure logging (A2)", () => {
+  const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  beforeEach(() => {
+    warnSpy.mockClear();
+    errorSpy.mockClear();
+    mockRedis.get.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue("OK");
+  });
+
+  it("emits redis_read_error when getQueryContext Redis call throws", async () => {
+    mockRedis.get.mockRejectedValueOnce(new Error("ECONNRESET"));
+    await getQueryContext("session-fail");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"redis_read_error"'),
+    );
+    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(logged.key).toBe("QueryContext");
+    expect(logged.error).toContain("ECONNRESET");
+  });
+
+  it("emits redis_write_error when setQueryContext Redis call throws", async () => {
+    mockRedis.set.mockRejectedValueOnce(new Error("READONLY"));
+    await setQueryContext("session-fail", emptyContext());
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"redis_write_error"'),
+    );
+    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(logged.key).toBe("QueryContext");
+    expect(logged.error).toContain("READONLY");
+  });
+
+  it("emits session_payload_too_large when QueryContext exceeds size limit", async () => {
+    // Build a context that exceeds 64 KB
+    const bigFilters: Record<string, string> = {};
+    for (let i = 0; i < 20; i++) {
+      bigFilters[`key_${i}`] = "x".repeat(2_000);
+    }
+    const bigCtx = { ...emptyContext(), active_filters: bigFilters };
+    // Force the size check to fail by passing an oversized serialised context directly
+    // We'll do this by mocking Buffer.byteLength to return over the limit
+    const origByteLength = Buffer.byteLength.bind(Buffer);
+    vi.spyOn(Buffer, "byteLength").mockImplementationOnce(() => 65 * 1024);
+    await setQueryContext("session-big", bigCtx);
+    vi.restoreAllMocks();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"session_payload_too_large"'),
+    );
+  });
+
+  it("emits redis_read_error when getUserProfile Redis call throws", async () => {
+    mockRedis.get.mockRejectedValueOnce(new Error("ETIMEDOUT"));
+    await getUserProfile("user-fail");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"redis_read_error"'),
+    );
+    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(logged.key).toBe("UserProfile");
+  });
+
+  it("emits redis_write_error when setUserProfile Redis call throws", async () => {
+    mockRedis.set.mockRejectedValueOnce(new Error("OOM"));
+    await setUserProfile("user-fail", emptyProfile());
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"event":"redis_write_error"'),
+    );
+    const logged = JSON.parse(warnSpy.mock.calls[0][0] as string);
+    expect(logged.key).toBe("UserProfile");
+  });
+});

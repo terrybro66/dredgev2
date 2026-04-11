@@ -195,6 +195,9 @@ interface ExecuteResult {
   intent: string;
   chips?: Chip[];
   activeFilter?: { field: string; value: string };
+  source_label?: string | null;
+  data_freshness?: string | null;
+  empty_suggestion?: string | null;
 }
 
 interface IntentError {
@@ -953,28 +956,28 @@ export function EmptyResults({
   onRefine,
   resultContext,
   onFollowUp,
+  suggestion,
 }: {
   plan: QueryPlan;
   onRefine: () => void;
   resultContext: ResultContext;
   onFollowUp: (query: ExecuteBody) => void;
+  suggestion?: string | null;
 }) {
   return (
     <div className="empty-panel">
       <div className="empty-icon">○</div>
       <div className="empty-title">No results found</div>
       <p className="empty-message">
-        No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
-        {plan.date_from === plan.date_to
-          ? formatMonth(plan.date_from)
-          : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
-        .
+        {resultContext.reason
+          ? resultContext.reason
+          : <>No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
+            {plan.date_from === plan.date_to
+              ? formatMonth(plan.date_from)
+              : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}.</>}
       </p>
-      {resultContext.reason && (
-        <p className="empty-reason">{resultContext.reason}</p>
-      )}
       <p className="empty-hint">
-        Try adjusting the date range or rephrasing your query.
+        {suggestion ?? "Try adjusting the date range or rephrasing your query."}
       </p>
       <FollowUpChips
         followUps={resultContext.followUps}
@@ -1650,8 +1653,8 @@ function ResultRenderer({
   onFollowUp: (query: ExecuteBody) => void;
   onChipAction: (chip: Chip) => void;
 }) {
-  const { plan, viz_hint, count, months_fetched, results, resultContext } =
-    result;
+  const { plan, viz_hint, count, months_fetched, results, resultContext,
+    source_label, data_freshness, empty_suggestion } = result;
 
   const safeContext: ResultContext = resultContext ?? {
     status: "exact",
@@ -1688,6 +1691,7 @@ function ResultRenderer({
           onRefine={onRefine}
           resultContext={safeContext}
           onFollowUp={onFollowUp}
+          suggestion={empty_suggestion}
         />
       ) : viz_hint === "dashboard" ? (
         <DashboardView results={results} />
@@ -1731,6 +1735,13 @@ function ResultRenderer({
 
       {count > 0 && chips.length > 0 && (
         <ActionChips chips={chips} onAction={onChipAction} />
+      )}
+
+      {(source_label || data_freshness) && (
+        <div className="result-attribution">
+          {data_freshness && <span className="data-freshness">Last updated: {data_freshness}</span>}
+          {source_label && <span className="source-label">Source: {source_label}</span>}
+        </div>
       )}
     </div>
   );
@@ -2259,7 +2270,7 @@ export default function App() {
                   {
                     method: "POST",
                     headers: {
-                      "Content-Type": "application/json",
+                      ...SESSION_HEADERS,
                       "x-user-id": "local-user",
                     },
                     body: JSON.stringify({

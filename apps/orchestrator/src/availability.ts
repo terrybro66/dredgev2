@@ -132,6 +132,11 @@ interface AvailabilityCache {
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
+/** Clears only the in-memory store, leaving Redis untouched. For use in tests only (simulates server restart). */
+export function clearInMemoryStore(): void {
+  store.clear();
+}
+
 /** Resets all in-memory state. For use in tests only. */
 export async function resetStore(): Promise<void> {
   store.clear();

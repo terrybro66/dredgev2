@@ -22,6 +22,7 @@ export const crimeUkAdapter: DomainAdapter = {
     cacheTtlHours: null,
     temporality: "time-series" as const,
     spatialAggregation: true,
+    sourceLabel: "data.police.uk",
   },
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),
   flattenRow: (row: unknown) => row as Record<string, unknown>,
