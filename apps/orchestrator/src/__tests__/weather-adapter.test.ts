@@ -159,7 +159,7 @@ describe("weatherAdapter.fetchData", () => {
         temperature_2m_max: [10.1, 11.2, 9.8],
         temperature_2m_min: [4.1, 5.2, 3.8],
         precipitation_sum: [0.0, 2.1, 0.5],
-        windspeed_10m_max: [15.0, 20.0, 12.0],
+        wind_speed_10m_max: [15.0, 20.0, 12.0],
         weathercode: [1, 61, 2],
       },
     },
@@ -212,11 +212,8 @@ describe("weatherAdapter.fetchData", () => {
     expect(rows.length).toBe(3);
   });
 
-  it("throws a clear error when OPENWEATHER_API_KEY is missing", async () => {
-    delete process.env.OPENWEATHER_API_KEY;
-    await expect(weatherAdapter.fetchData(plan, "")).rejects.toThrow(
-      /OPENWEATHER_API_KEY/,
-    );
+  it.skip("throws a clear error when OPENWEATHER_API_KEY is missing", async () => {
+    // Open-Meteo is free and requires no API key — this test is no longer applicable
   });
 });
 
@@ -247,7 +244,7 @@ describe("weatherAdapter.recoverFromEmpty — date fallback", () => {
         temperature_2m_max: [10.1, 11.2, 9.8],
         temperature_2m_min: [4.1, 5.2, 3.8],
         precipitation_sum: [0.0, 2.1, 0.5],
-        windspeed_10m_max: [15.0, 20.0, 12.0],
+        wind_speed_10m_max: [15.0, 20.0, 12.0],
         weathercode: [1, 61, 2],
       },
     },
