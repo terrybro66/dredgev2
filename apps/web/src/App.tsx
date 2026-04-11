@@ -1668,8 +1668,8 @@ function ResultRenderer({
         <div className="result-summary">
           <span className="result-count">{count}</span>
           <span className="result-desc">
-            {result.intent === "weather"
-              ? `day${count !== 1 ? "s" : ""}`
+            {result.intent === "weather" || plan.category?.startsWith("weather")
+              ? `day${count !== 1 ? "s" : ""} of weather data for ${plan.location}`
               : `${formatCategory(plan.category).toLowerCase()} result${count !== 1 ? "s" : ""}`}
           </span>
         </div>

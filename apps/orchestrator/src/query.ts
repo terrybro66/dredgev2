@@ -220,16 +220,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   const memory = sessionId ? await loadMemory(sessionId) : null;
   const clickCounts = sessionId ? await getChipClickCounts(sessionId) : {};
 
-  // C.1 — Tier 2 refinement: if rawText narrows an active plan (e.g. "just
-  // vehicle crime"), replace plan with the merged plan before routing to the
-  // adapter. Chip-triggered re-executes have no rawText and are unaffected.
-  if (rawText && memory) {
-    const router = new QueryRouter();
-    const routeResult = await router.route(rawText, memory, prisma);
-    if (routeResult.type === "refinement") {
-      plan = routeResult.mergedPlan;
-    }
-  }
+  // C.1 — Tier 2 refinement: DISABLED — location_shift pattern fires on any
+  // "in [Place]" query regardless of domain change, corrupting plan dates with
+  // the previous active_plan's dates and producing wrong cache hashes.
+  // Deferred: add domain-match guard before applying refinement (see deferred.md D6)
+  // if (rawText && memory) {
+  //   const router = new QueryRouter();
+  //   const routeResult = await router.route(rawText, memory, prisma);
+  //   if (routeResult.type === "refinement") {
+  //     plan = routeResult.mergedPlan;
+  //   }
+  // }
 
   // 0. Clarification check — regulatory/eligibility intents return questions
   //    before any data fetch. Only run when the user has not yet answered;
@@ -306,6 +307,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "hunting zones": "hunting zones",
     "open access land": "hunting zones",
     "game management areas": "hunting zones",
+    "weather forecast": "weather",
+    "weather data": "weather",
+    "weather conditions": "weather",
+    "current weather": "weather",
+    "temperature": "weather",
+    "forecast": "weather",
+    "precipitation": "weather",
+    "climate": "weather",
   };
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
@@ -625,6 +634,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         poly,
         viz_hint,
         resolved_location,
+        intent: routingIntent ?? resolvedIntent ?? null,
         count: liveResults.length,
         months_fetched: months,
         results: liveResults,
@@ -759,6 +769,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       poly,
       viz_hint,
       resolved_location,
+      intent: routingIntent ?? resolvedIntent ?? null,
       count: cached.result_count,
       months_fetched: months,
       results: cached.results,
@@ -1054,6 +1065,7 @@ FROM (
       poly,
       viz_hint,
       resolved_location,
+      intent: routingIntent ?? resolvedIntent ?? null,
       count: storedResults.length,
       months_fetched: effectiveMonths,
       results: storedResults,
