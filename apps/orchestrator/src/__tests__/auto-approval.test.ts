@@ -177,7 +177,7 @@ describe("shouldAutoApprove — criteria evaluation", () => {
     ).toBe(true);
   });
 
-  it("returns false when confidence is exactly 0.9 (threshold is strictly greater than)", async () => {
+  it("returns true when confidence is exactly 0.9 (threshold is inclusive)", async () => {
     const { shouldAutoApprove } = await import("../agent/auto-approval");
 
     const result = shouldAutoApprove({
@@ -186,7 +186,7 @@ describe("shouldAutoApprove — criteria evaluation", () => {
       apiUrl: "https://environment.data.gov.uk/api",
     });
 
-    expect(result).toBe(false);
+    expect(result).toBe(true);
   });
 
   it("returns false when confidence is below 0.9", async () => {

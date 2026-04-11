@@ -17,7 +17,7 @@ import {
 } from "./components/QueryHistoryCarousel";
 import { useDredgeStore } from "./store";
 
-// ── Session ID ───────────────────────────────────────────────────────────────
+// ── Session ──────────────────────────────────────────────────────────────────
 
 function getSessionId(): string {
   const KEY = "dredge_session_id";
@@ -1021,7 +1021,7 @@ function MapView({
             count: b.count,
           }))
         : (results as CrimeResult[])
-            .map((c) => ({ ...c, lng: c.longitude, lat: c.latitude }))
+            .map((c) => ({ ...c, lng: (c.lon ?? c.longitude) as number, lat: (c.lat ?? c.latitude) as number }))
             .filter(
               (c) =>
                 c.lng != null &&
@@ -1671,7 +1671,7 @@ function ResultRenderer({
         <div className="result-summary">
           <span className="result-count">{count}</span>
           <span className="result-desc">
-            {result.intent?.startsWith("weather") || plan.category?.startsWith("weather")
+            {result.intent === "weather" || plan.category?.startsWith("weather")
               ? `day${count !== 1 ? "s" : ""} of weather data for ${plan.location}`
               : `${formatCategory(plan.category).toLowerCase()} result${count !== 1 ? "s" : ""}`}
           </span>

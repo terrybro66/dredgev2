@@ -3,6 +3,7 @@ import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
 import { huntingZonesGbAdapter } from "./hunting-zones-gb/index";
+import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
 import { createGenericAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
@@ -28,6 +29,13 @@ export interface DomainAdapter {
   ) => Promise<{ data: unknown[]; fallback: FallbackInfo } | null>;
   normalizePlan?: (plan: any) => any;
   onLoad?: () => void | Promise<void>;
+  /**
+   * Optional: normalise a raw parsed plan before it is used for cache hashing,
+   * fetching, and storage.  Adapters that need to map LLM-returned category
+   * strings to canonical API slugs (e.g. crime-uk) implement this so that
+   * "crime statistics" and "all-crime" share the same cache key.
+   */
+  normalizePlan?: (plan: any) => any;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -63,6 +71,7 @@ export async function loadDomains(): Promise<void> {
     weatherAdapter,
     cinemasGbAdapter,
     huntingZonesGbAdapter,
+    foodHygieneGbAdapter,
     geocoderAdapter,
     travelEstimatorAdapter,
   ];

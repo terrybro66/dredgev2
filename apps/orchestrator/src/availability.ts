@@ -61,57 +61,53 @@ export async function loadAvailability(
  * Returns the most recent month string for `source`, or `null` if the source
  * has never been loaded or was loaded with an empty array.
  *
- * On in-memory miss (e.g. after a server restart), reads from Redis and
- * repopulates the in-memory store so subsequent calls are fast.
+ * Checks Redis when the in-memory map is empty (e.g. after a restart where
+ * loadAvailability failed but a prior run populated Redis).
  */
 export async function getLatestMonth(source: string): Promise<string | null> {
-  const months = store.get(source);
-  if (months && months.length > 0) return months[0];
-
-  // In-memory cache cold — try Redis
-  try {
-    const cached = await getAvailabilityCache().get(source);
-    if (cached && cached.length > 0) {
-      store.set(source, cached);
-      return cached[0];
-    }
-  } catch {
-    // Redis unavailable — fall through to null
+  let months = store.get(source);
+  if (!months || months.length === 0) {
+    months = await tryRestoreFromRedis(source);
   }
-
-  return null;
+  if (!months || months.length === 0) return null;
+  return months[0];
 }
 
 // ── isMonthAvailable ──────────────────────────────────────────────────────────
 
 /**
  * Returns `true` when `month` is in the loaded list for `source`.
- * Falls open: returns `true` when the source has never been loaded,
- * or when it was loaded with an empty array (assume available).
- *
- * On in-memory miss, reads from Redis before falling open.
+ * Falls open: returns `true` when the source has never been loaded
+ * AND Redis has no cached copy (assume available).
  */
-export async function isMonthAvailable(
-  source: string,
-  month: string,
-): Promise<boolean> {
+export async function isMonthAvailable(source: string, month: string): Promise<boolean> {
   let months = store.get(source);
-
-  if (!months) {
-    // In-memory cache cold — try Redis
-    try {
-      const cached = await getAvailabilityCache().get(source);
-      if (cached) {
-        store.set(source, cached);
-        months = cached;
-      }
-    } catch {
-      // Redis unavailable — fall open
-    }
+  if (!months || months.length === 0) {
+    months = await tryRestoreFromRedis(source);
   }
-
   if (!months || months.length === 0) return true;
   return months.includes(month);
+}
+
+/**
+ * Attempt to re-populate the in-memory store from the Redis cache.
+ * Returns the months array or null if Redis has nothing.
+ */
+async function tryRestoreFromRedis(source: string): Promise<string[] | null> {
+  try {
+    const cache = getAvailabilityCache();
+    const months = await cache.get(source);
+    if (months && months.length > 0) {
+      store.set(source, months);
+      console.log(
+        JSON.stringify({ event: "availability_restored_from_redis", source, count: months.length }),
+      );
+      return months;
+    }
+  } catch {
+    // Redis unavailable — fall through
+  }
+  return null;
 }
 
 // ── getAvailableMonths ────────────────────────────────────────────────────────

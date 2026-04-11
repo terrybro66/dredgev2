@@ -21,6 +21,7 @@ export const crimeUkAdapter: DomainAdapter = {
     rateLimit: { requestsPerMinute: 30 },
     cacheTtlHours: null,
     temporality: "time-series" as const,
+    spatialAggregation: true,
     sourceLabel: "data.police.uk",
   },
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),

@@ -65,6 +65,7 @@ export const cinemasGbAdapter: DomainAdapter = {
     const flat = rows.map((r) => cinemasGbAdapter.flattenRow(r));
     await prisma.queryResult.createMany({
       data: flat.map((row) => ({
+        query_id:     queryId,
         domain_name:  "cinemas-gb",
         source_tag:   "openstreetmap",
         date:         null,

@@ -134,6 +134,23 @@ app.get("/health", (_req, res) => {
 async function start() {
   await loadDomains();
 
+  // Load police API availability so the date-fallback recovery in crime-uk
+  // can shift queries to the latest published month when recent data is missing.
+  // Awaited so the cache is populated before traffic arrives.
+  const { loadAvailability } = await import("./availability");
+  try {
+    await loadAvailability(
+      "police-uk",
+      "https://data.police.uk/api/crimes-street-dates",
+      (data) => (data as Array<{ date: string }>).map((d) => d.date),
+    );
+  } catch {
+    // Non-fatal — server starts fine, recovery just won't shift dates
+    console.warn(
+      JSON.stringify({ event: "police_availability_load_failed" }),
+    );
+  }
+
   // Register regulatory adapters (D.4/D.5/D.11)
   const { registerRegulatoryAdapter } = await import("./regulatory-adapter");
   const { foodBusinessGbAdapter } =

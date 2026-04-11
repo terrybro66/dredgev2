@@ -19,6 +19,7 @@ import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
 import { findCuratedSource, SearchStrategy } from "./curated-registry";
+import { parsePoly } from "./poly";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
@@ -29,9 +30,16 @@ import {
   getQueryContext,
   pushResultHandle,
   createEphemeralHandle,
+  loadMemory,
 } from "./conversation-memory";
 import { recordCoOccurrence } from "./co-occurrence-log";
-import { setUserLocation, getUserLocation } from "./session";
+import {
+  setUserLocation,
+  getUserLocation,
+  recordChipClick,
+  getChipClickCounts,
+} from "./session";
+import { QueryRouter } from "./query-router";
 import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
 
@@ -266,7 +274,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   }
 
   const {
-    plan,
     poly,
     viz_hint,
     resolved_location,
@@ -276,10 +283,28 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     rawText,
     user_attributes,
   } = bodyResult.data;
+  let plan = bodyResult.data.plan;
 
   const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
   const userAttributes = user_attributes ?? {};
   const clarificationText = rawText ?? intent ?? plan.category ?? "";
+
+  // Load session memory once — used for Tier 2 refinement (C.1) and chip
+  // ranking (C.4/C.8). Non-blocking guard: only when sessionId is present.
+  const memory = sessionId ? await loadMemory(sessionId) : null;
+  const clickCounts = sessionId ? await getChipClickCounts(sessionId) : {};
+
+  // C.1 — Tier 2 refinement: DISABLED — location_shift pattern fires on any
+  // "in [Place]" query regardless of domain change, corrupting plan dates with
+  // the previous active_plan's dates and producing wrong cache hashes.
+  // Deferred: add domain-match guard before applying refinement (see deferred.md D6)
+  // if (rawText && memory) {
+  //   const router = new QueryRouter();
+  //   const routeResult = await router.route(rawText, memory, prisma);
+  //   if (routeResult.type === "refinement") {
+  //     plan = routeResult.mergedPlan;
+  //   }
+  // }
 
   // 0. Clarification check — regulatory/eligibility intents return questions
   //    before any data fetch. Only run when the user has not yet answered;
@@ -349,11 +374,30 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "public-order": "crime",
     "theft-from-the-person": "crime",
     "other-crime": "crime",
+    "crime statistics": "crime",
+    "cinema listings": "cinemas",
+    "cinema showtimes": "cinemas",
+    "films showing": "cinemas",
+    "hunting zones": "hunting zones",
+    "open access land": "hunting zones",
+    "game management areas": "hunting zones",
     "weather forecast": "weather",
     "weather data": "weather",
+    "weather conditions": "weather",
+    "current weather": "weather",
     "temperature": "weather",
     "forecast": "weather",
     "precipitation": "weather",
+    "climate": "weather",
+    "food businesses": "food hygiene",
+    "food business registrations": "food hygiene",
+    "food hygiene ratings": "food hygiene",
+    "food hygiene": "food hygiene",
+    "food safety": "food hygiene",
+    "food establishments": "food hygiene",
+    "restaurants": "food hygiene",
+    "takeaways": "food hygiene",
+    "cafes": "food hygiene",
   };
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
@@ -537,7 +581,17 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               );
             }
 
-            const restUrl = source.url ?? "";
+            let restUrl = source.url ?? "";
+            if (source.locationParams && poly) {
+              const { lat, lon } = parsePoly(poly).centroid();
+              const params = new URLSearchParams();
+              params.set(source.locationParams.latParam, String(lat));
+              params.set(source.locationParams.lonParam, String(lon));
+              if (source.locationParams.radiusParam && source.locationParams.radiusKm) {
+                params.set(source.locationParams.radiusParam, String(source.locationParams.radiusKm));
+              }
+              restUrl = `${restUrl}?${params.toString()}`;
+            }
             const provider = createRestProvider({ url: restUrl });
             const rows = await provider.fetchRows();
             return tagRows(rows as Record<string, unknown>[], restUrl);
@@ -565,6 +619,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           if (!source.storeResults || rows.length === 0) return;
           await prismaClient.queryResult.createMany({
             data: (rows as Record<string, unknown>[]).map((row) => ({
+              query_id: queryId,
               domain_name: source.name,
               source_tag:
                 (row._sourceTag as string) ??
@@ -629,6 +684,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     }
   }
 
+  // 1d. Normalise plan via adapter — ensures LLM category variants ("crime
+  //     statistics") map to canonical API slugs before cache hashing and fetching.
+  if (adapter.normalizePlan) {
+    plan = adapter.normalizePlan(plan);
+  }
+
   // 2. Ephemeral adapters bypass cache, storage and snapshots entirely
   const isEphemeral = adapter.config.storeResults === false;
 
@@ -686,6 +747,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         poly,
         viz_hint,
         resolved_location,
+        intent: routingIntent ?? resolvedIntent ?? null,
         count: liveResults.length,
         months_fetched: months,
         results: liveResults,
@@ -816,15 +878,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       domain: adapter.config.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
-      memory: {
-        context: {
-          location: null,
-          active_plan: plan,
-          result_stack: [],
-          active_filters: {},
-        },
+      memory: memory ?? {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
         profile: { user_attributes: {}, location_history: [] },
       },
+      clickCounts,
     });
 
     const cachedEmptyReason = cached.result_count === 0
@@ -838,6 +896,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    if (sessionId) {
+      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+    }
 
     return res.json({
       query_id: queryRecord.id,
@@ -845,6 +906,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       poly,
       viz_hint,
       resolved_location,
+      intent: routingIntent ?? resolvedIntent ?? null,
       count: cached.result_count,
       months_fetched: months,
       results: cached.results,
@@ -1018,25 +1080,25 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     if (isEphemeral || isShadowRecovery) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
-      if (adapter.config.tableName === "crime_results") {
+      if (adapter.config.spatialAggregation) {
         const bins = await prisma.$queryRaw<AggregatedBin[]>`
 SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
   SELECT
-    ST_Centroid(ST_Collect(ST_MakePoint(longitude, latitude))) AS centroid,
+    ST_Centroid(ST_Collect(ST_MakePoint(lon, lat))) AS centroid,
     COUNT(*)::int AS count
-  FROM crime_results
+  FROM query_results
   WHERE query_id = ${queryRecord.id}
-    AND latitude IS NOT NULL
-    AND longitude IS NOT NULL
-  GROUP BY ST_SnapToGrid(ST_MakePoint(longitude, latitude), 0.002)
+    AND lat IS NOT NULL
+    AND lon IS NOT NULL
+  GROUP BY ST_SnapToGrid(ST_MakePoint(lon, lat), 0.002)
 ) grouped
 `;
         storedResults = bins;
       } else {
-        // Generic path — reads from query_results using domain_name
+        // Generic path — reads from query_results filtered by query_id
         storedResults = await prisma.queryResult.findMany({
-          where: { domain_name: adapter.config.name },
+          where: { query_id: queryRecord.id },
           orderBy: { created_at: "desc" },
           take: 500,
         });
@@ -1118,15 +1180,11 @@ FROM (
       domain: adapter.config.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
-      memory: {
-        context: {
-          location: null,
-          active_plan: plan,
-          result_stack: [],
-          active_filters: {},
-        },
+      memory: memory ?? {
+        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
         profile: { user_attributes: {}, location_history: [] },
       },
+      clickCounts,
     });
 
     const emptyReason = storedResults.length === 0
@@ -1144,6 +1202,9 @@ FROM (
     const source_label = adapter.config.sourceLabel ?? null;
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    if (sessionId) {
+      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+    }
 
     return res.json({
       query_id: queryRecord.id,
@@ -1151,6 +1212,7 @@ FROM (
       poly,
       viz_hint,
       resolved_location,
+      intent: routingIntent ?? resolvedIntent ?? null,
       count: storedResults.length,
       months_fetched: effectiveMonths,
       results: storedResults,
@@ -1210,6 +1272,11 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
   }
 
   const { action, args, sessionId } = parsed.data;
+
+  // C.8 — record this chip click so chip ranking improves over the session
+  if (sessionId) {
+    recordChipClick(sessionId, action).catch(() => {});
+  }
 
   // ── fetch_domain: cinema-showtimes ────────────────────────────────────────
   if (action === "fetch_domain" && args.domain === "cinema-showtimes") {

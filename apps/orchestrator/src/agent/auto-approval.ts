@@ -27,14 +27,14 @@ function isGovernmentDomain(url: string): boolean {
 
 export function shouldAutoApprove(input: AutoApprovalInput): boolean {
   return (
-    input.confidence > AUTO_APPROVAL_CONFIDENCE_THRESHOLD &&
+    input.confidence >= AUTO_APPROVAL_CONFIDENCE_THRESHOLD &&
     input.providerType === "rest" &&
     isGovernmentDomain(input.apiUrl)
   );
 }
 
 export function autoApprovalReason(input: AutoApprovalInput): string {
-  if (input.confidence <= AUTO_APPROVAL_CONFIDENCE_THRESHOLD) {
+  if (input.confidence < AUTO_APPROVAL_CONFIDENCE_THRESHOLD) {
     return `Confidence ${input.confidence} does not exceed threshold ${AUTO_APPROVAL_CONFIDENCE_THRESHOLD}`;
   }
   if (input.providerType !== "rest") {

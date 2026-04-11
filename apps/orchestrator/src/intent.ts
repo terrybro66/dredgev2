@@ -60,6 +60,9 @@ const TABLE_ONLY_INTENTS = new Set([
   "cinema listings",
   "transport",
   "population statistics",
+  "food hygiene",
+  "food businesses",
+  "food business registrations",
 ]);
 
 export function deriveVizHint(
@@ -67,7 +70,7 @@ export function deriveVizHint(
   rawText: string,
   intent = "unknown",
 ): VizHint {
-  if (intent === "weather" || plan.category === "weather") return "dashboard";
+  if (intent === "weather" || plan.category.startsWith("weather")) return "dashboard";
   if (TABLE_ONLY_INTENTS.has(intent) || TABLE_ONLY_INTENTS.has(plan.category)) return "table";
   const lower = rawText.toLowerCase();
   if (
@@ -134,7 +137,24 @@ export async function parseIntent(rawText: string): Promise<QueryPlan> {
   const result = QueryPlanSchema.safeParse(parsed);
 
   if (result.success) {
-    return result.data;
+    const plan = result.data;
+
+    // Weather-specific date override: when the LLM defaulted to lastMonth
+    // (i.e. user didn't specify a date), use the current month instead.
+    // The weather adapter will then fetch from today → today+6 for current-month queries.
+    if (plan.category.startsWith("weather")) {
+      const now = new Date();
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}`;
+      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+      if (plan.date_from === lastMonthStr && plan.date_to === lastMonthStr) {
+        plan.date_from = currentMonthStr;
+        plan.date_to = currentMonthStr;
+      }
+    }
+
+    return plan;
   }
 
   // Build structured IntentError with understood/missing fields
