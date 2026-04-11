@@ -3,6 +3,7 @@ import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
 import { huntingZonesGbAdapter } from "./hunting-zones-gb/index";
+import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
 import { createGenericAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
@@ -69,6 +70,7 @@ export async function loadDomains(): Promise<void> {
     weatherAdapter,
     cinemasGbAdapter,
     huntingZonesGbAdapter,
+    foodHygieneGbAdapter,
     geocoderAdapter,
     travelEstimatorAdapter,
   ];

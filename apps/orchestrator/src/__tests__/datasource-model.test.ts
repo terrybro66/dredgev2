@@ -403,10 +403,10 @@ describe("loadDomains() — DataSource seeding", () => {
     await loadDomains();
 
     // upsert should be called exactly once per domain per invocation.
-    // With 6 built-in adapters (crime-uk, weather, cinemas-gb, hunting-zones-gb,
-    // geocoder, travel-estimator) × 2 calls = 12 upserts.
+    // With 7 built-in adapters (crime-uk, weather, cinemas-gb, hunting-zones-gb,
+    // food-hygiene-gb, geocoder, travel-estimator) × 2 calls = 14 upserts.
     // Crucially, NOT creates — which would cause a unique constraint error on a real DB.
-    expect(mockDataSourceUpsert).toHaveBeenCalledTimes(12);
+    expect(mockDataSourceUpsert).toHaveBeenCalledTimes(14);
   });
 
   it("calls onLoad on adapters that define it", async () => {

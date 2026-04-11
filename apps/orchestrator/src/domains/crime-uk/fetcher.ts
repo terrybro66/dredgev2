@@ -80,31 +80,12 @@ export async function fetchCrimesForMonth(
   const category = normalizeCrimeCategory(plan.category);
   const url = `${POLICE_API_BASE}/crimes-street/${category}`;
 
-  console.log(
-    JSON.stringify({
-      event: "police_api_request",
-      url,
-      category,
-      month,
-      poly_points: points.length,
-    }),
-  );
-
   try {
     const response = await axios.get(url, {
       params: { date: month, poly },
     });
 
     const rows = z.array(PoliceCrimeSchema).safeParse(response.data).data ?? [];
-    console.log(
-      JSON.stringify({
-        event: "police_api_response",
-        category,
-        month,
-        status: response.status,
-        rows_returned: rows.length,
-      }),
-    );
     return rows;
   } catch (err: any) {
     if (err?.response?.status === 404) {

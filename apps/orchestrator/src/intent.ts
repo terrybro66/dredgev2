@@ -60,6 +60,9 @@ const TABLE_ONLY_INTENTS = new Set([
   "cinema listings",
   "transport",
   "population statistics",
+  "food hygiene",
+  "food businesses",
+  "food business registrations",
 ]);
 
 export function deriveVizHint(

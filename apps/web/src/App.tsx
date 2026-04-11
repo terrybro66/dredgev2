@@ -1018,7 +1018,7 @@ function MapView({
             count: b.count,
           }))
         : (results as CrimeResult[])
-            .map((c) => ({ ...c, lng: c.longitude, lat: c.latitude }))
+            .map((c) => ({ ...c, lng: (c.lon ?? c.longitude) as number, lat: (c.lat ?? c.latitude) as number }))
             .filter(
               (c) =>
                 c.lng != null &&

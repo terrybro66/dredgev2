@@ -57,7 +57,7 @@ export async function fetchHuntingZones(
     where: "1=1",
     outFields: "OBJECTID,NAME,COUNTY,CATEGORY,Shape_Area",
     outSR: "4326",
-    returnCentroid: "true",
+    returnGeometry: "true",
     resultRecordCount: String(MAX_RESULTS),
     f: "json",
   });
@@ -82,6 +82,7 @@ export async function fetchHuntingZones(
   }
 
   const json = (await res.json()) as ArcGISResponse;
+  console.log(JSON.stringify({ event: "arcgis_response", error: json.error ?? null, features: json.features?.length ?? 0 }));
   if (json.error) {
     throw new Error(`NE ArcGIS API error: ${json.error.message ?? "unknown"}`);
   }

@@ -482,7 +482,7 @@ function LegacyMapView({ results }: { results: Record<string, unknown>[] }) {
   const points = useMemo(
     () =>
       results
-        .map((c) => ({ ...c, lng: c.longitude, lat: c.latitude }))
+        .map((c) => ({ ...c, lng: (c.lon ?? c.longitude) as number, lat: (c.lat ?? c.latitude) as number }))
         .filter(
           (c) =>
             c.lng != null &&

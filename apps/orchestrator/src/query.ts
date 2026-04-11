@@ -316,6 +316,15 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     "forecast": "weather",
     "precipitation": "weather",
     "climate": "weather",
+    "food businesses": "food hygiene",
+    "food business registrations": "food hygiene",
+    "food hygiene ratings": "food hygiene",
+    "food hygiene": "food hygiene",
+    "food safety": "food hygiene",
+    "food establishments": "food hygiene",
+    "restaurants": "food hygiene",
+    "takeaways": "food hygiene",
+    "cafes": "food hygiene",
   };
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
