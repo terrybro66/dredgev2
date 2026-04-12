@@ -42,6 +42,8 @@ import {
 import { QueryRouter } from "./query-router";
 import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
+import { generateInsight } from "./insight";
+import { CATEGORY_TO_INTENT, normalizeToDomainSlug } from "./domain-slug";
 
 // ── B2: Data freshness + source attribution helpers ───────────────────────────
 
@@ -294,17 +296,55 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   const memory = sessionId ? await loadMemory(sessionId) : null;
   const clickCounts = sessionId ? await getChipClickCounts(sessionId) : {};
 
-  // C.1 — Tier 2 refinement: DISABLED — location_shift pattern fires on any
-  // "in [Place]" query regardless of domain change, corrupting plan dates with
-  // the previous active_plan's dates and producing wrong cache hashes.
-  // Deferred: add domain-match guard before applying refinement (see deferred.md D6)
-  // if (rawText && memory) {
-  //   const router = new QueryRouter();
-  //   const routeResult = await router.route(rawText, memory, prisma);
-  //   if (routeResult.type === "refinement") {
-  //     plan = routeResult.mergedPlan;
-  //   }
-  // }
+  // C.1 — Tier 2 refinement: domain-match guard
+  //
+  // Only apply refinement when the incoming query is in the same domain as the
+  // active plan. Without this guard, "flood risk in York" after "crime in
+  // Manchester" triggers location_shift and produces a corrupted crime plan.
+  //
+  // Guard logic:
+  //   1. Normalise both the incoming intent and the active plan's category to a
+  //      canonical domain slug via CATEGORY_TO_INTENT.
+  //   2. If slugs differ → skip refinement, clear active_plan (cross-domain fresh start).
+  //   3. If slugs match → run QueryRouter; apply mergedPlan on refinement result.
+  //   4. On fresh_query with clearActivePlan → clear active_plan in session.
+  if (rawText && memory) {
+    const activePlan = memory.context.active_plan;
+    if (activePlan) {
+      const incomingSlug = normalizeToDomainSlug(intent, plan.category);
+      const activeSlug = normalizeToDomainSlug(undefined, activePlan.category);
+
+      if (incomingSlug === activeSlug) {
+        const router = new QueryRouter();
+        const routeResult = await router.route(rawText, memory, prisma);
+        if (routeResult.type === "refinement") {
+          plan = routeResult.mergedPlan;
+          console.log(
+            JSON.stringify({ event: "refinement_applied", rawText, incomingSlug }),
+          );
+        } else if (
+          routeResult.type === "fresh_query" &&
+          routeResult.clearActivePlan &&
+          sessionId
+        ) {
+          updateQueryContext(sessionId, { active_plan: null }).catch(() => {});
+        }
+      } else {
+        // Cross-domain query — clear stale active_plan so it doesn't bleed
+        // into subsequent refinements.
+        console.log(
+          JSON.stringify({
+            event: "refinement_skipped_cross_domain",
+            incoming: incomingSlug,
+            active: activeSlug,
+          }),
+        );
+        if (sessionId) {
+          updateQueryContext(sessionId, { active_plan: null }).catch(() => {});
+        }
+      }
+    }
+  }
 
   // 0. Clarification check — regulatory/eligibility intents return questions
   //    before any data fetch. Only run when the user has not yet answered;
@@ -354,51 +394,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   // Map crime subcategories to the registered intent slug.
   // The LLM returns "burglary" as category but the registry uses "crime".
   // Similarly, LLM variants of other intents are normalised here.
-  const CATEGORY_TO_INTENT: Record<string, string> = {
-    burglary: "crime",
-    "all-crime": "crime",
-    drugs: "crime",
-    robbery: "crime",
-    "violent-crime": "crime",
-    "bicycle-theft": "crime",
-    "anti-social-behaviour": "crime",
-    "vehicle-crime": "crime",
-    flooding: "flood risk",
-    "flood warnings": "flood risk",
-    "flood alerts": "flood risk",
-    "flood risk": "flood risk",
-    shoplifting: "crime",
-    "criminal-damage-arson": "crime",
-    "other-theft": "crime",
-    "possession-of-weapons": "crime",
-    "public-order": "crime",
-    "theft-from-the-person": "crime",
-    "other-crime": "crime",
-    "crime statistics": "crime",
-    "cinema listings": "cinemas",
-    "cinema showtimes": "cinemas",
-    "films showing": "cinemas",
-    "hunting zones": "hunting zones",
-    "open access land": "hunting zones",
-    "game management areas": "hunting zones",
-    "weather forecast": "weather",
-    "weather data": "weather",
-    "weather conditions": "weather",
-    "current weather": "weather",
-    "temperature": "weather",
-    "forecast": "weather",
-    "precipitation": "weather",
-    "climate": "weather",
-    "food businesses": "food hygiene",
-    "food business registrations": "food hygiene",
-    "food hygiene ratings": "food hygiene",
-    "food hygiene": "food hygiene",
-    "food safety": "food hygiene",
-    "food establishments": "food hygiene",
-    "restaurants": "food hygiene",
-    "takeaways": "food hygiene",
-    "cafes": "food hygiene",
-  };
+  // (Map is defined in domain-slug.ts and imported at module scope.)
   const routingIntent =
     CATEGORY_TO_INTENT[resolvedIntent ?? ""] ?? resolvedIntent;
 
@@ -895,6 +891,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
+    const insight = await generateInsight(
+      cached.results as Record<string, unknown>[],
+      plan,
+      adapter.config.name,
+    );
+
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
@@ -917,6 +919,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       source_label: adapter.config.sourceLabel ?? null,
       data_freshness: deriveDataFreshness(cached.results as Record<string, unknown>[]),
       empty_suggestion: cachedEmptyReason?.suggestion ?? null,
+      insight,
     });
   }
 
@@ -1201,6 +1204,12 @@ FROM (
     const data_freshness = deriveDataFreshness(storedResults as Record<string, unknown>[]);
     const source_label = adapter.config.sourceLabel ?? null;
 
+    const insight = await generateInsight(
+      storedResults as Record<string, unknown>[],
+      plan,
+      adapter.config.name,
+    );
+
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
@@ -1223,6 +1232,7 @@ FROM (
       source_label,
       data_freshness,
       empty_suggestion: emptyReason?.suggestion ?? null,
+      insight,
     });
   } catch (err: any) {
     await prisma.queryJob.update({

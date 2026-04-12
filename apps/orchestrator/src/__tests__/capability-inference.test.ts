@@ -282,4 +282,36 @@ describe("generateChips", () => {
     const unique = new Set(actions);
     expect(unique.size).toBe(actions.length);
   });
+
+  // ── B4: transport chip suppression ─────────────────────────────────────────
+
+  it("does NOT generate calculate_travel for crime-uk domain", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }, { lat: 51.6, lon: -0.2 }],
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    expect(chips.map((c) => c.action)).not.toContain("calculate_travel");
+  });
+
+  it("still generates show_map for crime-uk (only calculate_travel suppressed)", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }, { lat: 51.6, lon: -0.2 }],
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    expect(chips.map((c) => c.action)).toContain("show_map");
+  });
+
+  it("DOES generate calculate_travel for non-crime domains with coordinates", () => {
+    const handle = makeHandle({
+      domain: "cinemas-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    expect(chips.map((c) => c.action)).toContain("calculate_travel");
+  });
 });

@@ -198,6 +198,7 @@ interface ExecuteResult {
   source_label?: string | null;
   data_freshness?: string | null;
   empty_suggestion?: string | null;
+  insight?: string | null;
 }
 
 interface IntentError {
@@ -1654,7 +1655,7 @@ function ResultRenderer({
   onChipAction: (chip: Chip) => void;
 }) {
   const { plan, viz_hint, count, months_fetched, results, resultContext,
-    source_label, data_freshness, empty_suggestion } = result;
+    source_label, data_freshness, empty_suggestion, insight } = result;
 
   const safeContext: ResultContext = resultContext ?? {
     status: "exact",
@@ -1683,6 +1684,10 @@ function ResultRenderer({
 
       {safeContext.fallback && (
         <FallbackBanner fallback={safeContext.fallback} />
+      )}
+
+      {insight && (
+        <p className="result-insight">{insight}</p>
       )}
 
       {count === 0 ? (
@@ -2887,6 +2892,24 @@ const CSS = `
   }
 
   .result-desc { color: var(--text-mid); font-size: 12px; }
+
+  .result-insight {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-mid);
+    font-style: italic;
+    border-left: 2px solid var(--amber);
+    padding-left: 10px;
+  }
+
+  .result-attribution {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
 
   /* ── Map ── */
 
