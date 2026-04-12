@@ -43,13 +43,14 @@ interface QueryPlan {
   date_from: string;
   date_to: string;
   location: string;
+  temporal?: string;
 }
 
 interface SuggestedWorkflow {
-  workflow_id:   string;
+  workflow_id: string;
   workflow_name: string;
-  description:   string;
-  input_schema:  WorkflowInputField[];
+  description: string;
+  input_schema: WorkflowInputField[];
 }
 
 interface ParsedQuery {
@@ -61,6 +62,7 @@ interface ParsedQuery {
   intent: string;
   months: string[];
   suggested_workflow?: SuggestedWorkflow;
+  temporal?: string;
 }
 
 interface CrimeResult {
@@ -158,18 +160,18 @@ interface WorkflowInputField {
 }
 
 interface WorkflowStepResult {
-  step_id:    string;
+  step_id: string;
   output_key: string;
-  status:     "success" | "skipped" | "error" | "not_implemented";
-  error?:     string;
-  rows?:      Record<string, unknown>[];
+  status: "success" | "skipped" | "error" | "not_implemented";
+  error?: string;
+  rows?: Record<string, unknown>[];
 }
 
 interface WorkflowResult {
-  workflow_id:  string;
-  status:       "complete" | "partial" | "failed";
+  workflow_id: string;
+  status: "complete" | "partial" | "failed";
   step_results: WorkflowStepResult[];
-  handles:      unknown[];
+  handles: unknown[];
 }
 
 interface ResultContext {
@@ -246,7 +248,20 @@ function formatMonth(ym: string): string {
     year: "numeric",
   });
 }
-
+function formatTemporalDisplay(
+  temporal: string | undefined,
+  date_from: string,
+  date_to: string,
+): string {
+  if (temporal && temporal !== "unspecified") {
+    // Capitalise first letter for display
+    return temporal.charAt(0).toUpperCase() + temporal.slice(1);
+  }
+  if (date_from === date_to) {
+    return formatMonth(date_from);
+  }
+  return `${formatMonth(date_from)} – ${formatMonth(date_to)}`;
+}
 function formatCategory(slug: string): string {
   return slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -428,14 +443,14 @@ export function FollowUpChips({
 // ── ActionChips — Phase C.7 ───────────────────────────────────────────────────
 
 const ACTION_ICONS: Partial<Record<ChipAction, string>> = {
-  show_map:         "◉",
-  show_chart:       "▲",
+  show_map: "◉",
+  show_chart: "▲",
   calculate_travel: "→",
-  fetch_domain:     "⊕",
-  filter_by:        "⊘",
-  overlay_spatial:  "⊞",
+  fetch_domain: "⊕",
+  filter_by: "⊘",
+  overlay_spatial: "⊞",
   compare_location: "⇄",
-  clarify:          "?",
+  clarify: "?",
 };
 
 export function ActionChips({
@@ -489,10 +504,13 @@ export function ClarificationPanel({
     <div className="clarification-panel">
       <div className="clarification-header">
         <span className="clarification-label">A FEW QUESTIONS FIRST</span>
-        <button className="btn-ghost small" onClick={onDismiss}>✕</button>
+        <button className="btn-ghost small" onClick={onDismiss}>
+          ✕
+        </button>
       </div>
       <p className="clarification-intent">
-        To check eligibility for <strong>{request.intent}</strong>, please answer:
+        To check eligibility for <strong>{request.intent}</strong>, please
+        answer:
       </p>
       <div className="clarification-fields">
         {request.questions.map((q) => (
@@ -506,7 +524,9 @@ export function ClarificationPanel({
               >
                 <option value="">— select —</option>
                 {q.options.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
                 ))}
               </select>
             ) : q.input_type === "boolean" ? (
@@ -527,7 +547,9 @@ export function ClarificationPanel({
                 type={q.input_type === "number" ? "number" : "text"}
                 value={answers[q.field] ?? ""}
                 onChange={(e) => set(q.field, e.target.value)}
-                placeholder={q.input_type === "number" ? "Enter a number" : "Your answer"}
+                placeholder={
+                  q.input_type === "number" ? "Enter a number" : "Your answer"
+                }
               />
             )}
           </div>
@@ -557,7 +579,7 @@ export function DecisionResultPanel({
   onDismiss: () => void;
   onChipAction?: (label: string) => void;
 }) {
-  const isEligible    = decision.eligibility === "eligible";
+  const isEligible = decision.eligibility === "eligible";
   const isConditional = decision.eligibility === "conditional";
 
   const badgeColor = isEligible
@@ -583,11 +605,17 @@ export function DecisionResultPanel({
       <div className="decision-header">
         <div
           className="decision-badge"
-          style={{ color: badgeColor, background: badgeBg, border: `1px solid ${badgeColor}` }}
+          style={{
+            color: badgeColor,
+            background: badgeBg,
+            border: `1px solid ${badgeColor}`,
+          }}
         >
           {badgeLabel}
         </div>
-        <button className="btn-ghost small" onClick={onDismiss}>✕ New query</button>
+        <button className="btn-ghost small" onClick={onDismiss}>
+          ✕ New query
+        </button>
       </div>
 
       <div className="decision-intent">{intent}</div>
@@ -598,7 +626,9 @@ export function DecisionResultPanel({
           <ul className="decision-conditions">
             {decision.conditions.map((c, i) => (
               <li key={i} className="decision-condition">
-                <span className="decision-check" style={{ color: badgeColor }}>✓</span>
+                <span className="decision-check" style={{ color: badgeColor }}>
+                  ✓
+                </span>
                 {c}
               </li>
             ))}
@@ -612,7 +642,12 @@ export function DecisionResultPanel({
           <ul className="decision-conditions">
             {decision.next_questions.map((q) => (
               <li key={q.field} className="decision-condition">
-                <span className="decision-check" style={{ color: "var(--amber, #f5a623)" }}>?</span>
+                <span
+                  className="decision-check"
+                  style={{ color: "var(--amber, #f5a623)" }}
+                >
+                  ?
+                </span>
                 {q.prompt}
               </li>
             ))}
@@ -640,25 +675,27 @@ export function DecisionResultPanel({
         </div>
       )}
 
-      {decision.suggested_chips && decision.suggested_chips.length > 0 && onChipAction && (
-        <div className="decision-section">
-          <div className="decision-section-label">SUGGESTED NEXT STEPS</div>
-          <div className="chip-row" style={{ marginTop: "0.5rem" }}>
-            {decision.suggested_chips.map((chip) => (
-              <button
-                key={chip.label}
-                className="chip"
-                onClick={() => {
-                  onDismiss();
-                  onChipAction(chip.label);
-                }}
-              >
-                {chip.label}
-              </button>
-            ))}
+      {decision.suggested_chips &&
+        decision.suggested_chips.length > 0 &&
+        onChipAction && (
+          <div className="decision-section">
+            <div className="decision-section-label">SUGGESTED NEXT STEPS</div>
+            <div className="chip-row" style={{ marginTop: "0.5rem" }}>
+              {decision.suggested_chips.map((chip) => (
+                <button
+                  key={chip.label}
+                  className="chip"
+                  onClick={() => {
+                    onDismiss();
+                    onChipAction(chip.label);
+                  }}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }
@@ -701,10 +738,18 @@ function WorkflowInputForm({
     <div className="clarification-panel">
       <div className="clarification-header">
         <strong>{workflowName}</strong>
-        <button className="btn-ghost small" onClick={onDismiss}>✕</button>
+        <button className="btn-ghost small" onClick={onDismiss}>
+          ✕
+        </button>
       </div>
       {description && (
-        <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", color: "var(--text-muted, #888)" }}>
+        <p
+          style={{
+            margin: "0 0 0.75rem",
+            fontSize: "0.85rem",
+            color: "var(--text-muted, #888)",
+          }}
+        >
           {description}
         </p>
       )}
@@ -721,7 +766,9 @@ function WorkflowInputForm({
               >
                 <option value="">— select —</option>
                 {f.options.map((o) => (
-                  <option key={o} value={o}>{o}</option>
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
                 ))}
               </select>
             ) : (
@@ -736,7 +783,11 @@ function WorkflowInputForm({
             )}
           </div>
         ))}
-        <button type="submit" className="btn-primary" style={{ marginTop: "0.75rem" }}>
+        <button
+          type="submit"
+          className="btn-primary"
+          style={{ marginTop: "0.75rem" }}
+        >
           Run workflow
         </button>
       </form>
@@ -747,29 +798,29 @@ function WorkflowInputForm({
 // ── WorkflowResultPanel — Phase D.12 ─────────────────────────────────────────
 
 const STEP_ICONS: Record<WorkflowStepResult["status"], string> = {
-  success:         "✓",
-  skipped:         "↷",
-  error:           "✕",
+  success: "✓",
+  skipped: "↷",
+  error: "✕",
   not_implemented: "○",
 };
 
 const STEP_COLORS: Record<WorkflowStepResult["status"], string> = {
-  success:         "var(--green, #3ddc84)",
-  skipped:         "var(--muted, #888)",
-  error:           "var(--red, #ff4d4d)",
+  success: "var(--green, #3ddc84)",
+  skipped: "var(--muted, #888)",
+  error: "var(--red, #ff4d4d)",
   not_implemented: "var(--amber, #f5a623)",
 };
 
 const STATUS_LABEL: Record<WorkflowResult["status"], string> = {
   complete: "COMPLETE",
-  partial:  "PARTIAL",
-  failed:   "FAILED",
+  partial: "PARTIAL",
+  failed: "FAILED",
 };
 
 const STATUS_COLOR: Record<WorkflowResult["status"], string> = {
   complete: "var(--green, #3ddc84)",
-  partial:  "var(--amber, #f5a623)",
-  failed:   "var(--red, #ff4d4d)",
+  partial: "var(--amber, #f5a623)",
+  failed: "var(--red, #ff4d4d)",
 };
 
 function WorkflowResultPanel({
@@ -782,48 +833,86 @@ function WorkflowResultPanel({
   const color = STATUS_COLOR[result.status];
 
   // E.3 — hunting-day-plan renders an itinerary instead of raw step output
-  const travelStep = result.step_results.find((s) => s.step_id === "compute-travel-times");
-  const zoneStep   = result.step_results.find((s) => s.step_id === "fetch-zones");
-  const isHunting  = result.workflow_id === "hunting-day-plan"
-    && travelStep?.status === "success"
-    && (travelStep.rows?.length ?? 0) > 0;
+  const travelStep = result.step_results.find(
+    (s) => s.step_id === "compute-travel-times",
+  );
+  const zoneStep = result.step_results.find((s) => s.step_id === "fetch-zones");
+  const isHunting =
+    result.workflow_id === "hunting-day-plan" &&
+    travelStep?.status === "success" &&
+    (travelStep.rows?.length ?? 0) > 0;
 
   if (isHunting) {
-    const travelRows  = travelStep!.rows!;
-    const zoneRows    = zoneStep?.rows ?? [];
+    const travelRows = travelStep!.rows!;
+    const zoneRows = zoneStep?.rows ?? [];
     const closestZone = travelRows[0] as Record<string, unknown>;
-    const zoneDetail  = zoneRows.find(
+    const zoneDetail = zoneRows.find(
       (z) => z.lat === closestZone.lat && z.lon === closestZone.lon,
     ) as Record<string, unknown> | undefined;
 
     return (
       <div className="decision-panel">
         <div className="decision-header">
-          <div className="decision-badge" style={{ color: "var(--green, #3ddc84)", background: "rgba(61,220,132,0.12)", border: "1px solid var(--green, #3ddc84)" }}>
+          <div
+            className="decision-badge"
+            style={{
+              color: "var(--green, #3ddc84)",
+              background: "rgba(61,220,132,0.12)",
+              border: "1px solid var(--green, #3ddc84)",
+            }}
+          >
             ITINERARY READY
           </div>
-          <button className="btn-ghost small" onClick={onDismiss}>✕ New query</button>
+          <button className="btn-ghost small" onClick={onDismiss}>
+            ✕ New query
+          </button>
         </div>
 
         <div className="decision-intent">
-          {String(closestZone.name ?? "Hunting zone")} — {String(closestZone.distance_km ?? "?")} km away
+          {String(closestZone.name ?? "Hunting zone")} —{" "}
+          {String(closestZone.distance_km ?? "?")} km away
         </div>
 
         <div className="decision-section">
           <div className="decision-section-label">YOUR DAY</div>
           <ul className="decision-conditions">
             <li className="decision-condition">
-              <span className="decision-check" style={{ color: "var(--green,#3ddc84)" }}>→</span>
-              <span><strong>07:00</strong> — Depart, {String(closestZone.travel_time_minutes ?? "?")} min travel by {String(closestZone.transport_mode ?? "")}</span>
+              <span
+                className="decision-check"
+                style={{ color: "var(--green,#3ddc84)" }}
+              >
+                →
+              </span>
+              <span>
+                <strong>07:00</strong> — Depart,{" "}
+                {String(closestZone.travel_time_minutes ?? "?")} min travel by{" "}
+                {String(closestZone.transport_mode ?? "")}
+              </span>
             </li>
             <li className="decision-condition">
-              <span className="decision-check" style={{ color: "var(--green,#3ddc84)" }}>◉</span>
-              <span><strong>Arrive</strong> — {String(closestZone.name ?? "Zone")}{zoneDetail?.location ? `, ${String(zoneDetail.location)}` : ""}</span>
+              <span
+                className="decision-check"
+                style={{ color: "var(--green,#3ddc84)" }}
+              >
+                ◉
+              </span>
+              <span>
+                <strong>Arrive</strong> — {String(closestZone.name ?? "Zone")}
+                {zoneDetail?.location ? `, ${String(zoneDetail.location)}` : ""}
+              </span>
             </li>
             {zoneDetail?.value && (
               <li className="decision-condition">
-                <span className="decision-check" style={{ color: "var(--muted,#888)" }}>·</span>
-                <span>{String(zoneDetail.value)} ha open access land · {String(zoneDetail.category ?? "Open Access Land")}</span>
+                <span
+                  className="decision-check"
+                  style={{ color: "var(--muted,#888)" }}
+                >
+                  ·
+                </span>
+                <span>
+                  {String(zoneDetail.value)} ha open access land ·{" "}
+                  {String(zoneDetail.category ?? "Open Access Land")}
+                </span>
               </li>
             )}
           </ul>
@@ -837,8 +926,17 @@ function WorkflowResultPanel({
                 const row = r as Record<string, unknown>;
                 return (
                   <li key={i} className="decision-condition">
-                    <span className="decision-check" style={{ color: "var(--muted,#888)" }}>·</span>
-                    <span>{String(row.name ?? "Zone")} — {String(row.distance_km ?? "?")} km ({String(row.travel_time_minutes ?? "?")} min)</span>
+                    <span
+                      className="decision-check"
+                      style={{ color: "var(--muted,#888)" }}
+                    >
+                      ·
+                    </span>
+                    <span>
+                      {String(row.name ?? "Zone")} —{" "}
+                      {String(row.distance_km ?? "?")} km (
+                      {String(row.travel_time_minutes ?? "?")} min)
+                    </span>
                   </li>
                 );
               })}
@@ -854,11 +952,17 @@ function WorkflowResultPanel({
       <div className="decision-header">
         <div
           className="decision-badge"
-          style={{ color, background: `${color}1a`, border: `1px solid ${color}` }}
+          style={{
+            color,
+            background: `${color}1a`,
+            border: `1px solid ${color}`,
+          }}
         >
           {STATUS_LABEL[result.status]}
         </div>
-        <button className="btn-ghost small" onClick={onDismiss}>✕ New query</button>
+        <button className="btn-ghost small" onClick={onDismiss}>
+          ✕ New query
+        </button>
       </div>
 
       <div className="decision-intent">Workflow: {result.workflow_id}</div>
@@ -877,12 +981,24 @@ function WorkflowResultPanel({
               <span>
                 <strong>{step.step_id}</strong>
                 {step.error && (
-                  <span style={{ color: "var(--muted, #888)", marginLeft: "0.5rem", fontSize: "0.8em" }}>
+                  <span
+                    style={{
+                      color: "var(--muted, #888)",
+                      marginLeft: "0.5rem",
+                      fontSize: "0.8em",
+                    }}
+                  >
                     — {step.error}
                   </span>
                 )}
                 {step.rows && step.rows.length > 0 && (
-                  <span style={{ color: "var(--green, #3ddc84)", marginLeft: "0.5rem", fontSize: "0.8em" }}>
+                  <span
+                    style={{
+                      color: "var(--green, #3ddc84)",
+                      marginLeft: "0.5rem",
+                      fontSize: "0.8em",
+                    }}
+                  >
                     ({step.rows.length} rows)
                   </span>
                 )}
@@ -970,12 +1086,16 @@ export function EmptyResults({
       <div className="empty-icon">○</div>
       <div className="empty-title">No results found</div>
       <p className="empty-message">
-        {resultContext.reason
-          ? resultContext.reason
-          : <>No results found for <strong>{formatCategory(plan.category)}</strong> in{" "}
-            {plan.date_from === plan.date_to
-              ? formatMonth(plan.date_from)
-              : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}.</>}
+        {resultContext.reason ? (
+          resultContext.reason
+        ) : (
+          <>
+            No results found for{" "}
+            <strong>{formatCategory(plan.category)}</strong> in{" "}
+            {formatTemporalDisplay(plan.temporal, plan.date_from, plan.date_to)}
+            .
+          </>
+        )}
       </p>
       <p className="empty-hint">
         {suggestion ?? "Try adjusting the date range or rephrasing your query."}
@@ -1022,7 +1142,11 @@ function MapView({
             count: b.count,
           }))
         : (results as CrimeResult[])
-            .map((c) => ({ ...c, lng: (c.lon ?? c.longitude) as number, lat: (c.lat ?? c.latitude) as number }))
+            .map((c) => ({
+              ...c,
+              lng: (c.lon ?? c.longitude) as number,
+              lat: (c.lat ?? c.latitude) as number,
+            }))
             .filter(
               (c) =>
                 c.lng != null &&
@@ -1194,8 +1318,9 @@ function TableView({
       {activeFilter && (
         <div className="filter-bar">
           <span className="filter-label">
-            Filtered: <strong>{activeFilter.field}</strong> = <strong>{activeFilter.value}</strong>
-            {" "}({filtered.length} of {results.length})
+            Filtered: <strong>{activeFilter.field}</strong> ={" "}
+            <strong>{activeFilter.value}</strong> ({filtered.length} of{" "}
+            {results.length})
           </span>
           {onClearFilter && (
             <button className="btn-ghost small" onClick={onClearFilter}>
@@ -1654,8 +1779,18 @@ function ResultRenderer({
   onFollowUp: (query: ExecuteBody) => void;
   onChipAction: (chip: Chip) => void;
 }) {
-  const { plan, viz_hint, count, months_fetched, results, resultContext,
-    source_label, data_freshness, empty_suggestion, insight } = result;
+  const {
+    plan,
+    viz_hint,
+    count,
+    months_fetched,
+    results,
+    resultContext,
+    source_label,
+    data_freshness,
+    empty_suggestion,
+    insight,
+  } = result;
 
   const safeContext: ResultContext = resultContext ?? {
     status: "exact",
@@ -1686,9 +1821,7 @@ function ResultRenderer({
         <FallbackBanner fallback={safeContext.fallback} />
       )}
 
-      {insight && (
-        <p className="result-insight">{insight}</p>
-      )}
+      {insight && <p className="result-insight">{insight}</p>}
 
       {count === 0 ? (
         <EmptyResults
@@ -1711,7 +1844,13 @@ function ResultRenderer({
         <TableView
           results={results as CrimeResult[]}
           activeFilter={result.activeFilter}
-          onClearFilter={() => onChipAction({ label: "Clear filter", action: "filter_by", args: { field: "__clear__" } })}
+          onClearFilter={() =>
+            onChipAction({
+              label: "Clear filter",
+              action: "filter_by",
+              args: { field: "__clear__" },
+            })
+          }
         />
       )}
 
@@ -1744,8 +1883,14 @@ function ResultRenderer({
 
       {(source_label || data_freshness) && (
         <div className="result-attribution">
-          {data_freshness && <span className="data-freshness">Last updated: {data_freshness}</span>}
-          {source_label && <span className="source-label">Source: {source_label}</span>}
+          {data_freshness && (
+            <span className="data-freshness">
+              Last updated: {data_freshness}
+            </span>
+          )}
+          {source_label && (
+            <span className="source-label">Source: {source_label}</span>
+          )}
         </div>
       )}
     </div>
@@ -1762,10 +1907,23 @@ export default function App() {
   const [parsed, setParsed] = useState<ParsedQuery | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
-  const [clarification, setClarification] = useState<{ request: ClarificationRequest; executeBody: ExecuteBody } | null>(null);
-  const [decisionResult, setDecisionResult] = useState<{ decision: DecisionResult; intent: string } | null>(null);
-  const [workflowInput, setWorkflowInput] = useState<{ workflow_id: string; workflow_name: string; description?: string; input_schema: WorkflowInputField[] } | null>(null);
-  const [workflowResult, setWorkflowResult] = useState<WorkflowResult | null>(null);
+  const [clarification, setClarification] = useState<{
+    request: ClarificationRequest;
+    executeBody: ExecuteBody;
+  } | null>(null);
+  const [decisionResult, setDecisionResult] = useState<{
+    decision: DecisionResult;
+    intent: string;
+  } | null>(null);
+  const [workflowInput, setWorkflowInput] = useState<{
+    workflow_id: string;
+    workflow_name: string;
+    description?: string;
+    input_schema: WorkflowInputField[];
+  } | null>(null);
+  const [workflowResult, setWorkflowResult] = useState<WorkflowResult | null>(
+    null,
+  );
   const [refineText, setRefineText] = useState("");
   const [showWorkspaces, setShowWorkspaces] = useState(false);
   const [lastQueryId, setLastQueryId] = useState<string | null>(null);
@@ -1815,10 +1973,10 @@ export default function App() {
     if (parseData.suggested_workflow) {
       const wf = parseData.suggested_workflow;
       setWorkflowInput({
-        workflow_id:   wf.workflow_id,
+        workflow_id: wf.workflow_id,
         workflow_name: wf.workflow_name,
-        description:   wf.description,
-        input_schema:  wf.input_schema,
+        description: wf.description,
+        input_schema: wf.input_schema,
       });
       setStage("done");
       setLoadingStage(null);
@@ -1837,7 +1995,10 @@ export default function App() {
 
       // D.1 — clarification response
       if (data.type === "clarification") {
-        setClarification({ request: data.request, executeBody: parseData as ExecuteBody });
+        setClarification({
+          request: data.request,
+          executeBody: parseData as ExecuteBody,
+        });
         setStage("done");
         setLoadingStage(null);
         return;
@@ -1845,7 +2006,10 @@ export default function App() {
 
       // D.3 — decision result (regulatory adapter returned eligibility)
       if (data.type === "decision_result") {
-        setDecisionResult({ decision: data.decision, intent: data.intent ?? text });
+        setDecisionResult({
+          decision: data.decision,
+          intent: data.intent ?? text,
+        });
         setStage("done");
         setLoadingStage(null);
         return;
@@ -1954,7 +2118,10 @@ export default function App() {
 
       // D.3 — regulatory adapter returned a decision
       if (data.type === "decision_result") {
-        setDecisionResult({ decision: data.decision, intent: data.intent ?? clarification.request.intent });
+        setDecisionResult({
+          decision: data.decision,
+          intent: data.intent ?? clarification.request.intent,
+        });
         setStage("done");
       } else if (!res.ok || data.error) {
         setIntentError({
@@ -2004,18 +2171,25 @@ export default function App() {
         // Pick the most common category from results as the default, or
         // use chip.args.value if the backend supplied one
         const rows = result.results as unknown as Record<string, unknown>[];
-        const value = chip.args.value != null
-          ? String(chip.args.value)
-          : (() => {
-              const freq: Record<string, number> = {};
-              for (const r of rows) {
-                const c = String(r.category ?? "");
-                if (c) freq[c] = (freq[c] ?? 0) + 1;
-              }
-              return Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
-            })();
+        const value =
+          chip.args.value != null
+            ? String(chip.args.value)
+            : (() => {
+                const freq: Record<string, number> = {};
+                for (const r of rows) {
+                  const c = String(r.category ?? "");
+                  if (c) freq[c] = (freq[c] ?? 0) + 1;
+                }
+                return (
+                  Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ""
+                );
+              })();
         if (value) {
-          setResult({ ...result, viz_hint: "table", activeFilter: { field: "category", value } });
+          setResult({
+            ...result,
+            viz_hint: "table",
+            activeFilter: { field: "category", value },
+          });
         }
         return;
       }
@@ -2023,7 +2197,10 @@ export default function App() {
     }
 
     // C.11 — cinema showtimes via /query/chip
-    if (chip.action === "fetch_domain" && chip.args.domain === "cinema-showtimes") {
+    if (
+      chip.action === "fetch_domain" &&
+      chip.args.domain === "cinema-showtimes"
+    ) {
       // Extract cinema name from the current result rows
       const rows = result.results as Array<Record<string, unknown>>;
       const cinemaName =
@@ -2040,7 +2217,11 @@ export default function App() {
           headers: SESSION_HEADERS,
           body: JSON.stringify({
             action: "fetch_domain",
-            args: { domain: "cinema-showtimes", cinemaName, ref: chip.args.ref },
+            args: {
+              domain: "cinema-showtimes",
+              cinemaName,
+              ref: chip.args.ref,
+            },
           }),
         });
         const data = await res.json();
@@ -2087,9 +2268,9 @@ export default function App() {
         const data = await res.json();
         if (data.type === "workflow_input_required") {
           setWorkflowInput({
-            workflow_id:   data.workflow_id,
+            workflow_id: data.workflow_id,
             workflow_name: data.workflow_name,
-            input_schema:  data.input_schema,
+            input_schema: data.input_schema,
           });
           setStage("done");
         }
@@ -2100,20 +2281,26 @@ export default function App() {
     }
 
     // E.3 — fetch_domain: hunting-day-plan → show workflow input form
-    if (chip.action === "fetch_domain" && chip.args.domain === "hunting-day-plan") {
+    if (
+      chip.action === "fetch_domain" &&
+      chip.args.domain === "hunting-day-plan"
+    ) {
       try {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
           headers: SESSION_HEADERS,
-          body: JSON.stringify({ action: "fetch_domain", args: { domain: "hunting-day-plan" } }),
+          body: JSON.stringify({
+            action: "fetch_domain",
+            args: { domain: "hunting-day-plan" },
+          }),
         });
         const data = await res.json();
         if (data.type === "workflow_input_required") {
           setWorkflowInput({
-            workflow_id:   data.workflow_id,
+            workflow_id: data.workflow_id,
             workflow_name: data.workflow_name,
-            description:   data.description,
-            input_schema:  data.input_schema,
+            description: data.description,
+            input_schema: data.input_schema,
           });
           setStage("done");
         }
@@ -2137,7 +2324,10 @@ export default function App() {
       const res = await fetch(`${API}/query/workflow`, {
         method: "POST",
         headers: SESSION_HEADERS,
-        body: JSON.stringify({ workflow_id: workflowInput.workflow_id, inputs }),
+        body: JSON.stringify({
+          workflow_id: workflowInput.workflow_id,
+          inputs,
+        }),
       });
       const data = await res.json();
       if (data.type === "workflow_result") {
@@ -2235,14 +2425,19 @@ export default function App() {
             />
           )}
 
-          {stage === "done" && result && !clarification && !decisionResult && !workflowInput && !workflowResult && (
-            <ResultRenderer
-              result={result}
-              onRefine={handleRefine}
-              onFollowUp={handleFollowUp}
-              onChipAction={handleChipAction}
-            />
-          )}
+          {stage === "done" &&
+            result &&
+            !clarification &&
+            !decisionResult &&
+            !workflowInput &&
+            !workflowResult && (
+              <ResultRenderer
+                result={result}
+                onRefine={handleRefine}
+                onFollowUp={handleFollowUp}
+                onChipAction={handleChipAction}
+              />
+            )}
         </main>
 
         <footer className="app-footer">

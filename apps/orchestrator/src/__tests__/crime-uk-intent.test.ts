@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  parseIntent,
-  deriveVizHint,
-  expandDateRange,
-} from "../intent";
+import { parseIntent, deriveVizHint, expandDateRange } from "../intent";
 
 const { mockCreate } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
@@ -15,6 +11,7 @@ vi.mock("openai", () => {
   }
   return { default: MockOpenAI };
 });
+
 function makeLLMResponse(content: string) {
   return {
     choices: [{ message: { content } }],
@@ -24,30 +21,10 @@ function makeLLMResponse(content: string) {
 function validPlan(overrides = {}) {
   return JSON.stringify({
     category: "burglary",
-    date_from: "2024-01",
-    date_to: "2024-01",
+    temporal: "last month",
     location: "Cambridge, UK",
     ...overrides,
   });
-}
-
-// helper — last full calendar month as YYYY-MM
-function lastMonth() {
-  const d = new Date();
-  d.setMonth(d.getMonth() - 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function threeMonthsAgo() {
-  const d = new Date();
-  d.setMonth(d.getMonth() - 3);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function twelveMonthsAgo() {
-  const d = new Date();
-  d.setMonth(d.getMonth() - 12);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 beforeEach(() => {
@@ -59,26 +36,37 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("parseIntent", () => {
-  it("returns a valid QueryPlan with category, date_from, date_to, location", async () => {
+  it("returns an UnresolvedQueryPlan with category, temporal, location", async () => {
     mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    const plan = await parseIntent("burglaries in Cambridge last month");
     expect(plan).toMatchObject({
       category: "burglary",
-      date_from: "2024-01",
-      date_to: "2024-01",
+      temporal: expect.any(String),
       location: expect.any(String),
     });
   });
 
+  it("does NOT return date_from on the plan", async () => {
+    mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
+    const plan = await parseIntent("burglaries in Cambridge last month");
+    expect(plan).not.toHaveProperty("date_from");
+  });
+
+  it("does NOT return date_to on the plan", async () => {
+    mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
+    const plan = await parseIntent("burglaries in Cambridge last month");
+    expect(plan).not.toHaveProperty("date_to");
+  });
+
   it("viz_hint is NOT present on the returned plan", async () => {
     mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    const plan = await parseIntent("burglaries in Cambridge last month");
     expect(plan).not.toHaveProperty("viz_hint");
   });
 
   it("poly is NOT present on the returned plan", async () => {
     mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    const plan = await parseIntent("burglaries in Cambridge last month");
     expect(plan).not.toHaveProperty("poly");
   });
 
@@ -86,67 +74,60 @@ describe("parseIntent", () => {
     mockCreate.mockResolvedValue(
       makeLLMResponse(validPlan({ location: "Cambridge, UK" })),
     );
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    const plan = await parseIntent("burglaries in Cambridge last month");
     expect(typeof plan.location).toBe("string");
     expect(plan.location).not.toMatch(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
   });
 
-  it("defaults category to all-crime when not mentioned", async () => {
+  it("returns temporal field as a non-empty string", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(validPlan({ category: "all-crime" })),
+      makeLLMResponse(validPlan({ temporal: "last month" })),
     );
-    const plan = await parseIntent("what's happening in Cambridge");
-    expect(plan.category).toBe("all-crime");
+    const plan = await parseIntent("burglaries in Cambridge last month");
+    expect(typeof plan.temporal).toBe("string");
+    expect(plan.temporal.length).toBeGreaterThan(0);
   });
 
-  it("resolves 'last month' to correct date_from and date_to", async () => {
-    const lm = lastMonth();
+  it("passes through 'last month' temporal expression unchanged", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(validPlan({ date_from: lm, date_to: lm })),
+      makeLLMResponse(validPlan({ temporal: "last month" })),
     );
-    const plan = await parseIntent("crimes in Cambridge last month");
-    expect(plan.date_from).toBe(lm);
-    expect(plan.date_to).toBe(lm);
+    const plan = await parseIntent("burglaries in Cambridge last month");
+    expect(plan.temporal).toBe("last month");
   });
 
-  it("resolves 'last 3 months' to correct date_from and date_to", async () => {
-    const from = threeMonthsAgo();
-    const to = lastMonth();
+  it("passes through 'last 3 months' temporal expression unchanged", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(validPlan({ date_from: from, date_to: to })),
+      makeLLMResponse(validPlan({ temporal: "last 3 months" })),
     );
     const plan = await parseIntent(
       "crimes in Cambridge over the last 3 months",
     );
-    expect(plan.date_from).toBe(from);
-    expect(plan.date_to).toBe(to);
+    expect(plan.temporal).toBe("last 3 months");
   });
 
-  it("resolves 'last year' to a 12-month range", async () => {
-    const from = twelveMonthsAgo();
-    const to = lastMonth();
+  it("passes through 'last year' temporal expression unchanged", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(validPlan({ date_from: from, date_to: to })),
+      makeLLMResponse(validPlan({ temporal: "last year" })),
     );
     const plan = await parseIntent("crimes in Cambridge over the last year");
-    expect(plan.date_from).toBe(from);
-    expect(plan.date_to).toBe(to);
+    expect(plan.temporal).toBe("last year");
   });
 
-  it("resolves single month 'January 2024' to identical date_from and date_to", async () => {
-    mockCreate.mockResolvedValue(makeLLMResponse(validPlan()));
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
-    expect(plan.date_from).toBe(plan.date_to);
-  });
-
-  it("defaults both date fields to last full month when no date mentioned", async () => {
-    const lm = lastMonth();
+  it("passes through 'January 2024' temporal expression unchanged", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(validPlan({ date_from: lm, date_to: lm })),
+      makeLLMResponse(validPlan({ temporal: "January 2024" })),
+    );
+    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    expect(plan.temporal).toBe("January 2024");
+  });
+
+  it("passes through 'unspecified' when no date mentioned", async () => {
+    mockCreate.mockResolvedValue(
+      makeLLMResponse(validPlan({ temporal: "unspecified" })),
     );
     const plan = await parseIntent("burglaries in Cambridge");
-    expect(plan.date_from).toBe(lm);
-    expect(plan.date_to).toBe(lm);
+    expect(plan.temporal).toBe("unspecified");
   });
 
   it("defaults location to 'Cambridge, UK' when no location given", async () => {
@@ -160,34 +141,30 @@ describe("parseIntent", () => {
   it("strips markdown fences before parsing JSON", async () => {
     const fenced = "```json\n" + validPlan() + "\n```";
     mockCreate.mockResolvedValue(makeLLMResponse(fenced));
-    const plan = await parseIntent("burglaries in Cambridge in January 2024");
+    const plan = await parseIntent("burglaries in Cambridge last month");
     expect(plan.category).toBe("burglary");
   });
 
-  it("throws structured IntentError with missing: ['location'] when location field absent", async () => {
+  it("throws structured IntentError with missing: ['location'] when location absent", async () => {
     mockCreate.mockResolvedValue(
       makeLLMResponse(
         JSON.stringify({
           category: "burglary",
-          date_from: "2024-01",
-          date_to: "2024-01",
+          temporal: "last month",
         }),
       ),
     );
-    await expect(
-      parseIntent("burglaries in January 2024"),
-    ).rejects.toMatchObject({
+    await expect(parseIntent("burglaries last month")).rejects.toMatchObject({
       error: expect.stringMatching(/incomplete_intent|invalid_intent/),
       missing: expect.arrayContaining(["location"]),
     });
   });
 
-  it("throws structured IntentError with missing: ['category'] when category field absent", async () => {
+  it("throws structured IntentError with missing: ['category'] when category absent", async () => {
     mockCreate.mockResolvedValue(
       makeLLMResponse(
         JSON.stringify({
-          date_from: "2024-01",
-          date_to: "2024-01",
+          temporal: "last month",
           location: "Cambridge, UK",
         }),
       ),
@@ -198,9 +175,24 @@ describe("parseIntent", () => {
     });
   });
 
+  it("throws structured IntentError with missing: ['temporal'] when temporal absent", async () => {
+    mockCreate.mockResolvedValue(
+      makeLLMResponse(
+        JSON.stringify({
+          category: "burglary",
+          location: "Cambridge, UK",
+        }),
+      ),
+    );
+    await expect(parseIntent("burglaries in Cambridge")).rejects.toMatchObject({
+      error: expect.stringMatching(/incomplete_intent|invalid_intent/),
+      missing: expect.arrayContaining(["temporal"]),
+    });
+  });
+
   it("includes all missing field names when multiple fields fail", async () => {
     mockCreate.mockResolvedValue(
-      makeLLMResponse(JSON.stringify({ date_from: "2024-01" })),
+      makeLLMResponse(JSON.stringify({ temporal: "last month" })),
     );
     await expect(parseIntent("something")).rejects.toMatchObject({
       missing: expect.arrayContaining(["location", "category"]),
@@ -212,8 +204,7 @@ describe("parseIntent", () => {
       makeLLMResponse(
         JSON.stringify({
           category: "burglary",
-          date_from: "2024-01",
-          date_to: "2024-01",
+          temporal: "last month",
         }),
       ),
     );
@@ -235,7 +226,7 @@ describe("parseIntent", () => {
 });
 
 // ---------------------------------------------------------------------------
-// deriveVizHint
+// deriveVizHint — receives a resolved QueryPlan, unchanged by Phase D
 // ---------------------------------------------------------------------------
 
 describe("deriveVizHint", () => {
@@ -253,15 +244,6 @@ describe("deriveVizHint", () => {
   it("returns 'bar' when date_from !== date_to", () => {
     expect(
       deriveVizHint({ ...basePlan, date_to: "2024-03" }, "crimes in Cambridge"),
-    ).toBe("bar");
-  });
-
-  it("returns 'bar' when category is all-crime and range > 1 month", () => {
-    expect(
-      deriveVizHint(
-        { ...basePlan, category: "all-crime" as const, date_to: "2024-03" },
-        "all crimes in Cambridge",
-      ),
     ).toBe("bar");
   });
 
@@ -284,12 +266,12 @@ describe("deriveVizHint", () => {
   });
 
   it("returns 'dashboard' when intent is 'weather'", () => {
-    expect(
-      deriveVizHint(basePlan, "weather in London", "weather"),
-    ).toBe("dashboard");
+    expect(deriveVizHint(basePlan, "weather in London", "weather")).toBe(
+      "dashboard",
+    );
   });
 
-  it("returns 'dashboard' when plan.category is 'weather' (classifier absent)", () => {
+  it("returns 'dashboard' when plan.category starts with 'weather'", () => {
     expect(
       deriveVizHint(
         { ...basePlan, category: "weather" as const },
@@ -300,7 +282,7 @@ describe("deriveVizHint", () => {
 });
 
 // ---------------------------------------------------------------------------
-// expandDateRange
+// expandDateRange — pure function, unchanged by Phase D
 // ---------------------------------------------------------------------------
 
 describe("expandDateRange", () => {
@@ -315,7 +297,7 @@ describe("expandDateRange", () => {
     ]);
   });
 
-  it("3-month range returns all three months in ascending order", () => {
+  it("3-month range returns all three months", () => {
     expect(expandDateRange("2024-01", "2024-03")).toEqual([
       "2024-01",
       "2024-02",
