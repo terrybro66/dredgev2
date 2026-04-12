@@ -51,6 +51,20 @@ export const QueryPlanSchema = z.object({
 });
 export type QueryPlan = z.infer<typeof QueryPlanSchema>;
 
+export const UnresolvedQueryPlanSchema = z
+  .object({
+    category: z.union([CrimeCategorySchema, z.string().min(1)]),
+    temporal: z.string().min(1),
+    location: z
+      .string()
+      .min(1)
+      .refine((s) => !COORDINATE_PATTERN.test(s.trim()), {
+        message: "location must be a place name, not coordinates",
+      }),
+  })
+  .strip();
+
+export type UnresolvedQueryPlan = z.infer<typeof UnresolvedQueryPlanSchema>;
 // ── VizHint ───────────────────────────────────────────────────────────────────
 
 export const VizHintSchema = z.enum([

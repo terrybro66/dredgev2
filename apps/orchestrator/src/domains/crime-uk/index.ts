@@ -2,6 +2,7 @@ import { DomainAdapter } from "../registry";
 import { fetchCrimes, normalizeCrimeCategory } from "./fetcher";
 import { storeResults } from "./store";
 import { recoverFromEmpty } from "./recovery";
+import { resolveTemporalRangeForCrime } from "../../temporal-resolver";
 
 export const crimeUkAdapter: DomainAdapter = {
   config: {
@@ -34,4 +35,6 @@ export const crimeUkAdapter: DomainAdapter = {
     ...plan,
     category: normalizeCrimeCategory(plan.category),
   }),
+  resolveTemporalRange: (temporal: string) =>
+    resolveTemporalRangeForCrime(temporal),
 };

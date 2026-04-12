@@ -25,7 +25,6 @@ const { mockPrisma } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       findMany: vi.fn(),
     },
-
     crimeResult: {
       findMany: vi.fn(),
     },
@@ -56,8 +55,6 @@ const { mockPrisma } = vi.hoisted(() => ({
   },
 }));
 
-// ── NEW: mocks for modules that were hitting real implementations ──────────────
-
 const { mockAcquire } = vi.hoisted(() => ({ mockAcquire: vi.fn() }));
 const { mockCreateSnapshot } = vi.hoisted(() => ({
   mockCreateSnapshot: vi.fn(),
@@ -77,22 +74,22 @@ const { mockDomainDiscovery } = vi.hoisted(() => ({
 const { mockClassifyIntent } = vi.hoisted(() => ({
   mockClassifyIntent: vi.fn(),
 }));
-
-// ─────────────────────────────────────────────────────────────────────────────
+const { mockDefaultResolveTemporalRange, mockResolveTemporalRangeForCrime } =
+  vi.hoisted(() => ({
+    mockDefaultResolveTemporalRange: vi.fn(),
+    mockResolveTemporalRangeForCrime: vi.fn(),
+  }));
 
 vi.mock("../intent", () => ({
   parseIntent: mockParseIntent,
   deriveVizHint: mockDeriveVizHint,
   expandDateRange: mockExpandDateRange,
 }));
-
 vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
 }));
-
-// ── NEW: mock the four unmocked imports that were causing timeouts ─────────────
 vi.mock("../rateLimiter", () => ({ acquire: mockAcquire }));
 vi.mock("../execution-model", () => ({ createSnapshot: mockCreateSnapshot }));
 vi.mock("../agent/shadow-adapter", () => ({
@@ -104,9 +101,20 @@ vi.mock("../agent/domain-discovery", () => ({
 vi.mock("../semantic/classifier", () => ({
   classifyIntent: mockClassifyIntent,
 }));
-// ─────────────────────────────────────────────────────────────────────────────
+vi.mock("../temporal-resolver", () => ({
+  defaultResolveTemporalRange: mockDefaultResolveTemporalRange,
+  resolveTemporalRangeForCrime: mockResolveTemporalRangeForCrime,
+}));
 
+// basePlan is now an UnresolvedQueryPlan — temporal instead of date_from/date_to
 const basePlan = {
+  category: "burglary",
+  temporal: "last month",
+  location: "Cambridge, UK",
+};
+
+// resolved plan — what the /parse handler constructs after temporal resolution
+const resolvedPlan = {
   category: "burglary",
   date_from: "2024-01",
   date_to: "2024-01",
@@ -147,7 +155,7 @@ beforeEach(() => {
     flattenRow: (r: unknown) => r,
     storeResults: mockStoreResults,
   });
-  mockPrisma.query.create.mockResolvedValue({ id: "test-id", ...basePlan });
+  mockPrisma.query.create.mockResolvedValue({ id: "test-id", ...resolvedPlan });
   mockPrisma.query.findUnique.mockResolvedValue(null);
   mockPrisma.crimeResult.findMany.mockResolvedValue([]);
   mockPrisma.queryCache.findUnique.mockResolvedValue(null);
@@ -161,8 +169,6 @@ beforeEach(() => {
   mockPrisma.$queryRaw.mockResolvedValue([]);
   mockPrisma.queryResult.createMany.mockResolvedValue({});
   mockPrisma.queryResult.findMany.mockResolvedValue([]);
-
-  // ── NEW: defaults for the four previously-unmocked modules ──────────────────
   mockAcquire.mockResolvedValue(undefined);
   mockCreateSnapshot.mockResolvedValue({ id: "snap-id" });
   mockShadowAdapter.isEnabled.mockReturnValue(false);
@@ -174,7 +180,14 @@ beforeEach(() => {
     domain: null,
     intent: null,
   });
-  // ────────────────────────────────────────────────────────────────────────────
+  mockDefaultResolveTemporalRange.mockReturnValue({
+    date_from: "2024-01",
+    date_to: "2024-01",
+  });
+  mockResolveTemporalRangeForCrime.mockResolvedValue({
+    date_from: "2024-01",
+    date_to: "2024-01",
+  });
 });
 
 // ── POST /parse ───────────────────────────────────────────────────────────────
@@ -237,24 +250,81 @@ describe("POST /query/parse", () => {
     expect(res.body.error).toBe("geocode_failed");
   });
 
-  it("returns confirmation payload with plan, poly, viz_hint, resolved_location, country_code, intent, months", async () => {
+  it("response includes plan with resolved date_from and date_to", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.status).toBe(200);
+    expect(res.body.plan).toMatchObject({
+      category: "burglary",
+      date_from: "2024-01",
+      date_to: "2024-01",
+      location: "Cambridge, UK",
+    });
+  });
+
+  it("response includes temporal string from the unresolved plan", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.status).toBe(200);
+    expect(res.body.temporal).toBe("last month");
+  });
+
+  it("uses resolveTemporalRangeForCrime when intent is crime", async () => {
+    mockClassifyIntent.mockResolvedValue({
+      confidence: 0.9,
+      domain: "crime-uk",
+      intent: "crime",
+    });
+    const app = buildApp();
+    await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(mockResolveTemporalRangeForCrime).toHaveBeenCalledWith("last month");
+  });
+
+  it("uses defaultResolveTemporalRange when intent is not crime", async () => {
+    mockClassifyIntent.mockResolvedValue({
+      confidence: 0.9,
+      domain: "weather",
+      intent: "weather",
+    });
+    const app = buildApp();
+    await request(app)
+      .post("/query/parse")
+      .send({ text: "weather in Cambridge" });
+    expect(mockDefaultResolveTemporalRange).toHaveBeenCalledWith("last month");
+  });
+
+  it("uses defaultResolveTemporalRange when classifier confidence is below threshold", async () => {
+    mockClassifyIntent.mockResolvedValue({
+      confidence: 0,
+      domain: null,
+      intent: null,
+    });
+    const app = buildApp();
+    await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(mockDefaultResolveTemporalRange).toHaveBeenCalledWith("last month");
+  });
+
+  it("returns confirmation payload with poly, viz_hint, resolved_location, country_code, months", async () => {
     const app = buildApp();
     const res = await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      plan: basePlan,
       poly: expect.any(String),
       viz_hint: "map",
       resolved_location: "Cambridge, Cambridgeshire, England",
       country_code: "GB",
-      // intent is undefined when classifier confidence is below threshold
-      // and keyword matching has been removed — the execute endpoint receives
-      // it as undefined and triggers domain lookup or discovery accordingly
       months: ["2024-01"],
     });
-    expect(res.body.intent).toBeUndefined();
   });
 
   it("does not write to the database", async () => {
@@ -293,7 +363,7 @@ describe("POST /query/parse", () => {
     );
   });
 
-  it("months array is correctly expanded from date range", async () => {
+  it("months array is correctly expanded from resolved date range", async () => {
     mockExpandDateRange.mockReturnValue(["2024-01", "2024-02", "2024-03"]);
     const app = buildApp();
     const res = await request(app)
@@ -301,12 +371,33 @@ describe("POST /query/parse", () => {
       .send({ text: "burglaries in Cambridge" });
     expect(res.body.months).toEqual(["2024-01", "2024-02", "2024-03"]);
   });
+
+  it("returns undefined intent when classifier confidence is below threshold", async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.body.intent).toBeUndefined();
+  });
+
+  it("returns classified intent when classifier confidence meets threshold", async () => {
+    mockClassifyIntent.mockResolvedValue({
+      confidence: 0.9,
+      domain: "crime-uk",
+      intent: "crime",
+    });
+    const app = buildApp();
+    const res = await request(app)
+      .post("/query/parse")
+      .send({ text: "burglaries in Cambridge" });
+    expect(res.body.intent).toBe("crime");
+  });
 });
 
 // ── POST /execute ─────────────────────────────────────────────────────────────
 
 const validExecuteBody = {
-  plan: basePlan,
+  plan: resolvedPlan,
   poly: "52.3,0.0:52.3,0.3:52.1,0.3:52.1,0.0",
   viz_hint: "map",
   resolved_location: "Cambridge, Cambridgeshire, England",
@@ -358,7 +449,7 @@ describe("POST /query/execute", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockFetchCrimes).toHaveBeenCalledWith(
-      basePlan,
+      resolvedPlan,
       validExecuteBody.poly,
     );
   });
@@ -369,11 +460,9 @@ describe("POST /query/execute", () => {
       .post("/query/execute")
       .send(validExecuteBody);
     expect(res.status).toBe(200);
-    console.log("500 body:", res.body);
-
     expect(res.body).toMatchObject({
       query_id: expect.any(String),
-      plan: basePlan,
+      plan: resolvedPlan,
       poly: validExecuteBody.poly,
       viz_hint: "map",
       resolved_location: "Cambridge, Cambridgeshire, England",
@@ -384,8 +473,6 @@ describe("POST /query/execute", () => {
   });
 
   it("bar chart results are grouped by month not raw rows", async () => {
-    // The bar chart path groups rows by month and returns { month, count }
-    // entries — not raw rows capped at 100.
     const crimes = Array.from({ length: 150 }, (_, i) => ({
       id: i,
       category: "burglary",
@@ -397,7 +484,6 @@ describe("POST /query/execute", () => {
     const res = await request(app)
       .post("/query/execute")
       .send({ ...validExecuteBody, viz_hint: "bar" });
-    // Should return one entry per month, not 150 raw rows
     expect(res.body.results).toHaveLength(2);
     expect(res.body.results[0]).toMatchObject({
       month: expect.any(String),
@@ -438,7 +524,7 @@ describe("GET /query/:id", () => {
   it("returns query record with results included", async () => {
     mockPrisma.query.findUnique.mockResolvedValue({
       id: "test-id",
-      ...basePlan,
+      ...resolvedPlan,
       results: [{ id: "r1", category: "burglary" }],
     });
     const app = buildApp();
@@ -511,6 +597,7 @@ describe("cache, job tracking, and routing", () => {
       }),
     );
   });
+
   it("returns 200 with not_supported when country_code has no adapter", async () => {
     mockGetDomainForQuery.mockReturnValue(undefined);
     const app = buildApp();
@@ -528,29 +615,6 @@ describe("cache, job tracking, and routing", () => {
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
     expect(res.body.country_code).toBe("GB");
-  });
-
-  it("returns undefined intent when classifier confidence is below threshold", async () => {
-    const app = buildApp();
-    const res = await request(app)
-      .post("/query/parse")
-      .send({ text: "burglaries in Cambridge" });
-    // keyword matching removed — classifier mock returns confidence: 0
-    // so intent falls through to undefined rather than defaulting to "crime"
-    expect(res.body.intent).toBeUndefined();
-  });
-
-  it("returns classified intent when classifier confidence meets threshold", async () => {
-    mockClassifyIntent.mockResolvedValue({
-      confidence: 0.9,
-      domain: "crime-uk",
-      intent: "crime",
-    });
-    const app = buildApp();
-    const res = await request(app)
-      .post("/query/parse")
-      .send({ text: "burglaries in Cambridge" });
-    expect(res.body.intent).toBe("crime");
   });
 });
 
@@ -636,6 +700,7 @@ describe("shadow adapter recovery storage", () => {
     expect(mockPrisma.queryCache.create).not.toHaveBeenCalled();
   });
 });
+
 describe("GET /query/history", () => {
   const historyRecord = {
     id: "q1",

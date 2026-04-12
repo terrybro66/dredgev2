@@ -44,6 +44,10 @@ import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
 import { generateInsight } from "./insight";
 import { CATEGORY_TO_INTENT, normalizeToDomainSlug } from "./domain-slug";
+import {
+  defaultResolveTemporalRange,
+  resolveTemporalRangeForCrime,
+} from "./temporal-resolver";
 
 // ── B2: Data freshness + source attribution helpers ───────────────────────────
 
@@ -55,7 +59,8 @@ function deriveDataFreshness(rows: Record<string, unknown>[]): string | null {
   if (rows.length === 0) return null;
   let latest: string | null = null;
   for (const row of rows) {
-    const d = row["date"] ?? row["month"] ?? row["ratingDate"] ?? row["created_at"];
+    const d =
+      row["date"] ?? row["month"] ?? row["ratingDate"] ?? row["created_at"];
     if (typeof d === "string" && d.length >= 7) {
       const candidate = d.slice(0, 7); // YYYY-MM
       if (!latest || candidate > latest) latest = candidate;
@@ -79,7 +84,12 @@ const CRIME_DATA_START = "2010-12";
  * a meaningful message rather than a blank panel.
  */
 function deriveEmptyReason(
-  plan: { date_from?: string; date_to?: string; category?: string; location?: string },
+  plan: {
+    date_from?: string;
+    date_to?: string;
+    category?: string;
+    location?: string;
+  },
   months: string[],
 ): { code: string; message: string; suggestion: string } {
   const dateFrom = plan.date_from ?? "";
@@ -239,8 +249,26 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     }
   }
 
-  const viz_hint = deriveVizHint(plan, text, intent ?? "unknown");
-  const months = expandDateRange(plan.date_from, plan.date_to);
+  // Phase D — resolve temporal expression to concrete date range.
+  // Crime uses the availability cache to anchor to the latest published month.
+  // All other domains use the default calendar-based resolver.
+  const unresolvedTemporal = (plan as any).temporal as string;
+  let dateRange: { date_from: string; date_to: string };
+  if (intent === "crime") {
+    dateRange = await resolveTemporalRangeForCrime(unresolvedTemporal);
+  } else {
+    dateRange = defaultResolveTemporalRange(unresolvedTemporal);
+  }
+
+  const resolvedPlan = {
+    category: plan.category,
+    location: plan.location,
+    date_from: dateRange.date_from,
+    date_to: dateRange.date_to,
+  };
+
+  const viz_hint = deriveVizHint(resolvedPlan, text, intent ?? "unknown");
+  const months = expandDateRange(resolvedPlan.date_from, resolvedPlan.date_to);
 
   const suggestedWorkflows = findWorkflowsForIntent(text);
   const suggested_workflow =
@@ -252,9 +280,9 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
           input_schema: suggestedWorkflows[0].input_schema,
         }
       : undefined;
-
   return res.json({
-    plan,
+    plan: resolvedPlan,
+    temporal: unresolvedTemporal,
     poly: geocoded.poly,
     viz_hint,
     resolved_location: geocoded.display_name,
@@ -320,7 +348,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         if (routeResult.type === "refinement") {
           plan = routeResult.mergedPlan;
           console.log(
-            JSON.stringify({ event: "refinement_applied", rawText, incomingSlug }),
+            JSON.stringify({
+              event: "refinement_applied",
+              rawText,
+              incomingSlug,
+            }),
           );
         } else if (
           routeResult.type === "fresh_query" &&
@@ -416,11 +448,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         domainDiscovery
           .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
           .catch((err: unknown) => {
-            console.warn(JSON.stringify({
-              event: "discovery_run_failed",
-              intent: routingIntent ?? plan.category,
-              error: err instanceof Error ? err.message : String(err),
-            }));
+            console.warn(
+              JSON.stringify({
+                event: "discovery_run_failed",
+                intent: routingIntent ?? plan.category,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
           });
       }
 
@@ -583,8 +617,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               const params = new URLSearchParams();
               params.set(source.locationParams.latParam, String(lat));
               params.set(source.locationParams.lonParam, String(lon));
-              if (source.locationParams.radiusParam && source.locationParams.radiusKm) {
-                params.set(source.locationParams.radiusParam, String(source.locationParams.radiusKm));
+              if (
+                source.locationParams.radiusParam &&
+                source.locationParams.radiusKm
+              ) {
+                params.set(
+                  source.locationParams.radiusParam,
+                  String(source.locationParams.radiusKm),
+                );
               }
               restUrl = `${restUrl}?${params.toString()}`;
             }
@@ -654,11 +694,13 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         domainDiscovery
           .run({ intent: discoveryIntent, country_code }, prisma)
           .catch((err: unknown) => {
-            console.warn(JSON.stringify({
-              event: "discovery_run_failed",
-              intent: discoveryIntent,
-              error: err instanceof Error ? err.message : String(err),
-            }));
+            console.warn(
+              JSON.stringify({
+                event: "discovery_run_failed",
+                intent: discoveryIntent,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
           });
       }
       return res.status(200).json({
@@ -875,19 +917,29 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: memory ?? {
-        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        context: {
+          location: null,
+          active_plan: plan,
+          result_stack: [],
+          active_filters: {},
+        },
         profile: { user_attributes: {}, location_history: [] },
       },
       clickCounts,
     });
 
-    const cachedEmptyReason = cached.result_count === 0
-      ? deriveEmptyReason(plan, months)
-      : null;
+    const cachedEmptyReason =
+      cached.result_count === 0 ? deriveEmptyReason(plan, months) : null;
 
-    const resultContext: ResultContext = cached.result_count === 0
-      ? { status: "empty", reason: cachedEmptyReason?.message, followUps, confidence: "low" }
-      : { status: "exact", followUps, confidence: "high" };
+    const resultContext: ResultContext =
+      cached.result_count === 0
+        ? {
+            status: "empty",
+            reason: cachedEmptyReason?.message,
+            followUps,
+            confidence: "low",
+          }
+        : { status: "exact", followUps, confidence: "high" };
 
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
@@ -917,7 +969,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       chips,
       resultContext,
       source_label: adapter.config.sourceLabel ?? null,
-      data_freshness: deriveDataFreshness(cached.results as Record<string, unknown>[]),
+      data_freshness: deriveDataFreshness(
+        cached.results as Record<string, unknown>[],
+      ),
       empty_suggestion: cachedEmptyReason?.suggestion ?? null,
       insight,
     });
@@ -1184,24 +1238,37 @@ FROM (
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: memory ?? {
-        context: { location: null, active_plan: plan, result_stack: [], active_filters: {} },
+        context: {
+          location: null,
+          active_plan: plan,
+          result_stack: [],
+          active_filters: {},
+        },
         profile: { user_attributes: {}, location_history: [] },
       },
       clickCounts,
     });
 
-    const emptyReason = storedResults.length === 0
-      ? deriveEmptyReason(plan, effectiveMonths)
-      : null;
+    const emptyReason =
+      storedResults.length === 0
+        ? deriveEmptyReason(plan, effectiveMonths)
+        : null;
 
     const resultContext: ResultContext =
       storedResults.length === 0
-        ? { status: "empty", reason: emptyReason?.message, followUps, confidence: "low" }
+        ? {
+            status: "empty",
+            reason: emptyReason?.message,
+            followUps,
+            confidence: "low",
+          }
         : fallback
           ? { status: "fallback", fallback, followUps, confidence: "medium" }
           : { status: "exact", followUps, confidence: "high" };
 
-    const data_freshness = deriveDataFreshness(storedResults as Record<string, unknown>[]);
+    const data_freshness = deriveDataFreshness(
+      storedResults as Record<string, unknown>[],
+    );
     const source_label = adapter.config.sourceLabel ?? null;
 
     const insight = await generateInsight(

@@ -1,5 +1,10 @@
 import OpenAI from "openai";
-import { QueryPlanSchema, QueryPlan, VizHint } from "@dredge/schemas";
+import {
+  UnresolvedQueryPlanSchema,
+  UnresolvedQueryPlan,
+  QueryPlan,
+  VizHint,
+} from "@dredge/schemas";
 
 const client = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY,
@@ -7,19 +12,12 @@ const client = new OpenAI({
 });
 
 function buildSystemPrompt(): string {
-  const now = new Date();
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}`;
-
   return `You are a structured data extraction assistant. Extract the user's query intent and return ONLY a valid JSON object — no prose, no markdown fences.
-
-Today is ${now.toISOString().slice(0, 10)}. The last full calendar month is ${lastMonthStr}.
 
 Return exactly this shape:
 {
   "category": "<slug>",
-  "date_from": "YYYY-MM",
-  "date_to": "YYYY-MM",
+  "temporal": "<temporal expression>",
   "location": "<place name>"
 }
 
@@ -33,19 +31,17 @@ Rules:
     - If the user specifies a region or county, always include it: "Hackney, London" not just "Hackney"
 - Default location to "Cambridge, UK" when none is specified.
 - Default category to "unknown" when intent is unclear.
-- Resolve all relative date expressions to explicit YYYY-MM values:
-    "last month"      → date_from and date_to both = ${lastMonthStr}
-    "last 3 months"   → date_from = 3 months before ${lastMonthStr}, date_to = ${lastMonthStr}
-    "last year"       → date_from = 12 months before ${lastMonthStr}, date_to = ${lastMonthStr}
-    "January 2024"    → date_from: "2024-01", date_to: "2024-01"
-    no date mentioned → date_from and date_to both = ${lastMonthStr}
+- For "temporal", return the user's date expression as a free-text string. Examples:
+    "last month", "last 3 months", "last year", "January 2024", "2024-03"
+    Use "unspecified" when no date is mentioned.
+- Do NOT resolve dates to YYYY-MM values — return the expression as-is.
 - Do NOT include viz_hint in your output.
 
 For "category", return a concise natural-language phrase (2–4 words, lowercase) that describes what the user wants.
   Examples: "cinema listings", "crime statistics", "flood risk", "train times", "bus timetables",
             "restaurant reviews", "pharmacy opening hours", "weather forecast", "population statistics"
 Use "unknown" only when the intent is completely unclear.
-Do NOT restrict yourself to a fixed list — new intent types are welcome.\``;
+Do NOT restrict yourself to a fixed list — new intent types are welcome.`;
 }
 
 export function stripFences(text: string): string {
@@ -70,8 +66,10 @@ export function deriveVizHint(
   rawText: string,
   intent = "unknown",
 ): VizHint {
-  if (intent === "weather" || plan.category.startsWith("weather")) return "dashboard";
-  if (TABLE_ONLY_INTENTS.has(intent) || TABLE_ONLY_INTENTS.has(plan.category)) return "table";
+  if (intent === "weather" || plan.category.startsWith("weather"))
+    return "dashboard";
+  if (TABLE_ONLY_INTENTS.has(intent) || TABLE_ONLY_INTENTS.has(plan.category))
+    return "table";
   const lower = rawText.toLowerCase();
   if (
     lower.includes("list") ||
@@ -110,7 +108,9 @@ export function expandDateRange(dateFrom: string, dateTo: string): string[] {
   return months;
 }
 
-export async function parseIntent(rawText: string): Promise<QueryPlan> {
+export async function parseIntent(
+  rawText: string,
+): Promise<UnresolvedQueryPlan> {
   if (!rawText || rawText.trim() === "") {
     throw new Error("Query text must not be empty");
   }
@@ -127,6 +127,7 @@ export async function parseIntent(rawText: string): Promise<QueryPlan> {
   const raw = response.choices[0]?.message?.content ?? "";
   const cleaned = stripFences(raw);
   console.log(JSON.stringify({ event: "intent_parsed", raw: cleaned }));
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(cleaned);
@@ -134,37 +135,19 @@ export async function parseIntent(rawText: string): Promise<QueryPlan> {
     throw new Error(`LLM returned invalid JSON: ${cleaned}`);
   }
 
-  const result = QueryPlanSchema.safeParse(parsed);
+  const result = UnresolvedQueryPlanSchema.safeParse(parsed);
 
   if (result.success) {
-    const plan = result.data;
-
-    // Weather-specific date override: when the LLM defaulted to lastMonth
-    // (i.e. user didn't specify a date), use the current month instead.
-    // The weather adapter will then fetch from today → today+6 for current-month queries.
-    if (plan.category.startsWith("weather")) {
-      const now = new Date();
-      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastMonthStr = `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}`;
-      const currentMonthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-
-      if (plan.date_from === lastMonthStr && plan.date_to === lastMonthStr) {
-        plan.date_from = currentMonthStr;
-        plan.date_to = currentMonthStr;
-      }
-    }
-
-    return plan;
+    return result.data;
   }
 
-  // Build structured IntentError with understood/missing fields
   const obj =
     typeof parsed === "object" && parsed !== null
       ? (parsed as Record<string, unknown>)
       : {};
-  const requiredFields = ["category", "date_from", "date_to", "location"];
+  const requiredFields = ["category", "temporal", "location"];
 
-  const understood: Partial<QueryPlan> = {};
+  const understood: Partial<UnresolvedQueryPlan> = {};
   const missing: string[] = [];
 
   for (const field of requiredFields) {

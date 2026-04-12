@@ -30,12 +30,15 @@ export interface DomainAdapter {
   normalizePlan?: (plan: any) => any;
   onLoad?: () => void | Promise<void>;
   /**
-   * Optional: normalise a raw parsed plan before it is used for cache hashing,
-   * fetching, and storage.  Adapters that need to map LLM-returned category
-   * strings to canonical API slugs (e.g. crime-uk) implement this so that
-   * "crime statistics" and "all-crime" share the same cache key.
+   * Phase D — resolve a free-text temporal expression to a concrete date range.
+   * Adapters that read from the availability cache (e.g. crime-uk) implement
+   * this so that "last month" anchors to the latest published data, not the
+   * calendar. Optional — the /parse handler falls back to
+   * defaultResolveTemporalRange when absent.
    */
-  normalizePlan?: (plan: any) => any;
+  resolveTemporalRange?: (
+    temporal: string,
+  ) => Promise<{ date_from: string; date_to: string }>;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
