@@ -1771,11 +1771,13 @@ function DashboardView({ results }: { results: any[] }) {
 function ResultRenderer({
   result,
   onRefine,
+  onNewQuery,
   onFollowUp,
   onChipAction,
 }: {
   result: ExecuteResult;
   onRefine: () => void;
+  onNewQuery: () => void;
   onFollowUp: (query: ExecuteBody) => void;
   onChipAction: (chip: Chip) => void;
 }) {
@@ -1799,7 +1801,11 @@ function ResultRenderer({
   };
 
   const followUps = safeContext.followUps ?? [];
-  const chips = result.chips ?? [];
+
+  // Suppress show_map when already on a map view — the chip would be a no-op.
+  const chips = (result.chips ?? []).filter(
+    (c) => !(c.action === "show_map" && (viz_hint === "map" || viz_hint === "heatmap")),
+  );
 
   return (
     <div className="result-panel">
@@ -1812,7 +1818,7 @@ function ResultRenderer({
               : `${formatCategory(plan.category).toLowerCase()} result${count !== 1 ? "s" : ""}`}
           </span>
         </div>
-        <button className="btn-ghost small" onClick={onRefine}>
+        <button className="btn-ghost small" onClick={onNewQuery}>
           New query
         </button>
       </div>
@@ -2084,7 +2090,8 @@ export default function App() {
     setLoadingStage(null);
   };
 
-  const handleRefine = () => {
+  // Full reset — blank input, all state cleared. Used by "✕ New query" buttons.
+  const handleNewQuery = () => {
     setStage("idle");
     setResult(null);
     setParsed(null);
@@ -2094,6 +2101,12 @@ export default function App() {
     setWorkflowInput(null);
     setWorkflowResult(null);
     setRefineText("");
+  };
+
+  // Soft reset — returns to input with the last query pre-populated for editing.
+  // Used by "Refine ↩" and "Refine query" buttons.
+  const handleRefine = () => {
+    setStage("idle");
   };
 
   // D.2/D.3 — user submitted clarification answers — re-execute with user_attributes
@@ -2380,7 +2393,7 @@ export default function App() {
           )}
 
           {stage === "error" && intentError && (
-            <IntentErrorPanel error={intentError} onRetry={handleRefine} />
+            <IntentErrorPanel error={intentError} onRetry={handleNewQuery} />
           )}
 
           {stage === "done" && parsed && (
@@ -2395,7 +2408,7 @@ export default function App() {
             <ClarificationPanel
               request={clarification.request}
               onSubmit={handleClarificationSubmit}
-              onDismiss={handleRefine}
+              onDismiss={handleNewQuery}
             />
           )}
 
@@ -2403,7 +2416,7 @@ export default function App() {
             <DecisionResultPanel
               intent={decisionResult.intent}
               decision={decisionResult.decision}
-              onDismiss={handleRefine}
+              onDismiss={handleNewQuery}
               onChipAction={handleQuery}
             />
           )}
@@ -2414,14 +2427,14 @@ export default function App() {
               description={workflowInput.description}
               inputSchema={workflowInput.input_schema}
               onSubmit={handleWorkflowSubmit}
-              onDismiss={handleRefine}
+              onDismiss={handleNewQuery}
             />
           )}
 
           {stage === "done" && workflowResult && !workflowInput && (
             <WorkflowResultPanel
               result={workflowResult}
-              onDismiss={handleRefine}
+              onDismiss={handleNewQuery}
             />
           )}
 
@@ -2434,6 +2447,7 @@ export default function App() {
               <ResultRenderer
                 result={result}
                 onRefine={handleRefine}
+                onNewQuery={handleNewQuery}
                 onFollowUp={handleFollowUp}
                 onChipAction={handleChipAction}
               />
