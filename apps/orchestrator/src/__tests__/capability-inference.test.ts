@@ -192,7 +192,7 @@ describe("inferCapabilities", () => {
 // ── generateChips ─────────────────────────────────────────────────────────────
 
 describe("generateChips", () => {
-  it("generates show_map and calculate_travel from has_coordinates", () => {
+  it("generates show_map, show_table, and calculate_travel from has_coordinates", () => {
     const handle = makeHandle({
       data: [{ lat: 51.5, lon: -0.1 }],
       capabilities: ["has_coordinates"],
@@ -200,6 +200,7 @@ describe("generateChips", () => {
     const chips = generateChips(handle);
     const actions = chips.map((c) => c.action);
     expect(actions).toContain("show_map");
+    expect(actions).toContain("show_table");
     expect(actions).toContain("calculate_travel");
   });
 
@@ -212,13 +213,13 @@ describe("generateChips", () => {
     expect(chips.map((c) => c.action)).toContain("show_chart");
   });
 
-  it("generates overlay_spatial from has_polygon", () => {
+  it("does NOT generate overlay_spatial (globally suppressed — no backend)", () => {
     const handle = makeHandle({
       data: [{ geometry: { type: "Polygon", coordinates: [] } }],
       capabilities: ["has_polygon"],
     });
     const chips = generateChips(handle);
-    expect(chips.map((c) => c.action)).toContain("overlay_spatial");
+    expect(chips.map((c) => c.action)).not.toContain("overlay_spatial");
   });
 
   it("generates filter_by (no_overlap) from has_schedule", () => {
@@ -246,13 +247,36 @@ describe("generateChips", () => {
     expect(filterChip).toBeDefined();
   });
 
-  it("generates clarify chip from has_regulatory_reference", () => {
+  it("does NOT generate clarify chip (globally suppressed — no backend)", () => {
     const handle = makeHandle({
       data: [],
       capabilities: ["has_regulatory_reference"],
     });
     const chips = generateChips(handle);
-    expect(chips.map((c) => c.action)).toContain("clarify");
+    expect(chips.map((c) => c.action)).not.toContain("clarify");
+  });
+
+  it("does NOT generate calculate_travel for crime-uk (domain suppressed)", () => {
+    const handle = makeHandle({
+      data: [{ lat: 51.5, lon: -0.1 }],
+      domain: "crime-uk",
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    const actions = chips.map((c) => c.action);
+    expect(actions).toContain("show_map");
+    expect(actions).toContain("show_table");
+    expect(actions).not.toContain("calculate_travel");
+  });
+
+  it("DOES generate calculate_travel for non-crime domains", () => {
+    const handle = makeHandle({
+      data: [{ lat: 51.5, lon: -0.1 }],
+      domain: "cinemas-gb",
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    expect(chips.map((c) => c.action)).toContain("calculate_travel");
   });
 
   it("chip args carry the handle id as ref", () => {

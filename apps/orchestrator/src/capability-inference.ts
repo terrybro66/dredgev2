@@ -121,6 +121,11 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
       args: {},
     },
     {
+      label: "Show as table",
+      action: "show_table",
+      args: {},
+    },
+    {
       label: "Get directions",
       action: "calculate_travel",
       args: {},
@@ -170,21 +175,25 @@ const CAPABILITY_CHIPS: Record<Capability, ChipTemplate[]> = {
   ],
 };
 
+// ── Global action suppressions ────────────────────────────────────────────────
+//
+// Actions listed here are never emitted, regardless of domain or capability.
+// Remove an entry only when the backing workflow is fully implemented.
+//
+//   overlay_spatial — no spatial join implementation; would error on click
+//   clarify         — no /clarify backend handler; would error on click
+
+const GLOBALLY_SUPPRESSED_ACTIONS = new Set(["overlay_spatial", "clarify"]);
+
 // ── Per-domain action suppressions ───────────────────────────────────────────
 //
 // Chip actions listed here are not emitted for the named domain, regardless
 // of which capabilities are inferred.  Remove an entry when the backing
 // adapter or workflow exists and the action is safe to surface.
-//
-// Why suppress rather than delete from CAPABILITY_CHIPS?
-// The capability-based chips are correct for most domains.  Suppression lets
-// us gate on domain readiness without scattering domain-specific logic across
-// the inference table.
 
 const SUPPRESSED_ACTIONS: Record<string, Set<string>> = {
   // calculate_travel opens the "reachable-area" workflow — useful for hunting
   // zones / cinemas, but confusing when applied to crime incident coordinates.
-  // Re-enable once a dedicated transport adapter is registered.
   "crime-uk": new Set(["calculate_travel"]),
 };
 
@@ -229,10 +238,11 @@ export function generateChips(handle: ResultHandle): Chip[] {
   const dedupeKey = (tpl: ChipTemplate) =>
     `${tpl.action}:${tpl.args.domain ?? ""}:${tpl.args.constraint ?? ""}:${tpl.args.field ?? ""}`;
 
-  const suppressed = SUPPRESSED_ACTIONS[handle.domain] ?? new Set<string>();
+  const domainSuppressed = SUPPRESSED_ACTIONS[handle.domain] ?? new Set<string>();
 
   const push = (tpl: ChipTemplate) => {
-    if (suppressed.has(tpl.action)) return;
+    if (GLOBALLY_SUPPRESSED_ACTIONS.has(tpl.action)) return;
+    if (domainSuppressed.has(tpl.action)) return;
     const key = dedupeKey(tpl);
     if (seenKeys.has(key)) return;
     seenKeys.add(key);
