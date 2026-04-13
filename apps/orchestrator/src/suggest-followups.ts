@@ -10,6 +10,10 @@
  * Chip[] in the response. It replaces the domain-specific generateFollowUps()
  * for domains that do not need bespoke chip logic.
  *
+ * Pass domainRelationships to include learned co-occurrence weights from Redis
+ * (getMergedRelationships from relationship-discovery.ts). If omitted, falls
+ * back to the static seed data.
+ *
  * Pure function — no I/O, no async. Safe to call in hot-path.
  */
 
@@ -35,6 +39,12 @@ export interface SuggestFollowupsInput {
   memory: ConversationMemory;
   /** Per-action chip click counts from the session (C.8). Empty object is safe. */
   clickCounts?: Record<string, number>;
+  /**
+   * Merged domain relationships (seeded + learned from Redis co-occurrence).
+   * Obtain via getMergedRelationships() from relationship-discovery.ts.
+   * Falls back to static DOMAIN_RELATIONSHIPS seed if omitted.
+   */
+  domainRelationships?: DomainRelationship[];
 }
 
 /**
@@ -42,7 +52,10 @@ export interface SuggestFollowupsInput {
  * and return the top CHIP_DISPLAY_MAX (3) chips ready to send to the frontend.
  */
 export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
-  const { rows, domain, handleId, ephemeral, memory, clickCounts = {} } = input;
+  const {
+    rows, domain, handleId, ephemeral, memory, clickCounts = {},
+    domainRelationships = DOMAIN_RELATIONSHIPS as DomainRelationship[],
+  } = input;
 
   const capabilities = inferCapabilities(rows);
 
@@ -64,7 +77,7 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
     chips,
     handle,
     memory,
-    domainRelationships: DOMAIN_RELATIONSHIPS as DomainRelationship[],
+    domainRelationships,
     clickCounts,
   });
 }

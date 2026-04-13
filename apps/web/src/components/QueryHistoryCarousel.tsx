@@ -8,8 +8,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useDredgeStore } from "../store";
-
-const API = "http://localhost:3001";
+import { API } from "../api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

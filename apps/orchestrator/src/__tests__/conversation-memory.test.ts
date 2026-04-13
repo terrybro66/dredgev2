@@ -415,10 +415,9 @@ describe("Redis failure logging (A2)", () => {
     const bigCtx = { ...emptyContext(), active_filters: bigFilters };
     // Force the size check to fail by passing an oversized serialised context directly
     // We'll do this by mocking Buffer.byteLength to return over the limit
-    const origByteLength = Buffer.byteLength.bind(Buffer);
-    vi.spyOn(Buffer, "byteLength").mockImplementationOnce(() => 65 * 1024);
+    const byteLengthSpy = vi.spyOn(Buffer, "byteLength").mockImplementationOnce(() => 65 * 1024);
     await setQueryContext("session-big", bigCtx);
-    vi.restoreAllMocks();
+    byteLengthSpy.mockRestore();
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining('"event":"session_payload_too_large"'),
     );

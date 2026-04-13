@@ -6,6 +6,12 @@ vi.mock("../intent", () => ({
   expandDateRange: vi.fn(),
 }));
 
+// availability is async after F3 — stub it so fetcher tests don't need Redis
+vi.mock("../availability", () => ({
+  getLatestMonth: vi.fn().mockResolvedValue(null),
+  isMonthAvailable: vi.fn().mockResolvedValue(true),
+}));
+
 const mockAxiosGet = axios.get as ReturnType<typeof vi.fn>;
 
 const { mockExpandDateRange } = vi.hoisted(() => ({

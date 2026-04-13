@@ -23,6 +23,7 @@ import { parsePoly } from "./poly";
 import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
+import { getMergedRelationships } from "./relationship-discovery";
 import { buildClarificationRequest } from "./clarification";
 import { getRegulatoryAdapter } from "./regulatory-adapter";
 import {
@@ -275,7 +276,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   const {
     poly,
-    viz_hint,
     resolved_location,
     country_code,
     intent,
@@ -284,6 +284,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     user_attributes,
   } = bodyResult.data;
   let plan = bodyResult.data.plan;
+  let viz_hint = bodyResult.data.viz_hint;
 
   const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
   const userAttributes = user_attributes ?? {};
@@ -690,6 +691,16 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     plan = adapter.normalizePlan(plan);
   }
 
+  // 1e. Override viz_hint from adapter's vizHintRules now that the adapter is
+  //     known. The parse-time hint is a best-guess without adapter context;
+  //     adapter rules are authoritative (e.g. food hygiene is always a table,
+  //     hunting zones are always a map regardless of date range).
+  if (adapter.config.vizHintRules) {
+    viz_hint = months.length > 1
+      ? adapter.config.vizHintRules.multiMonthHint
+      : adapter.config.vizHintRules.defaultHint;
+  }
+
   // 2. Ephemeral adapters bypass cache, storage and snapshots entirely
   const isEphemeral = adapter.config.storeResults === false;
 
@@ -808,6 +819,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     .update(hashInput)
     .digest("hex");
 
+  // Resolve merged domain relationships (static seed + Redis co-occurrence)
+  // once per request so both the cache-hit and live paths use learned weights.
+  const mergedRelationships = await getMergedRelationships().catch(() => []);
+
   let cached = await prisma.queryCache.findUnique({ where: { query_hash } });
 
   if (cached && adapter.config.cacheTtlHours != null) {
@@ -883,6 +898,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         profile: { user_attributes: {}, location_history: [] },
       },
       clickCounts,
+      domainRelationships: mergedRelationships,
     });
 
     const cachedEmptyReason = cached.result_count === 0
@@ -1185,6 +1201,7 @@ FROM (
         profile: { user_attributes: {}, location_history: [] },
       },
       clickCounts,
+      domainRelationships: mergedRelationships,
     });
 
     const emptyReason = storedResults.length === 0

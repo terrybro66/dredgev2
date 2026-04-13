@@ -16,6 +16,7 @@ import {
   CAROUSEL_CSS,
 } from "./components/QueryHistoryCarousel";
 import { useDredgeStore } from "./store";
+import { API } from "./api";
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ type ChipAction =
   | "fetch_domain"
   | "show_map"
   | "show_chart"
+  | "show_table"
   | "clarify";
 
 interface ChipArgs {
@@ -227,7 +229,6 @@ type Stage = "idle" | "loading" | "done" | "error";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const API = "http://localhost:3001";
 
 // Recent queries will replace these static examples once the
 // QueryHistoryCarousel component is built (feat/query-history-carousel).
@@ -429,6 +430,7 @@ export function FollowUpChips({
 const ACTION_ICONS: Partial<Record<ChipAction, string>> = {
   show_map:         "◉",
   show_chart:       "▲",
+  show_table:       "☰",
   calculate_travel: "→",
   fetch_domain:     "⊕",
   filter_by:        "⊘",
@@ -1663,7 +1665,14 @@ function ResultRenderer({
   };
 
   const followUps = safeContext.followUps ?? [];
-  const chips = result.chips ?? [];
+  // Filter chips that are redundant for the current viz:
+  //   show_map   — already on map/heatmap
+  //   show_table — already showing as table
+  const chips = (result.chips ?? []).filter((c) => {
+    if (c.action === "show_map" && (viz_hint === "map" || viz_hint === "heatmap")) return false;
+    if (c.action === "show_table" && viz_hint === "table") return false;
+    return true;
+  });
 
   return (
     <div className="result-panel">
@@ -1985,6 +1994,10 @@ export default function App() {
     }
     if (chip.action === "show_chart") {
       setResult({ ...result, viz_hint: "bar" });
+      return;
+    }
+    if (chip.action === "show_table") {
+      setResult({ ...result, viz_hint: "table" });
       return;
     }
 
