@@ -10,7 +10,7 @@ import {
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
-import { getDomainForQuery, DomainAdapter } from "./domains/registry";
+import { getDomainForQuery, getDomainByName, DomainAdapter } from "./domains/registry";
 import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
@@ -29,6 +29,7 @@ import { getRegulatoryAdapter } from "./regulatory-adapter";
 import {
   updateQueryContext,
   getQueryContext,
+  getResultHandle,
   pushResultHandle,
   createEphemeralHandle,
   loadMemory,
@@ -967,7 +968,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
     if (sessionId) {
-      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+      updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
     }
 
     return res.json({
@@ -1296,7 +1297,7 @@ FROM (
 
     recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
     if (sessionId) {
-      updateQueryContext(sessionId, { active_plan: plan }).catch(() => {});
+      updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
     }
 
     return res.json({
@@ -1353,6 +1354,10 @@ const ChipBodySchema = z.object({
     ref: z.string().optional(),
     cinemaName: z.string().optional(),
     cacheKey: z.string().optional(),
+    // W.2 — explicit overrides; when absent, values fall back to session context
+    location: z.string().optional(),
+    date_from: z.string().optional(),
+    date_to: z.string().optional(),
   }),
   sessionId: z.string().optional(),
 });
@@ -1432,6 +1437,104 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
       description: template.description,
       input_schema: template.input_schema,
     });
+  }
+
+  // ── Generic fetch_domain handler — W.1 + W.2 ────────────────────────────
+  // Handles any registered domain that isn't a special case above.
+  if (action === "fetch_domain" && args.domain) {
+    const adapter = getDomainByName(args.domain);
+    if (!adapter) {
+      return res.status(404).json({
+        error: "domain_not_found",
+        domain: args.domain,
+        message: `Domain '${args.domain}' is not registered.`,
+      });
+    }
+
+    try {
+      // W.2 — read session context for location/poly defaults
+      let plan: any = null;
+      let poly = "";
+
+      if (sessionId) {
+        const ctx = await getQueryContext(sessionId);
+        if (ctx?.active_plan) {
+          plan = { ...ctx.active_plan };
+        }
+        if (ctx?.active_poly) {
+          poly = ctx.active_poly;
+        }
+
+        // If a parent handle ref is supplied, it confirms which result to carry
+        // context from (the plan/poly already covers the same session).
+        // Future phases can use the handle's capabilities for richer context.
+        if (args.ref) {
+          const handle = await getResultHandle(sessionId, args.ref);
+          if (!handle) {
+            console.warn(
+              JSON.stringify({
+                event: "chip_stale_reference",
+                ref: args.ref,
+                domain: args.domain,
+              }),
+            );
+          }
+        }
+      }
+
+      // Chip explicit args override session defaults
+      if (args.location) {
+        const geocoded = await geocodeToPolygon(args.location, prisma);
+        poly = geocoded.poly;
+        plan = {
+          ...(plan ?? {}),
+          location: geocoded.display_name,
+        };
+      }
+      if (args.date_from && plan) {
+        plan = { ...plan, date_from: args.date_from };
+      }
+      if (args.date_to && plan) {
+        plan = { ...plan, date_to: args.date_to };
+      }
+
+      if (!plan) {
+        return res.status(400).json({
+          error: "no_context",
+          message:
+            "No session context found. Run a query first so the chip knows which area to search.",
+        });
+      }
+
+      const rows = await adapter.fetchData(plan, poly);
+      const handle = createEphemeralHandle(rows, args.domain);
+
+      if (sessionId) {
+        await pushResultHandle(sessionId, handle);
+      }
+
+      const viz_hint =
+        adapter.config.vizHintRules?.defaultHint ?? "table";
+
+      return res.json({
+        type: "ephemeral",
+        handle,
+        rows,
+        viz_hint,
+        domain: args.domain,
+      });
+    } catch (err: any) {
+      console.warn(
+        JSON.stringify({
+          event: "chip_execution_error",
+          domain: args.domain,
+          error: err.message,
+        }),
+      );
+      return res
+        .status(500)
+        .json({ error: "chip_execution_error", message: err.message });
+    }
   }
 
   // ── Unhandled action ─────────────────────────────────────────────────────

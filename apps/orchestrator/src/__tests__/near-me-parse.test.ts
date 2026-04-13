@@ -21,6 +21,15 @@ vi.mock("../semantic/classifier", () => ({
   classifyIntent: null,
 }));
 
+vi.mock("../temporal-resolver", () => ({
+  defaultResolveTemporalRange: vi.fn(() => ({ date_from: "2024-03", date_to: "2024-03" })),
+  resolveTemporalRangeForCrime: vi.fn(async () => ({ date_from: "2024-03", date_to: "2024-03" })),
+}));
+
+vi.mock("../insight", () => ({
+  generateInsight: vi.fn(async () => null),
+}));
+
 vi.mock("../db", () => ({ prisma: {} }));
 vi.mock("../rateLimiter", () => ({ acquire: vi.fn() }));
 vi.mock("../followups", () => ({ generateFollowUps: vi.fn() }));
@@ -58,6 +67,7 @@ const basePlan = {
   date_from: "2024-03",
   date_to: "2024-03",
   location: "London, UK",
+  temporal: "2024-03",
 };
 
 const londonGeocode = {

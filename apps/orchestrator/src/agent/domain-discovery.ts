@@ -226,16 +226,4 @@ export const domainDiscovery = {
     }
   },
 
-  async approve(id: string, prisma: any): Promise<boolean> {
-    const record = await prisma.domainDiscovery.findUnique({ where: { id } });
-    if (!record) return false;
-    if (record.status !== "requires_review") return false;
-
-    await prisma.domainDiscovery.update({
-      where: { id },
-      data: { approved: true, status: "approved" },
-    });
-
-    return true;
-  },
 };

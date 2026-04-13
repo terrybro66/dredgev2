@@ -178,6 +178,7 @@ export function emptyContext(): QueryContext {
   return {
     location: null,
     active_plan: null,
+    active_poly: null,
     result_stack: [],
     active_filters: {},
   };

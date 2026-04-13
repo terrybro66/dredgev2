@@ -235,6 +235,11 @@ export interface QueryContext {
    *  the follow-up as a new query. */
   active_plan: QueryPlan | null;
 
+  /** The polygon string (WKT) for the most recent query's resolved location.
+   *  Carried forward to chip-triggered queries so they cover the same area
+   *  without re-geocoding. */
+  active_poly: string | null;
+
   /** Last RESULT_STACK_MAX ResultHandle ids, newest first. Full handle data
    *  lives in the session:handles:{sessionId} Redis hash. */
   result_stack: ResultHandle[];

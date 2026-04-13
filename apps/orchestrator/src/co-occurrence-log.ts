@@ -47,8 +47,15 @@ export async function recordCoOccurrence(domains: string[]): Promise<void> {
 
   try {
     await pipeline.exec();
-  } catch {
-    // non-fatal — chip ranker falls back to seeded weights
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "redis_write_error",
+        key: "cooccurrence",
+        domains: unique,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 }
 

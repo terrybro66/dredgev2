@@ -27,15 +27,48 @@ vi.mock("../geocoder", () => ({
   })),
 }));
 vi.mock("../intent", () => ({
-  parseIntent: vi.fn(async (text: string) => ({
+  parseIntent: vi.fn(async (_text: string) => ({
     category: "transport",
     location: "London",
     date_from: "2025-01",
     date_to: "2025-01",
+    temporal: "2025-01",
   })),
   deriveVizHint: vi.fn(() => "table"),
   expandDateRange: vi.fn(() => ["2025-01"]),
 }));
+
+vi.mock("../temporal-resolver", () => ({
+  defaultResolveTemporalRange: vi.fn(() => ({ date_from: "2025-01", date_to: "2025-01" })),
+  resolveTemporalRangeForCrime: vi.fn(async () => ({ date_from: "2025-01", date_to: "2025-01" })),
+}));
+
+vi.mock("../insight", () => ({
+  generateInsight: vi.fn(async () => null),
+}));
+
+vi.mock("../domains/registry", () => ({
+  getDomainForQuery: vi.fn().mockReturnValue(undefined),
+  getDomainByName: vi.fn().mockReturnValue(undefined),
+  loadDomains: vi.fn(),
+}));
+
+vi.mock("../curated-registry", () => ({
+  findCuratedSource: vi.fn().mockReturnValue(null),
+  resolveLocationSlug: vi.fn(),
+}));
+
+vi.mock("../agent/shadow-adapter", () => ({
+  shadowAdapter: { isEnabled: () => false, recover: vi.fn() },
+}));
+
+vi.mock("../agent/domain-discovery", () => ({
+  domainDiscovery: { isEnabled: () => false },
+}));
+
+vi.mock("../followups", () => ({ generateFollowUps: vi.fn() }));
+vi.mock("../execution-model", () => ({ createSnapshot: vi.fn() }));
+vi.mock("../rateLimiter", () => ({ acquire: vi.fn() }));
 
 import express from "express";
 import request from "supertest";
