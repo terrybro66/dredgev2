@@ -1,0 +1,191 @@
+DREDGE — Phase 0 Context (April 2026)
+Status
+The Immediate phase (W.1, W.2, W.3) is complete and all 77 test files pass.
+
+Done	What
+W.1	Generic fetch_domain chip handler in /query/chip — any registered domain is now reachable by chip click
+W.2	active_poly added to QueryContext; execute paths save it; chip handler reads plan+poly from session
+W.3	domainDiscovery.approve() deleted; structured logging added to co-occurrence catch block
+The Architectural Decision
+Phase 0 of roadmap-v3 is replaced. The roadmap proposed adding fields incrementally to the existing flat DomainConfig. Instead, we are adopting the full rich config shape now.
+
+The principle driving this is from guides/generic.md:
+
+The generic adapter works because it standardises meaning, not structure.
+
+This means:
+
+A domain is a config object, not a TypeScript file
+The adapter is a pipeline executor that reads from config
+All domains — built-in and discovered — use the same shape
+The Three-Layer Model
+Every domain produces data in three parallel representations:
+
+Raw — exactly what the API returns, never modified, always stored in raw JSONB column.
+
+Canonical — mapped via config.fields, a flat record with resolved types: { lat, lon, date, category, value, description }.
+
+Semantic — what fields mean: roles (time | metric | dimension | location | label), used for reasoning, aggregation, cross-domain joining.
+
+No logic touches field names. Everything asks: what is the time field? what is the metric? what is the location?
+
+Target DomainConfig Shape
+This replaces the existing flat DomainConfig in packages/schemas/src/index.ts.
+
+interface DomainConfig {
+  // 1. Identity
+  identity: {
+    name: string;
+    displayName: string;
+    description: string;
+    countries: string[];         // ["gb"] | [] for global
+    intents: string[];
+  };
+
+  // 2. Data Source
+  source: {
+    type: "rest" | "csv" | "xlsx" | "scrape";
+    endpoint: string;
+    method?: "GET" | "POST";
+    queryParams?: Record<string, string>;  // "{YYYY-MM}", "{lat}", "{lon}" tokens
+    apiKeyEnv?: string;
+  };
+
+  // 3. Template Shape
+  template: {
+    type: "incidents" | "places" | "forecasts" | "boundaries" | "listings" | "regulations";
+    capabilities: Partial<Record<Capability, boolean>>;
+  };
+
+  // 4. Field Semantics
+  fields: Record<string, FieldDef>;
+  /*
+  FieldDef = {
+    source: string;          // dot-path into raw row e.g. "location.latitude"
+    type: "time" | "number" | "string" | "enum" | "boolean";
+    role: "time" | "metric" | "dimension" | "location_lat" | "location_lon" | "label" | "extra";
+    format?: string;         // "YYYY-MM" for time fields
+    resolution?: string;     // "month" | "day"
+    normalise?: boolean;     // apply categoryMap to enum fields
+    transform?: string;      // "humanise_category" etc.
+  }
+  */
+
+  // 5. Temporal Intelligence
+  time: {
+    type: "time_series" | "static" | "realtime";
+    resolution?: "month" | "day" | "hour";
+    availability?: {
+      source: string;          // Redis cache key e.g. "crime-uk"
+      strategy: "clamp" | "nearest";
+    };
+    defaultRange?: string;     // "1_month" | "6_months"
+  };
+
+  // 6. Recovery Policy (ordered, first trigger wins)
+  recovery: Array<{
+    strategy: "shift_time" | "relax_filter" | "expand_spatial" | "none";
+    trigger: "empty" | "low_results";
+    threshold?: number;
+    // strategy-specific fields:
+    direction?: "backward" | "forward";
+    step?: string;
+    maxAttempts?: number;
+    field?: string;
+    factor?: number;
+    maxRadius?: string;
+  }>;
+
+  // 7. Storage
+  storage: {
+    storeResults: boolean;
+    tableName: string;            // "query_results" for all generic domains
+    prismaModel: string;          // "queryResult"
+    extrasStrategy: "retain_unmapped" | "discard";
+  };
+
+  // 8. Visualisation
+  visualisation: {
+    default: VizHint;
+    rules: Array<{
+      condition: "multi_month" | "single_location" | "has_category";
+      view: VizHint;
+    }>;
+  };
+
+  // 9. Cross-Domain Relationships
+  relationships?: {
+    suggests: Array<{
+      domain: string;
+      reason: string;
+    }>;
+  };
+}
+
+Pipeline Executor
+generic-adapter.ts becomes a pure pipeline executor. No per-domain logic lives here — only the algorithm that executes any DomainConfig.
+
+fetchData(plan, poly):
+  1. FETCH   — build URL from source.endpoint + queryParams tokens + poly centroid
+  2. NORMALISE — map each raw row through config.fields → canonical record
+  3. ENRICH  — coerce types, apply transforms, apply categoryMap to enums
+  4. return canonical rows
+
+storeResults(queryId, rows, prisma):
+  — write canonical fields to query_results columns
+  — write full raw row to `raw` JSONB
+  — write unmapped fields to `extras` JSONB (if extrasStrategy: "retain_unmapped")
+
+recoverFromEmpty(plan, poly, prisma):
+  — iterate config.recovery[] in order
+  — for each strategy: attempt, check result count, return on success
+
+resolveTemporalRange(temporal):
+  — if time.availability: clamp to Redis cache
+  — else: defaultResolveTemporalRange(temporal)
+
+Capability inference no longer scans row shapes heuristically. It reads template.capabilities from config directly. inferCapabilities() in capability-inference.ts becomes a one-liner for config-backed domains.
+
+Migration Plan
+Five adapters need converting. Risk order (hardest first):
+
+Adapter	Risk	Why
+crime-uk	High	Availability-cache temporal resolution; per-endpoint month iteration; crime-specific DB table
+weather	Medium	Multi-metric fields (temp_max, temp_min, precipitation); dedicated DB table
+cinemas-gb	Low	Overpass → places template; no temporal
+food-hygiene-gb	Low	FSA REST → listings template
+hunting-zones-gb	Low	Dead endpoint (D8); config-only, no live data
+Migration order
+Define DomainConfig type + FieldDef type in packages/schemas/src/index.ts
+Write pipeline executor in generic-adapter.ts — verify with a simple domain (food-hygiene)
+Migrate cinemas-gb → config object, delete adapter file, confirm parity
+Migrate food-hygiene-gb → same
+Migrate weather → handle multi-metric; migrate from weather_results table to query_results
+Migrate crime-uk → hardest; migrate from crime_results table; wire availability cache via time.availability
+Delete crime_results and weather_results tables (or keep as read-only legacy — decision deferred)
+Parity test for each migration: before deleting an adapter file, a test asserts that the generic executor on the new config returns the same canonical fields as the old adapter's flattenRow.
+
+Key Files
+File	Change
+packages/schemas/src/index.ts	Replace flat DomainConfig with structured shape + FieldDef type
+apps/orchestrator/src/domains/generic-adapter.ts	Full rewrite as pipeline executor
+apps/orchestrator/src/capability-inference.ts	Read from template.capabilities instead of scanning rows
+apps/orchestrator/src/domains/registry.ts	DomainAdapter.config type changes; loadDomains unchanged in structure
+apps/orchestrator/src/domains/crime-uk/index.ts	Replace with config object
+apps/orchestrator/src/domains/weather/index.ts	Replace with config object
+apps/orchestrator/src/domains/cinemas-gb/index.ts	Replace with config object
+apps/orchestrator/src/domains/food-hygiene-gb/index.ts	Replace with config object
+packages/database/prisma/schema.prisma	No immediate change; crime_results/weather_results tables left intact until migration verified
+What Phases 1–3 Look Like After This
+Phase 1 (Domain Lifecycle): registerDiscoveredDomain writes a DomainConfig row to the DB. Discovery proposes field mappings using the same FieldDef shape. The LLM prompt asks it to pick a template.type and map source fields to FieldDef entries.
+
+Phase 2 (Connected Queries): Cross-domain chips can reason from relationships.suggests in config. The chip ranker reads relationship weights from config rather than the seeded static table. overlay_spatial works because template.type === "incidents" implies coordinate data.
+
+Phase 3 (Schema Evolution): evolveSchema() reads config.fields to know the expected column set. New fields in a source that don't have a FieldDef go into extras. Promoting an extras field means adding a FieldDef entry — no code change, just a config update.
+
+What Is Not Changing
+query.ts remains domain-agnostic — no domain names in route handlers
+DomainAdapter interface in registry.ts — its method signatures stay the same; the config type it wraps changes
+The chip system (W.1/W.2 complete) — works against both old and new adapter shape
+The admin approval endpoint — correct as-is
+conversation-memory.ts, co-occurrence-log.ts — done
