@@ -380,3 +380,133 @@ export const WeatherQueryPlanSchema = z.object({
   metric: z.enum(["temperature", "precipitation", "wind"]).optional(),
 });
 export type WeatherQueryPlan = z.infer<typeof WeatherQueryPlanSchema>;
+
+// ── Phase 0: Structured DomainConfig (V2) ────────────────────────────────────
+// The flat DomainConfig above is kept intact for backward compat during
+// migration. New adapters and the generic pipeline executor use DomainConfigV2.
+
+export type TemplateType =
+  | "incidents"
+  | "places"
+  | "forecasts"
+  | "boundaries"
+  | "listings"
+  | "regulations";
+
+export type Capability =
+  | "has_coordinates"
+  | "has_time_series"
+  | "has_category"
+  | "has_polygon"
+  | "has_schedule"
+  | "has_regulatory_reference"
+  | "has_training_requirement";
+
+export type FieldDef = {
+  /** Dot-path into the raw row e.g. "location.latitude" */
+  source: string;
+  type: "time" | "number" | "string" | "enum" | "boolean";
+  role:
+    | "time"
+    | "metric"
+    | "dimension"
+    | "location_lat"
+    | "location_lon"
+    | "label"
+    | "extra";
+  /** e.g. "YYYY-MM" for time fields */
+  format?: string;
+  /** "month" | "day" | "hour" */
+  resolution?: string;
+  /** Apply categoryMap normalisation to enum fields */
+  normalise?: boolean;
+  /** Named transform e.g. "humanise_category" */
+  transform?: string;
+};
+
+export type RecoveryStrategy = {
+  strategy: "shift_time" | "relax_filter" | "expand_spatial" | "none";
+  trigger: "empty" | "low_results";
+  threshold?: number;
+  // shift_time
+  direction?: "backward" | "forward";
+  step?: string;
+  maxAttempts?: number;
+  // relax_filter
+  field?: string;
+  // expand_spatial
+  factor?: number;
+  maxRadius?: string;
+};
+
+export type DomainConfigV2 = {
+  // 1. Identity
+  identity: {
+    name: string;
+    displayName: string;
+    description: string;
+    /** ISO 3166-1 alpha-2 codes. Empty = global. */
+    countries: string[];
+    intents: string[];
+  };
+
+  // 2. Data Source
+  source: {
+    type: "rest" | "csv" | "xlsx" | "scrape";
+    endpoint: string;
+    method?: "GET" | "POST";
+    /** Token substitution e.g. "{lat}", "{lon}", "{YYYY-MM}" */
+    queryParams?: Record<string, string>;
+    apiKeyEnv?: string;
+  };
+
+  // 3. Template Shape
+  template: {
+    type: TemplateType;
+    capabilities: Partial<Record<Capability, boolean>>;
+  };
+
+  // 4. Field Semantics — keyed by canonical field name
+  fields: Record<string, FieldDef>;
+
+  // 5. Temporal Intelligence
+  time: {
+    type: "time_series" | "static" | "realtime";
+    resolution?: "month" | "day" | "hour";
+    availability?: {
+      /** Redis cache key e.g. "crime-uk" */
+      source: string;
+      strategy: "clamp" | "nearest";
+    };
+    /** "1_month" | "6_months" */
+    defaultRange?: string;
+  };
+
+  // 6. Recovery Policy — ordered, first trigger wins
+  recovery: RecoveryStrategy[];
+
+  // 7. Storage
+  storage: {
+    storeResults: boolean;
+    tableName: string;
+    prismaModel: string;
+    extrasStrategy: "retain_unmapped" | "discard";
+  };
+
+  // 8. Visualisation
+  visualisation: {
+    default: VizHint;
+    rules: Array<{
+      condition: "multi_month" | "single_location" | "has_category";
+      view: VizHint;
+    }>;
+  };
+
+  // 9. Cross-Domain Relationships (optional)
+  relationships?: {
+    suggests: Array<{
+      domain: string;
+      reason: string;
+    }>;
+  };
+};

@@ -11,4 +11,4 @@ coverage
 
 # Crawlee / Stagehand runtime storage (generated, not source)
 apps/orchestrator/storage/
-.Claude/
+.Claude/guides/
