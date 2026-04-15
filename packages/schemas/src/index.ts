@@ -448,22 +448,33 @@ export type DomainConfigV2 = {
     /** ISO 3166-1 alpha-2 codes. Empty = global. */
     countries: string[];
     intents: string[];
+    sourceLabel?: string;
   };
 
-  // 2. Data Source
-  source: {
-    type: "rest" | "csv" | "xlsx" | "scrape";
-    endpoint: string;
-    method?: "GET" | "POST";
-    /** Token substitution e.g. "{lat}", "{lon}", "{YYYY-MM}" */
-    queryParams?: Record<string, string>;
-    apiKeyEnv?: string;
-  };
+  // 2. Data Source — discriminated union
+  source:
+    | {
+        type: "rest";
+        endpoint: string;
+        method?: "GET" | "POST";
+        /** Token substitution e.g. "{lat}", "{lon}", "{YYYY-MM}" */
+        queryParams?: Record<string, string>;
+        apiKeyEnv?: string;
+      }
+    | { type: "csv"; endpoint: string }
+    | { type: "xlsx"; endpoint: string }
+    | { type: "scrape"; endpoint: string }
+    | {
+        type: "overpass";
+        query: string;
+        spatial: "polygon" | "bbox";
+      };
 
   // 3. Template Shape
   template: {
     type: TemplateType;
     capabilities: Partial<Record<Capability, boolean>>;
+    spatialAggregation?: boolean;
   };
 
   // 4. Field Semantics — keyed by canonical field name
@@ -491,7 +502,14 @@ export type DomainConfigV2 = {
     tableName: string;
     prismaModel: string;
     extrasStrategy: "retain_unmapped" | "discard";
+    defaultOrderBy?: Record<string, "asc" | "desc">;
   };
+
+  // Optional: cache TTL
+  cache?: { ttlHours: number };
+
+  // Optional: rate limit
+  rateLimit?: { requestsPerMinute: number };
 
   // 8. Visualisation
   visualisation: {

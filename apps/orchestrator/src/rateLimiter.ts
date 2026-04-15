@@ -1,4 +1,4 @@
-import { DomainConfig } from "@dredge/schemas";
+import { DomainConfigV2 } from "@dredge/schemas";
 import {
   RateLimiterRedis,
   RateLimiterMemory,
@@ -28,10 +28,10 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function acquire(config: DomainConfig): Promise<void> {
+export async function acquire(config: DomainConfigV2): Promise<void> {
   if (!config.rateLimit) return;
 
-  const adapter = config.name;
+  const adapter = config.identity.name;
   const { requestsPerMinute } = config.rateLimit;
   const limiter = getLimiter(adapter, requestsPerMinute);
   const key = adapter; // use adapter as the Redis key suffix

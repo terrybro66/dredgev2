@@ -1,5 +1,4 @@
 import type {
-  DomainConfig,
   DomainConfigV2,
   FieldDef,
   FallbackInfo,
@@ -131,6 +130,9 @@ async function fetchRawRows(
   plan: any,
   poly: string,
 ): Promise<unknown[]> {
+  // overpass type has no endpoint — handled externally (Phase 2)
+  if (config.source.type === "overpass") return [];
+
   const url = buildUrl(config.source.endpoint, plan, poly);
 
   try {
@@ -178,28 +180,8 @@ async function fetchRawRows(
 export function createPipelineAdapter(config: DomainConfigV2): DomainAdapter {
   const domainName = config.identity.name;
 
-  // Compatibility shim — query.ts reads adapter.config.vizHintRules.defaultHint
-  // and adapter.config.name / intents / countries from the flat DomainConfig shape.
-  // We attach these directly so query.ts needs no changes during migration.
-  const compatConfig = {
-    // V2 fields
-    ...config,
-    // Flat compat fields query.ts still reads
-    name: domainName,
-    intents: config.identity.intents,
-    countries: config.identity.countries,
-    vizHintRules: {
-      defaultHint: config.visualisation.default,
-      multiMonthHint:
-        config.visualisation.rules.find((r) => r.condition === "multi_month")
-          ?.view ?? config.visualisation.default,
-    },
-    tableName: config.storage.tableName,
-    prismaModel: config.storage.prismaModel,
-  } as unknown as DomainConfig;
-
   return {
-    config: compatConfig,
+    config,
 
     // ── fetchData ───────────────────────────────────────────────────────────
     async fetchData(plan: unknown, poly: string): Promise<unknown[]> {
@@ -305,24 +287,36 @@ export function createPipelineAdapter(config: DomainConfigV2): DomainAdapter {
   };
 }
 
-// ── createGenericAdapter (legacy — flat DomainConfig) ────────────────────────
-// Kept intact so registry.ts dynamic domain loading continues to work
-// until Phase 1 migrates discovered domains to DomainConfigV2.
+// ── createGenericAdapter (legacy — supports dynamic domains) ──────────────────
+// Accepts a DomainConfigV2 (minimal) and an optional flat field map.
+// Used by registry.ts for dynamically discovered domains until Phase 2
+// migrates them to full V2 configs.
 
 export function createGenericAdapter(
-  config: DomainConfig,
+  config: DomainConfigV2,
+  fieldMap: Record<string, string> = {},
   dedupeKeys: string[] = [],
 ): DomainAdapter {
+  const domainName = config.identity.name;
+
   return {
     config,
 
     async fetchData(_plan: unknown, _locationArg: string): Promise<unknown[]> {
       const dbSources = await prisma.dataSource.findMany({
-        where: { domainName: config.name, enabled: true },
+        where: { domainName, enabled: true },
         orderBy: { confidence: "desc" },
       });
 
-      const sources = dbSources.length > 0 ? dbSources : (config.sources ?? []);
+      // Fall back to the config endpoint if no DB sources
+      const sourceEndpoint =
+        config.source.type !== "overpass" ? config.source.endpoint : "";
+      const sources =
+        dbSources.length > 0
+          ? dbSources
+          : sourceEndpoint
+            ? [{ url: sourceEndpoint, type: "rest" as const }]
+            : [];
       if (sources.length === 0) return [];
 
       const results = await Promise.all(
@@ -412,9 +406,22 @@ export function createGenericAdapter(
       );
 
       const merged = results.flat() as Record<string, unknown>[];
+      // Apply flat field map if provided (legacy dynamic domains)
+      const mapped =
+        Object.keys(fieldMap).length > 0
+          ? merged.map((row) => {
+              const out: Record<string, unknown> = { ...row };
+              for (const [key, target] of Object.entries(fieldMap)) {
+                if (key in row) {
+                  out[target] = row[key];
+                }
+              }
+              return out;
+            })
+          : merged;
       return dedupeKeys.length > 0
-        ? deduplicateRows(merged, dedupeKeys)
-        : merged;
+        ? deduplicateRows(mapped, dedupeKeys)
+        : mapped;
     },
 
     flattenRow(row: unknown): Record<string, unknown> {
@@ -424,13 +431,13 @@ export function createGenericAdapter(
     async storeResults(
       queryId: string,
       rows: unknown[],
-      prisma: any,
+      prismaClient: any,
     ): Promise<void> {
       if (rows.length === 0) return;
-      await prisma.queryResult.createMany({
+      await prismaClient.queryResult.createMany({
         data: (rows as Record<string, unknown>[]).map((row) => ({
-          domain_name: config.name,
-          source_tag: (row.source_tag as string) ?? config.name,
+          domain_name: domainName,
+          source_tag: (row.source_tag as string) ?? domainName,
           date: row.date ? new Date(row.date as string) : null,
           lat: ((row.lat ?? row.latitude) as number) ?? null,
           lon: ((row.lon ?? row.longitude) as number) ?? null,

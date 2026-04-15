@@ -1,4 +1,4 @@
-import { DomainConfig, FallbackInfo } from "@dredge/schemas";
+import { DomainConfigV2, FallbackInfo } from "@dredge/schemas";
 import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
@@ -14,7 +14,7 @@ import { travelEstimatorAdapter } from "./travel-estimator/index";
 // ── DomainAdapter interface ───────────────────────────────────────────────────
 
 export interface DomainAdapter {
-  config: DomainConfig;
+  config: DomainConfigV2;
   fetchData: (plan: any, locationArg: string) => Promise<unknown[]>;
   flattenRow: (row: unknown) => Record<string, unknown>;
   storeResults: (
@@ -46,7 +46,7 @@ export interface DomainAdapter {
 const registry = new Map<string, DomainAdapter>();
 
 export function registerDomain(adapter: DomainAdapter): void {
-  registry.set(adapter.config.name, adapter);
+  registry.set(adapter.config.identity.name, adapter);
 }
 
 export function getDomainForQuery(
@@ -54,10 +54,10 @@ export function getDomainForQuery(
   intent: string,
 ): DomainAdapter | undefined {
   for (const adapter of registry.values()) {
-    const intentMatch = adapter.config.intents.includes(intent);
+    const intentMatch = adapter.config.identity.intents.includes(intent);
     const countryMatch =
-      adapter.config.countries.length === 0 ||
-      adapter.config.countries.includes(countryCode);
+      adapter.config.identity.countries.length === 0 ||
+      adapter.config.identity.countries.includes(countryCode);
     if (intentMatch && countryMatch) return adapter;
   }
   return undefined;
@@ -65,6 +65,15 @@ export function getDomainForQuery(
 
 export function getDomainByName(name: string): DomainAdapter | undefined {
   return registry.get(name);
+}
+
+// ── Helper: derive a canonical source URL from a DomainConfigV2 ───────────────
+
+function getSourceEndpoint(config: DomainConfigV2): string {
+  if (config.source.type === "overpass") {
+    return "https://overpass-api.de/api/interpreter";
+  }
+  return (config.source as { endpoint: string }).endpoint ?? "";
 }
 
 export async function loadDomains(): Promise<void> {
@@ -81,25 +90,36 @@ export async function loadDomains(): Promise<void> {
   for (const adapter of adapters) {
     registerDomain(adapter);
 
+    const domainName = adapter.config.identity.name;
+    const sourceUrl = getSourceEndpoint(adapter.config);
+
+    // Skip upsert for internal/non-URL endpoints (e.g. travel-estimator)
+    if (!sourceUrl || sourceUrl.startsWith("internal:")) {
+      if (adapter.onLoad) {
+        await adapter.onLoad();
+      }
+      continue;
+    }
+
     // Seed a DataSource record for each built-in adapter so the DB
     // reflects the static config from day one. Upsert is idempotent —
     // calling loadDomains() twice never creates duplicate records.
     await prisma.dataSource.upsert({
       where: {
         domainName_url: {
-          domainName: adapter.config.name,
-          url: adapter.config.apiUrl,
+          domainName: domainName,
+          url: sourceUrl,
         },
       },
       update: {}, // no updates — static adapters don't change at runtime
       create: {
-        domainName: adapter.config.name,
-        name: adapter.config.name,
-        url: adapter.config.apiUrl,
+        domainName: domainName,
+        name: domainName,
+        url: sourceUrl,
         type: "rest",
-        fieldMap: (adapter.config.flattenRow as object) ?? {},
+        fieldMap: {},
         refreshPolicy:
-          adapter.config.cacheTtlHours === 0 ? "realtime" : "weekly",
+          adapter.config.cache?.ttlHours === 0 ? "realtime" : "weekly",
         storeResults: true,
         discoveredBy: "manual",
         enabled: true,
@@ -133,44 +153,38 @@ export async function loadDomains(): Promise<void> {
     const country_code = (config.country_code as string) ?? "";
     const fieldMap = (config.fieldMap as Record<string, string>) ?? {};
 
+    // Build a minimal DomainConfigV2 for dynamically loaded domains.
+    // These will be replaced in Phase 2 with full V2 configs.
+    const dynamicConfig: DomainConfigV2 = {
+      identity: {
+        name,
+        displayName: name,
+        description: name,
+        countries: country_code ? [country_code] : [],
+        intents: [intent],
+      },
+      source: { type: "rest", endpoint: apiUrl },
+      template: { type: "listings", capabilities: {} },
+      fields: {},
+      time: { type: "static" },
+      recovery: [],
+      storage: {
+        storeResults,
+        tableName: "query_results",
+        prismaModel: "queryResult",
+        extrasStrategy: "retain_unmapped",
+      },
+      visualisation: { default: "table", rules: [] },
+    };
+
     if (storeResults) {
       registerDomain(
-        createGenericAdapter({
-          name,
-          tableName: "query_results",
-          prismaModel: "queryResult",
-          storeResults: true,
-          countries: country_code ? [country_code] : [],
-          intents: [intent],
-          apiUrl,
-          apiKeyEnv: null,
-          locationStyle: "coordinates",
-          params: {},
-          flattenRow: fieldMap,
-          categoryMap: {},
-          vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-          cacheTtlHours: null,
-        }),
+        createGenericAdapter(dynamicConfig, fieldMap),
       );
     } else {
       const url = apiUrl; // capture for closure
       registerDomain({
-        config: {
-          name,
-          tableName: "query_results",
-          prismaModel: "queryResult",
-          storeResults: false,
-          countries: country_code ? [country_code] : [],
-          intents: [intent],
-          apiUrl: url,
-          apiKeyEnv: null,
-          locationStyle: "coordinates",
-          params: {},
-          flattenRow: fieldMap,
-          categoryMap: {},
-          vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-          cacheTtlHours: null,
-        },
+        config: dynamicConfig,
         async fetchData(_plan: unknown, _loc: string): Promise<unknown[]> {
           try {
             const provider = createRestProvider({ url });

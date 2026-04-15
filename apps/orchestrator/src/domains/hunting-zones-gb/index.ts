@@ -1,5 +1,5 @@
 /**
- * hunting-zones-gb/index.ts — Phase D.10
+ * hunting-zones-gb/index.ts — Phase 1 migration to DomainConfigV2
  *
  * Track A persistent domain for GB open access / game management land.
  *
@@ -13,35 +13,52 @@
  * After the regulatory adapter confirms eligibility, the frontend chips surface
  * "Find zones near me" which resolves to this adapter, then a "How do I get
  * there?" chip triggers the transport / reachable-area workflow.
+ *
+ * Note: the ArcGIS endpoint is dead (D8) but the config must be valid.
  */
 
+import type { DomainConfigV2 } from "@dredge/schemas";
 import type { DomainAdapter } from "../registry";
 import { fetchHuntingZones, type HuntingZoneRow } from "./fetcher";
 
-export const huntingZonesGbAdapter: DomainAdapter = {
-  config: {
-    name:          "hunting-zones-gb",
-    tableName:     "query_results",
-    prismaModel:   "queryResult",
-    countries:     ["GB"],
-    intents:       ["hunting zones", "shooting zones", "game management areas"],
-    apiUrl:        "https://environment.data.gov.uk/arcgis/rest/services/NE/CRoW_Open_Access_Land/FeatureServer/0/query",
-    apiKeyEnv:     null,
-    locationStyle: "polygon",
-    params:        {},
-    flattenRow:    {
-      name:        "description",
-      county:      "location",
-      lat:         "lat",
-      lon:         "lon",
-      area_ha:     "value",
-      access_type: "category",
-    },
-    categoryMap:   {},
-    vizHintRules:  { defaultHint: "map", multiMonthHint: "map" },
-    cacheTtlHours: 168,   // 1 week — land designations change slowly
-    storeResults:  true,
+const config: DomainConfigV2 = {
+  identity: {
+    name: "hunting-zones-gb",
+    displayName: "Hunting Zones GB",
+    description: "GB open access land and game management areas from Natural England CRoW data",
+    countries: ["GB"],
+    intents: ["hunting zones", "shooting zones", "game management areas"],
   },
+  source: {
+    type: "rest",
+    endpoint: "https://environment.data.gov.uk/arcgis/rest/services/NE/CRoW_Open_Access_Land/FeatureServer/0/query",
+  },
+  template: {
+    type: "boundaries",
+    capabilities: { has_coordinates: true, has_category: true },
+  },
+  fields: {
+    description: { source: "name", type: "string", role: "label" },
+    location: { source: "county", type: "string", role: "label" },
+    category: { source: "access_type", type: "string", role: "dimension" },
+    lat: { source: "lat", type: "number", role: "location_lat" },
+    lon: { source: "lon", type: "number", role: "location_lon" },
+    value: { source: "area_ha", type: "number", role: "metric" },
+  },
+  time: { type: "static" },
+  recovery: [],
+  storage: {
+    storeResults: true,
+    tableName: "query_results",
+    prismaModel: "queryResult",
+    extrasStrategy: "retain_unmapped",
+  },
+  visualisation: { default: "map", rules: [] },
+  cache: { ttlHours: 168 },
+};
+
+export const huntingZonesGbAdapter: DomainAdapter = {
+  config,
 
   async fetchData(_plan: unknown, poly: string): Promise<unknown[]> {
     return fetchHuntingZones(poly || null);
@@ -72,7 +89,7 @@ export const huntingZonesGbAdapter: DomainAdapter = {
   ): Promise<void> {
     if (rows.length === 0) return;
 
-    const flat = rows.map((r) => this.flattenRow(r));
+    const flat = rows.map((r) => huntingZonesGbAdapter.flattenRow(r));
     await prisma.queryResult.createMany({
       data: flat.map((r) => ({
         query_id:    queryId,

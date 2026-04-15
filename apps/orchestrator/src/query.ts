@@ -6,6 +6,8 @@ import {
   ResultContext,
   FallbackInfo,
   VizHintSchema,
+  DomainConfigV2,
+  VizHint,
 } from "@dredge/schemas";
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
@@ -50,6 +52,26 @@ import {
   defaultResolveTemporalRange,
   resolveTemporalRangeForCrime,
 } from "./temporal-resolver";
+
+// ── DomainConfigV2 helpers ────────────────────────────────────────────────────
+
+/** Derive the effective viz hint from DomainConfigV2 visualisation config. */
+function getVizHint(config: DomainConfigV2, months: string[]): VizHint {
+  if (months.length > 1) {
+    const multiRule = config.visualisation.rules.find(
+      (r) => r.condition === "multi_month",
+    );
+    if (multiRule) return multiRule.view;
+  }
+  return config.visualisation.default;
+}
+
+/** Get canonical source URL for snapshot recording. */
+function getSourceUrl(config: DomainConfigV2): string {
+  if (config.source.type === "overpass")
+    return "https://overpass-api.de/api/interpreter";
+  return (config.source as { endpoint: string }).endpoint ?? "";
+}
 
 // ── B2: Data freshness + source attribution helpers ───────────────────────────
 
@@ -462,23 +484,29 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
       // Build an on-the-fly adapter from the curated source
       const source = curatedSource; // capture for closures
-      adapter = {
-        config: {
+      const curatedConfig: DomainConfigV2 = {
+        identity: {
           name: source.name,
-          tableName: "query_results",
-          prismaModel: "queryResult",
-          storeResults: source.storeResults,
+          displayName: source.name,
+          description: source.name,
           countries: source.countryCodes,
           intents: [source.intent],
-          apiUrl: source.url,
-          apiKeyEnv: null,
-          locationStyle: "coordinates",
-          params: {},
-          flattenRow: source.fieldMap,
-          categoryMap: {},
-          vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-          cacheTtlHours: null,
         },
+        source: { type: "rest", endpoint: source.url },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: {
+          storeResults: source.storeResults,
+          tableName: "query_results",
+          prismaModel: "queryResult",
+          extrasStrategy: "retain_unmapped",
+        },
+        visualisation: { default: "table", rules: [] },
+      };
+      adapter = {
+        config: curatedConfig,
 
         async fetchData(
           _plan: unknown,
@@ -734,14 +762,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
   //     known. The parse-time hint is a best-guess without adapter context;
   //     adapter rules are authoritative (e.g. food hygiene is always a table,
   //     hunting zones are always a map regardless of date range).
-  if (adapter.config.vizHintRules) {
-    viz_hint = months.length > 1
-      ? adapter.config.vizHintRules.multiMonthHint
-      : adapter.config.vizHintRules.defaultHint;
-  }
+  viz_hint = getVizHint(adapter.config, months);
 
   // 2. Ephemeral adapters bypass cache, storage and snapshots entirely
-  const isEphemeral = adapter.config.storeResults === false;
+  const isEphemeral = adapter.config.storage.storeResults === false;
 
   if (isEphemeral) {
     // Create job record for observability, then fetch live and return directly
@@ -753,7 +777,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         date_to: plan.date_to,
         poly,
         viz_hint,
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         country_code,
         resolved_location,
         intent: resolvedIntent ?? null,
@@ -763,7 +787,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       data: {
         query_id: queryRecord.id,
         status: "pending",
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         cache_hit: false,
       },
     });
@@ -847,7 +871,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   // 3. Compute deterministic cache hash (persistent adapters only)
   const hashInput = JSON.stringify({
-    domain: adapter.config.name,
+    domain: adapter.config.identity.name,
     category: plan.category,
     date_from: plan.date_from,
     date_to: plan.date_to,
@@ -864,15 +888,15 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   let cached = await prisma.queryCache.findUnique({ where: { query_hash } });
 
-  if (cached && adapter.config.cacheTtlHours != null) {
+  if (cached && adapter.config.cache?.ttlHours != null) {
     const ageHours = (Date.now() - cached.createdAt.getTime()) / 3600000;
 
-    if (ageHours > adapter.config.cacheTtlHours) {
+    if (ageHours > adapter.config.cache.ttlHours) {
       await prisma.queryCache.delete({ where: { query_hash } });
       console.log(
         JSON.stringify({
           event: "cache_stale_evicted",
-          domain: adapter.config.name,
+          domain: adapter.config.identity.name,
           query_hash,
         }),
       );
@@ -889,7 +913,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         date_to: plan.date_to,
         poly,
         viz_hint,
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         country_code,
         resolved_location,
         intent: resolvedIntent ?? null,
@@ -899,7 +923,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       data: {
         query_id: queryRecord.id,
         status: "complete",
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         cache_hit: true,
         rows_inserted: cached.result_count,
         completedAt: new Date(),
@@ -909,14 +933,14 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       JSON.stringify({
         event: "execute",
         cache_hit: true,
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         query_hash,
         result_count: cached.result_count,
       }),
     );
 
     const followUps = generateFollowUps({
-      domain: adapter.config.name,
+      domain: adapter.config.identity.name,
       plan,
       poly,
       viz_hint,
@@ -929,7 +953,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     const chips = suggestFollowups({
       rows: cached.results as unknown[],
-      domain: adapter.config.name,
+      domain: adapter.config.identity.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: memory ?? {
@@ -963,10 +987,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     const insight = await generateInsight(
       cached.results as Record<string, unknown>[],
       plan,
-      adapter.config.name,
+      adapter.config.identity.name,
     );
 
-    recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    recordDomainCoOccurrence(sessionId, adapter.config.identity.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
     }
@@ -985,7 +1009,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       aggregated,
       chips,
       resultContext,
-      source_label: adapter.config.sourceLabel ?? null,
+      source_label: adapter.config.identity.sourceLabel ?? null,
       data_freshness: deriveDataFreshness(
         cached.results as Record<string, unknown>[],
       ),
@@ -1005,7 +1029,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         date_to: plan.date_to,
         poly,
         viz_hint,
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         country_code,
         resolved_location,
         intent: resolvedIntent ?? null,
@@ -1020,7 +1044,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     data: {
       query_id: queryRecord.id,
       status: "pending",
-      domain: adapter.config.name,
+      domain: adapter.config.identity.name,
       cache_hit: false,
     },
   });
@@ -1035,7 +1059,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     let fallback: FallbackInfo | undefined;
     let isShadowRecovery = false;
     let effectiveMonths =
-      adapter.config.temporality === "time-series" ? months : [];
+      adapter.config.time.type === "time_series" ? months : [];
 
     if (rows.length === 0 && adapter.recoverFromEmpty) {
       const recovery = await adapter.recoverFromEmpty(plan, poly, prisma);
@@ -1067,7 +1091,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         if (shadow.newSource) {
           await prisma.apiAvailability.upsert({
             where: {
-              source: `${adapter.config.name}:shadow:${shadow.newSource.sourceUrl}`,
+              source: `${adapter.config.identity.name}:shadow:${shadow.newSource.sourceUrl}`,
             },
             update: {
               sourceUrl: shadow.newSource.sourceUrl,
@@ -1076,7 +1100,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
               lastUsedAt: new Date(),
             },
             create: {
-              source: `${adapter.config.name}:shadow:${shadow.newSource.sourceUrl}`,
+              source: `${adapter.config.identity.name}:shadow:${shadow.newSource.sourceUrl}`,
               months: [],
               sourceUrl: shadow.newSource.sourceUrl,
               providerType: shadow.newSource.providerType,
@@ -1097,8 +1121,8 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           await (prisma as any).queryResult.createMany({
             data: (rows as Record<string, unknown>[]).map((row) => ({
               query_id: queryRecord.id,
-              domain_name: adapter.config.name,
-              source_tag: (row._sourceTag as string) ?? adapter.config.name,
+              domain_name: adapter.config.identity.name,
+              source_tag: (row._sourceTag as string) ?? adapter.config.identity.name,
               date: row.date
                 ? new Date(row.date as string)
                 : row.month
@@ -1139,9 +1163,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     if (!isEphemeral) {
       await createSnapshot({
         queryId: queryRecord.id,
-        sourceSet: adapter.config.sources?.map((s) => s.url) ?? [
-          adapter.config.apiUrl,
-        ],
+        sourceSet: [getSourceUrl(adapter.config)],
         schemaVersion: "1.0",
         rows,
         prisma,
@@ -1154,7 +1176,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     if (isEphemeral || isShadowRecovery) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
-      if (adapter.config.spatialAggregation) {
+      if (adapter.config.template.spatialAggregation) {
         const bins = await prisma.$queryRaw<AggregatedBin[]>`
 SELECT ST_Y(centroid)::float AS lat, ST_X(centroid)::float AS lon, count
 FROM (
@@ -1180,10 +1202,10 @@ FROM (
       aggregated = true;
     } else {
       storedResults = await (prisma as any)[
-        adapter.config.prismaModel
+        adapter.config.storage.prismaModel
       ].findMany({
         where: { query_id: queryRecord.id },
-        orderBy: (adapter.config.defaultOrderBy ?? { date: "asc" }) as any,
+        orderBy: (adapter.config.storage.defaultOrderBy ?? { date: "asc" }) as any,
       });
     }
 
@@ -1191,7 +1213,7 @@ FROM (
       await prisma.queryCache.create({
         data: {
           query_hash,
-          domain: adapter.config.name,
+          domain: adapter.config.identity.name,
           result_count: storedResults.length,
           results: storedResults as any,
         },
@@ -1228,7 +1250,7 @@ FROM (
       JSON.stringify({
         event: "execute",
         cache_hit: false,
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         query_hash,
         fetch_ms,
         store_ms,
@@ -1238,7 +1260,7 @@ FROM (
     );
 
     const followUps = generateFollowUps({
-      domain: adapter.config.name,
+      domain: adapter.config.identity.name,
       plan,
       poly,
       viz_hint,
@@ -1251,7 +1273,7 @@ FROM (
 
     const chips = suggestFollowups({
       rows: storedResults as unknown[],
-      domain: adapter.config.name,
+      domain: adapter.config.identity.name,
       handleId: `qr_${queryRecord.id}`,
       ephemeral: false,
       memory: memory ?? {
@@ -1287,15 +1309,15 @@ FROM (
     const data_freshness = deriveDataFreshness(
       storedResults as Record<string, unknown>[],
     );
-    const source_label = adapter.config.sourceLabel ?? null;
+    const source_label = adapter.config.identity.sourceLabel ?? null;
 
     const insight = await generateInsight(
       storedResults as Record<string, unknown>[],
       plan,
-      adapter.config.name,
+      adapter.config.identity.name,
     );
 
-    recordDomainCoOccurrence(sessionId, adapter.config.name).catch(() => {});
+    recordDomainCoOccurrence(sessionId, adapter.config.identity.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
     }
@@ -1331,7 +1353,7 @@ FROM (
     console.log(
       JSON.stringify({
         event: "execute_error",
-        domain: adapter.config.name,
+        domain: adapter.config.identity.name,
         error: err.message,
       }),
     );
@@ -1514,7 +1536,7 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
       }
 
       const viz_hint =
-        adapter.config.vizHintRules?.defaultHint ?? "table";
+        adapter.config.visualisation.default ?? "table";
 
       return res.json({
         type: "ephemeral",

@@ -1,13 +1,6 @@
-import * as pdfParseModule from "pdf-parse";
 import type { Provider, ProviderResult, ProviderSource } from "./types";
 import { ProviderFetchError } from "./types";
 import axios from "axios";
-
-const pdfParse = (
-  pdfParseModule as unknown as {
-    default: (buffer: Buffer) => Promise<{ text: string }>;
-  }
-).default;
 
 type PdfProviderOptions = {
   extractRows: (text: string) => Record<string, unknown>[];
@@ -21,6 +14,13 @@ export function createPdfProvider(options: PdfProviderOptions): Provider {
           responseType: "arraybuffer",
         });
         const buffer = Buffer.from(response.data);
+        // Lazy import — pdf-parse crashes at module load time in Node 18
+        // due to DOMMatrix not being defined. Dynamic import defers it until
+        // actually needed.
+        const pdfParseModule = await import("pdf-parse");
+        const pdfParse = (pdfParseModule as unknown as {
+          default: (buffer: Buffer) => Promise<{ text: string }>;
+        }).default;
         const parsed = await pdfParse(buffer);
         const rows = options.extractRows(parsed.text);
 

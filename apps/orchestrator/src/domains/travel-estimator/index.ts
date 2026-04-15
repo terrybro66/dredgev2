@@ -13,6 +13,7 @@
  * Output: one row per waypoint with travel_time_minutes and distance_km.
  */
 
+import type { DomainConfigV2 } from "@dredge/schemas";
 import type { DomainAdapter } from "../registry";
 
 // ── Haversine ─────────────────────────────────────────────────────────────────
@@ -47,21 +48,33 @@ const SPEED_KMH: Record<string, number> = {
 
 export const travelEstimatorAdapter: DomainAdapter = {
   config: {
-    name: "travel-estimator",
-    tableName: "query_results",
-    prismaModel: "queryResult",
-    countries: [],
-    intents: ["travel time", "travel estimator", "journey time"],
-    apiUrl: "internal:haversine",
-    apiKeyEnv: null,
-    locationStyle: "coordinates",
-    params: {},
-    flattenRow: {},
-    categoryMap: {},
-    vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-    cacheTtlHours: null,
-    storeResults: false,
-  },
+    identity: {
+      name: "travel-estimator",
+      displayName: "Travel Estimator",
+      description: "Haversine travel time estimates between origin and waypoints",
+      countries: [],
+      intents: ["travel time", "travel estimator", "journey time"],
+    },
+    source: {
+      // "internal:haversine" is an intentional marker — no real HTTP call is made.
+      type: "rest",
+      endpoint: "internal:haversine",
+    },
+    template: {
+      type: "listings",
+      capabilities: {},
+    },
+    fields: {},
+    time: { type: "static" },
+    recovery: [],
+    storage: {
+      storeResults: false,
+      tableName: "query_results",
+      prismaModel: "queryResult",
+      extrasStrategy: "discard",
+    },
+    visualisation: { default: "table", rules: [] },
+  } satisfies DomainConfigV2,
 
   async fetchData(plan: unknown): Promise<unknown[]> {
     const p = plan as Record<string, unknown>;
