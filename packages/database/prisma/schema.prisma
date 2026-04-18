@@ -16,35 +16,14 @@ model Query {
   poly              String
   viz_hint          String
   createdAt         DateTime      @default(now())
-  domain            String        @default("crime-uk")  // changed: "crime" → "crime-uk"
+  domain            String        @default("unknown")
   resolved_location String?
   country_code      String?                             // new in v4.1
   intent            String? 
-  results           CrimeResult[]
-  weatherResults    WeatherResult[]
   jobs              QueryJob[]                          // new in v4.1
   queryResults      QueryResult[]
 
   @@map("query")
-}
-
-model CrimeResult {
-  id               String   @id @default(cuid())
-  query_id         String
-  persistent_id    String?
-  category         String
-  month            String
-  street           String?
-  latitude         Float?
-  longitude        Float?
-  outcome_category String?
-  outcome_date     String?
-  location_type    String?
-  context          String?
-  raw              Json?
-  query            Query    @relation(fields: [query_id], references: [id])
-
-  @@map("crime_results")
 }
 
 model SchemaVersion {
@@ -54,7 +33,7 @@ model SchemaVersion {
   column_type  String
   triggered_by String
   createdAt    DateTime @default(now())
-  domain       String   @default("crime-uk")           // changed: "crime" → "crime-uk"
+  domain       String   @default("unknown")
 
   @@map("schema_version")
 }
@@ -118,25 +97,6 @@ model ApiAvailability {
   lastUsedAt       DateTime?
 
   @@map("api_availability")
-}
-
-// ── new in v6.0 ───────────────────────────────────────────────────────────────
-
-model WeatherResult {
-  id              String  @id @default(cuid())
-  query_id        String
-  date            String
-  latitude        Float?
-  longitude       Float?
-  temperature_max Float?
-  temperature_min Float?
-  precipitation   Float?
-  wind_speed      Float?
-  description     String?
-  raw             Json?
-  query           Query   @relation(fields: [query_id], references: [id])
-
-  @@map("weather_results")
 }
 
 // ── new in Phase 8 ────────────────────────────────────────────────────────────
