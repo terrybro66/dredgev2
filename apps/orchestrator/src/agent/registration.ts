@@ -8,6 +8,7 @@
  * Block F — persistent path (storeResults: true): implemented.
  */
 
+import type { DomainConfigV2 } from "@dredge/schemas";
 import { registerDomain, getDomainByName } from "../domains/registry";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
@@ -112,23 +113,29 @@ async function registerEphemeral(opts: PathOpts): Promise<RegisterResult> {
   });
 
   // 3b. Build and register fetch-and-discard adapter
-  registerDomain({
-    config: {
+  const ephemeralConfig: DomainConfigV2 = {
+    identity: {
       name,
-      tableName: "query_results",
-      prismaModel: "queryResult",
-      storeResults: false,
+      displayName: name,
+      description: name,
       countries: country_code ? [country_code] : [],
       intents: [intent],
-      apiUrl,
-      apiKeyEnv: null,
-      locationStyle: "coordinates",
-      params: {},
-      flattenRow: fieldMap as Record<string, string>,
-      categoryMap: {},
-      vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-      cacheTtlHours: null,
     },
+    source: { type: "rest", endpoint: apiUrl },
+    template: { type: "listings", capabilities: {} },
+    fields: {},
+    time: { type: "static" },
+    recovery: [],
+    storage: {
+      storeResults: false,
+      tableName: "query_results",
+      prismaModel: "queryResult",
+      extrasStrategy: "retain_unmapped",
+    },
+    visualisation: { default: "table", rules: [] },
+  };
+  registerDomain({
+    config: ephemeralConfig,
 
     async fetchData(_plan: unknown, _locationArg: string): Promise<unknown[]> {
       try {
@@ -190,22 +197,28 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
   });
 
   // 3b. Register a full GenericAdapter with storage
-  const adapter = createGenericAdapter({
-    name,
-    tableName: "query_results",
-    prismaModel: "queryResult",
-    storeResults: true,
-    countries: country_code ? [country_code] : [],
-    intents: [intent],
-    apiUrl,
-    apiKeyEnv: null,
-    locationStyle: "coordinates",
-    params: {},
-    flattenRow: fieldMap as Record<string, string>,
-    categoryMap: {},
-    vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-    cacheTtlHours: null,
-  });
+  const persistentConfig: DomainConfigV2 = {
+    identity: {
+      name,
+      displayName: name,
+      description: name,
+      countries: country_code ? [country_code] : [],
+      intents: [intent],
+    },
+    source: { type: "rest", endpoint: apiUrl },
+    template: { type: "listings", capabilities: {} },
+    fields: {},
+    time: { type: "static" },
+    recovery: [],
+    storage: {
+      storeResults: true,
+      tableName: "query_results",
+      prismaModel: "queryResult",
+      extrasStrategy: "retain_unmapped",
+    },
+    visualisation: { default: "table", rules: [] },
+  };
+  const adapter = createGenericAdapter(persistentConfig, fieldMap as Record<string, string>);
 
   registerDomain(adapter);
 

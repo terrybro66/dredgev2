@@ -32,6 +32,15 @@ vi.mock("../components/QueryHistoryCarousel", () => ({
   CAROUSEL_CSS: "",
 }));
 
+// Mock zustand and store
+vi.mock("zustand");
+vi.mock("../store", () => ({
+  useDredgeStore: vi.fn(() => ({
+    executeQuery: null,
+    setExecuteQuery: vi.fn(),
+  })),
+}));
+
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 
 const validFallback = {

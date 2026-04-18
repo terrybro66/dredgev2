@@ -1,4 +1,4 @@
-import { DomainConfig, FallbackInfo } from "@dredge/schemas";
+import { DomainConfigV2, FallbackInfo } from "@dredge/schemas";
 import {
   searchAlternativeSources,
   sampleAndDetectFormat,
@@ -65,11 +65,11 @@ export function applyFieldMap(
 }
 
 export function isValidShapeForDomain(
-  config: DomainConfig,
+  config: DomainConfigV2,
   rows: unknown[],
 ): boolean {
   if (rows.length === 0) return false;
-  const rule = DOMAIN_SHAPE_RULES[config.name];
+  const rule = DOMAIN_SHAPE_RULES[config.identity.name];
   if (!rule) return true;
   return rule(rows[0] as Record<string, unknown>);
 }
@@ -159,7 +159,7 @@ export const shadowAdapter = {
   },
 
   async recover(
-    config: DomainConfig,
+    config: DomainConfigV2,
     context: ShadowContext,
     prisma: any,
   ): Promise<ShadowResult | null> {
@@ -232,7 +232,7 @@ export const shadowAdapter = {
           JSON.stringify({
             event: "shadow_adapter_shape_rejected",
             url: top.url,
-            domain: config.name,
+            domain: config.identity.name,
           }),
         );
         return null;

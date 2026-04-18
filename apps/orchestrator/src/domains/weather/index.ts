@@ -1,6 +1,6 @@
 import axios from "axios";
-import { DomainAdapter } from "../registry";
-import { FallbackInfo } from "@dredge/schemas";
+import type { DomainConfigV2, FallbackInfo } from "@dredge/schemas";
+import type { DomainAdapter } from "../registry";
 
 // WMO weather interpretation codes → human-readable description
 const WMO_CODES: Record<number, string> = {
@@ -145,25 +145,46 @@ function rowsFromResponse(
   }));
 }
 
-export const weatherAdapter: DomainAdapter = {
-  config: {
+const weatherConfig: DomainConfigV2 = {
+  identity: {
     name: "weather",
-    tableName: "weather_results",
-    prismaModel: "weatherResult",
+    displayName: "Weather",
+    description: "Global weather forecasts and historical data from Open-Meteo",
     countries: [],
     intents: ["weather"],
-    apiUrl: "https://api.open-meteo.com/v1/forecast",
-    apiKeyEnv: null,
-    locationStyle: "coordinates",
-    params: {},
-    flattenRow: { raw: "$" },
-    categoryMap: {},
-    vizHintRules: { defaultHint: "dashboard", multiMonthHint: "dashboard" },
-    rateLimit: { requestsPerMinute: 60 },
-    defaultOrderBy: { date: "asc" },
-    cacheTtlHours: 1,
-    temporality: "time-series" as const,
   },
+  source: {
+    type: "rest",
+    endpoint: "https://api.open-meteo.com/v1/forecast",
+  },
+  template: {
+    type: "forecasts",
+    capabilities: { has_time_series: true },
+  },
+  fields: {
+    date: { source: "date", type: "time", role: "time", format: "YYYY-MM-DD" },
+    temperature_max: { source: "temperature_max", type: "number", role: "metric" },
+    temperature_min: { source: "temperature_min", type: "number", role: "metric" },
+    precipitation: { source: "precipitation", type: "number", role: "metric" },
+    wind_speed: { source: "wind_speed", type: "number", role: "metric" },
+    description: { source: "description", type: "string", role: "label" },
+  },
+  time: { type: "realtime" },
+  recovery: [],
+  storage: {
+    storeResults: true,
+    tableName: "weather_results",
+    prismaModel: "weatherResult",
+    extrasStrategy: "discard",
+    defaultOrderBy: { date: "asc" },
+  },
+  visualisation: { default: "dashboard", rules: [] },
+  rateLimit: { requestsPerMinute: 60 },
+  cache: { ttlHours: 1 },
+};
+
+export const weatherAdapter: DomainAdapter = {
+  config: weatherConfig,
 
   async fetchData(plan: any): Promise<unknown[]> {
     // Open-Meteo is free — no API key required.

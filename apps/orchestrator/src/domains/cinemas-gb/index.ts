@@ -1,5 +1,5 @@
 /**
- * cinemas-gb/index.ts — Phase C.10
+ * cinemas-gb/index.ts — Phase 1 migration to DomainConfigV2
  *
  * Track A persistent domain for UK cinema locations.
  * Stores: name, chain, lat, lon, address — NOT showtimes.
@@ -13,72 +13,61 @@
  * cinema result chip, not as a standalone query.
  */
 
-import { DomainAdapter } from "../registry";
+import type { DomainConfigV2 } from "@dredge/schemas";
+import { createPipelineAdapter } from "../generic-adapter";
 import { fetchCinemas, type CinemaRow } from "./fetcher";
 
-export const cinemasGbAdapter: DomainAdapter = {
-  config: {
-    name:           "cinemas-gb",
-    tableName:      "query_results",
-    prismaModel:    "queryResult",
-    countries:      ["GB"],
-    intents:        ["cinemas"],
-    apiUrl:         "https://overpass-api.de/api/interpreter",
-    apiKeyEnv:      null,
-    locationStyle:  "polygon",
-    params:         {},
-    flattenRow:     { name: "description", lat: "lat", lon: "lon" },
-    categoryMap:    {},
-    vizHintRules:   { defaultHint: "map", multiMonthHint: "map" },
-    cacheTtlHours:  168, // 1 week
-    storeResults:   true,
+const config: DomainConfigV2 = {
+  identity: {
+    name: "cinemas-gb",
+    displayName: "Cinemas GB",
+    description: "UK cinema locations from OpenStreetMap",
+    countries: ["GB"],
+    intents: ["cinemas"],
+    sourceLabel: "openstreetmap",
   },
+  source: {
+    type: "overpass",
+    query: `[out:json];node["amenity"="cinema"]({{bbox}});out body;`,
+    spatial: "polygon",
+  },
+  template: {
+    type: "places",
+    capabilities: { has_coordinates: true, has_category: true },
+  },
+  fields: {
+    description: { source: "tags.name", type: "string", role: "label" },
+    category: { source: "tags.operator", type: "string", role: "dimension" },
+    lat: { source: "lat", type: "number", role: "location_lat" },
+    lon: { source: "lon", type: "number", role: "location_lon" },
+    location: { source: "tags.addr:city", type: "string", role: "label" },
+  },
+  time: { type: "static" },
+  recovery: [],
+  storage: {
+    storeResults: true,
+    tableName: "query_results",
+    prismaModel: "queryResult",
+    extrasStrategy: "retain_unmapped",
+  },
+  visualisation: { default: "map", rules: [] },
+  cache: { ttlHours: 168 },
+};
 
+const base = createPipelineAdapter(config);
+
+export const cinemasGbAdapter = {
+  ...base,
   async fetchData(_plan: unknown, poly: string): Promise<unknown[]> {
     const rows = await fetchCinemas(poly || null);
-    return rows;
-  },
-
-  flattenRow(row: unknown): Record<string, unknown> {
-    const r = row as CinemaRow;
-    return {
+    return rows.map((r: CinemaRow) => ({
       description: r.name,
-      category:    r.chain,
-      lat:         r.lat,
-      lon:         r.lon,
-      location:    r.address ?? r.name,
-      extras: {
-        chain:   r.chain,
-        address: r.address,
-        website: r.website,
-        osm_id:  r.osm_id,
-      },
-    };
-  },
-
-  async storeResults(
-    queryId: string,
-    rows: unknown[],
-    prisma: any,
-  ): Promise<void> {
-    if (rows.length === 0) return;
-    const flat = rows.map((r) => cinemasGbAdapter.flattenRow(r));
-    await prisma.queryResult.createMany({
-      data: flat.map((row) => ({
-        query_id:     queryId,
-        domain_name:  "cinemas-gb",
-        source_tag:   "openstreetmap",
-        date:         null,
-        lat:          (row.lat as number) ?? null,
-        lon:          (row.lon as number) ?? null,
-        location:     (row.location as string) ?? null,
-        description:  (row.description as string) ?? null,
-        category:     (row.category as string) ?? null,
-        value:        null,
-        raw:          row,
-        extras:       (row.extras as object) ?? null,
-        snapshot_id:  null,
-      })),
-    });
+      category: r.chain,
+      lat: r.lat,
+      lon: r.lon,
+      location: r.address ?? r.name,
+      extras: { chain: r.chain, address: r.address, website: r.website, osm_id: r.osm_id },
+      raw: r,
+    }));
   },
 };
