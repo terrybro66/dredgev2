@@ -4,6 +4,7 @@ const { PrismaClient } = vi.hoisted(() => {
   function PrismaClient(this: any) {
     this.$connect = () => {};
     this.$disconnect = () => {};
+    this.$queryRaw = vi.fn();
   }
   return { PrismaClient };
 });
@@ -14,6 +15,7 @@ describe("db singleton", () => {
   beforeEach(() => {
     vi.resetModules();
     (globalThis as any).prisma = undefined;
+    vi.clearAllMocks();
   });
 
   it("prisma instance is defined", async () => {

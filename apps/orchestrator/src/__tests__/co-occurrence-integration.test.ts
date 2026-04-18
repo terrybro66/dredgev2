@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => {
     id: `ephemeral_${domain}`,
     type: domain,
     domain,
-    capabilities: [] as never[],
+    capabilities: [],
     ephemeral: true,
     rowCount: 0,
     data: [],
