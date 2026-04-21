@@ -107,3 +107,65 @@ Summary sentence:`;
     return null;
   }
 }
+
+/**
+ * Generate an insight along with suggested follow‑up queries that form a logical progression.
+ * Returns an object containing the insight (or null) and an array of follow‑up suggestions.
+ * The follow‑ups are derived from patterns in the data (e.g., trends, location, categories).
+ */
+export async function generateInsightWithFollowUps(
+  rows: Record<string, unknown>[],
+  plan: { category: string; date_from: string; date_to: string; location: string },
+  domain: string,
+): Promise<{ insight: string | null; followUps: Array<{ label: string; intent: string; params: Record<string, unknown> }> }> {
+  const insight = await generateInsight(rows, plan, domain);
+  const followUps: Array<{ label: string; intent: string; params: Record<string, unknown> }> = [];
+
+  if (rows.length === 0) {
+    return { insight, followUps };
+  }
+
+  const stats = buildStats(rows, plan);
+
+  // Suggest a follow‑up to compare with a nearby location
+  followUps.push({
+    label: `Compare with nearby areas`,
+    intent: `compare_${plan.category}`,
+    params: {
+      location: plan.location,
+      radius: 10,
+      date_from: plan.date_from,
+      date_to: plan.date_to,
+    },
+  });
+
+  // If there's a monthly trend, suggest drilling into a specific month
+  if (stats.monthlyTrend && stats.monthlyTrend.length >= 2) {
+    const highestMonth = stats.monthlyTrend.reduce((prev, curr) => (curr.count > prev.count ? curr : prev));
+    followUps.push({
+      label: `See details for ${highestMonth.month}`,
+      intent: `drill_down`,
+      params: {
+        date_from: highestMonth.month + "-01",
+        date_to: highestMonth.month + "-31",
+        category: plan.category,
+        location: plan.location,
+      },
+    });
+  }
+
+  // Suggest a related domain (e.g., from crime to safety scores)
+  if (domain.startsWith("crime")) {
+    followUps.push({
+      label: `Check safety scores for ${plan.location}`,
+      intent: `safety_scores`,
+      params: {
+        location: plan.location,
+        date_from: plan.date_from,
+        date_to: plan.date_to,
+      },
+    });
+  }
+
+  return { insight, followUps };
+}

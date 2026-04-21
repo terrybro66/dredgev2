@@ -43,6 +43,12 @@ export interface RegulatoryAdapter {
    * Must never throw — return ineligible with an explanation on any error.
    */
   evaluate(userAttributes: Record<string, unknown>): Promise<DecisionResult>;
+
+  /**
+   * Whether this regulatory adapter was auto‑approved during registration.
+   * Defaults to false for dynamically discovered adapters; true for built‑in ones.
+   */
+  autoApproved?: boolean;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────

@@ -491,3 +491,29 @@ export interface WorkflowResult {
   step_results: WorkflowStepResult[];
   handles:      ResultHandle[];
 }
+
+// ── Domain Validation & Auto‑Approval ────────────────────────────────────────
+
+export type ValidationStatus = "pending" | "approved" | "rejected" | "auto_approved";
+
+export interface DomainValidation {
+  status: ValidationStatus;
+  criteria: {
+    hasRequiredFields: boolean;
+    supportedCountry: boolean;
+    safeSource: boolean;
+    hasValidEndpoint: boolean;
+  };
+  notes: string[];
+}
+
+// ── Insight & Follow‑up Queries ──────────────────────────────────────────────
+
+export interface InsightWithFollowUps {
+  insight: string | null;
+  followUps: Array<{
+    label: string;
+    intent: string;
+    params: Record<string, unknown>;
+  }>;
+}
