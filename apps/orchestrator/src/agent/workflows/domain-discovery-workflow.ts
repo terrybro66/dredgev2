@@ -111,7 +111,7 @@ async function discoverWithBrowser(
            Look for government open data portals, CSV files, REST APIs, or statistical datasets.
            Return the direct URL to the data, the likely format, and a brief description.`,
           z.object({
-            sources: z.array(
+            items: z.array(
               z.object({
                 url: z.string(),
                 format: z.enum(["rest", "csv", "xlsx", "scrape"]),
