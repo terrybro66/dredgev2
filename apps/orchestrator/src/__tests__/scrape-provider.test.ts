@@ -263,62 +263,42 @@ describe("ScrapeProvider", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Suite 2 — GenericAdapter scrape routing
+// Suite 2 — PipelineAdapter scrape routing
+// Verifies that createPipelineAdapter calls ScrapeProvider when
+// config.source.type === "scrape", and leaves Stagehand untouched for
+// other source types.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const { mockPrismaForAdapter } = vi.hoisted(() => ({
-  mockPrismaForAdapter: {
-    dataSource: {
-      findMany: vi.fn(),
-      update: vi.fn().mockResolvedValue({}),
-    },
-  },
-}));
+// ── Helper: build a minimal DomainConfigV2 ────────────────────────────────────
 
-vi.mock("../db", () => ({ prisma: mockPrismaForAdapter }));
+const makeV2Config = (
+  name: string,
+  endpoint: string,
+  storeResults = false,
+  sourceType: "rest" | "scrape" = "rest",
+) => ({
+  identity: { name, displayName: name, description: "", countries: ["GB"], intents: [name] },
+  source: { type: sourceType as const, endpoint },
+  template: { type: "listings" as const, capabilities: {} },
+  fields: {},
+  time: { type: "static" as const },
+  recovery: [],
+  storage: { storeResults, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" as const },
+  visualisation: { default: "table" as const, rules: [] },
+});
 
-describe("GenericAdapter — scrape source routing", () => {
-  beforeEach(() => {
-    global.fetch = vi.fn().mockRejectedValue(new Error("Not a direct file"));
-    mockPrismaForAdapter.dataSource.findMany.mockResolvedValue([]);
-  });
-
-  it("GenericAdapter routes to ScrapeProvider when source.type === 'scrape'", async () => {
-    // Return a scrape-type DataSource from the DB
-    mockPrismaForAdapter.dataSource.findMany.mockResolvedValue([
-      {
-        id: "ds-scrape-1",
-        url: "https://www.odeon.co.uk/cinemas/braehead/",
-        type: "scrape",
-        enabled: true,
-        storeResults: false,
-        extractionPrompt: "Extract all movie titles and showtimes.",
-        fieldMap: { title: "description", showtime: "date" },
-      },
-    ]);
-
+describe("PipelineAdapter — scrape source routing", () => {
+  it("routes to ScrapeProvider when config.source.type === 'scrape'", async () => {
     mockExtract.mockResolvedValue({
       cinema: "Odeon",
       movies: ["Dune Part Two", "Gladiator II"],
     });
 
-    const { createGenericAdapter } = await import("../domains/generic-adapter");
+    const { createPipelineAdapter } = await import("../domains/generic-adapter");
 
-    const adapter = createGenericAdapter({
-      name: "cinema-listings-gb",
-      tableName: "query_results",
-      prismaModel: "queryResult",
-      storeResults: false,
-      countries: ["GB"],
-      intents: ["cinema"],
-      apiUrl: "https://www.odeon.co.uk",
-      apiKeyEnv: null,
-      locationStyle: "coordinates",
-      params: {},
-      flattenRow: {},
-      categoryMap: {},
-      vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-    });
+    const adapter = createPipelineAdapter(
+      makeV2Config("cinema-listings-gb", "https://www.odeon.co.uk/cinemas/braehead/", false, "scrape"),
+    );
 
     const rows = await adapter.fetchData({}, "51.5,-0.1");
 
@@ -327,81 +307,31 @@ describe("GenericAdapter — scrape source routing", () => {
     expect(Array.isArray(rows)).toBe(true);
   });
 
-  it("GenericAdapter does NOT call Stagehand when source.type === 'rest'", async () => {
-    mockPrismaForAdapter.dataSource.findMany.mockResolvedValue([
-      {
-        id: "ds-rest-1",
-        url: "https://api.example.com/data",
-        type: "rest",
-        enabled: true,
-        storeResults: true,
-        fieldMap: {},
-      },
-    ]);
-
+  it("does NOT call Stagehand when config.source.type === 'rest'", async () => {
     mockAxiosGet.mockResolvedValue({ data: [{ id: 1 }] });
 
-    const { createGenericAdapter } = await import("../domains/generic-adapter");
+    const { createPipelineAdapter } = await import("../domains/generic-adapter");
 
-    const adapter = createGenericAdapter({
-      name: "flood-risk-gb",
-      tableName: "query_results",
-      prismaModel: "queryResult",
-      storeResults: true,
-      countries: ["GB"],
-      intents: ["flood risk"],
-      apiUrl: "https://api.example.com/data",
-      apiKeyEnv: null,
-      locationStyle: "coordinates",
-      params: {},
-      flattenRow: {},
-      categoryMap: {},
-      vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-    });
+    const adapter = createPipelineAdapter(
+      makeV2Config("flood-risk-gb", "https://api.example.com/data", true, "rest"),
+    );
 
     await adapter.fetchData({}, "51.5,-0.1").catch(() => {});
 
     expect(mockExtract).not.toHaveBeenCalled();
   });
 
-  it("rows from ScrapeProvider pass through the adapter's flattenRow like any other provider", async () => {
-    mockPrismaForAdapter.dataSource.findMany.mockResolvedValue([
-      {
-        id: "ds-scrape-2",
-        url: "https://www.odeon.co.uk/cinemas/braehead/",
-        type: "scrape",
-        enabled: true,
-        storeResults: false,
-        extractionPrompt: "Extract all movie titles.",
-        fieldMap: {},
-      },
-    ]);
-
+  it("rows from ScrapeProvider pass through normaliseRow via config.fields", async () => {
     mockExtract.mockResolvedValue({
-      movies: [{ cinema: "Odeon", movies: ["Dune Part Two", "Gladiator II"] }],
+      movies: [{ cinema: "Odeon", title: "Dune Part Two" }],
     });
 
-    const { createGenericAdapter } = await import("../domains/generic-adapter");
+    const { createPipelineAdapter } = await import("../domains/generic-adapter");
 
-    const flattenRow = vi.fn((row: unknown) => row as Record<string, unknown>);
+    const adapter = createPipelineAdapter(
+      makeV2Config("cinema-listings-gb", "https://www.odeon.co.uk/", false, "scrape"),
+    );
 
-    const adapter = createGenericAdapter({
-      name: "cinema-listings-gb",
-      tableName: "query_results",
-      prismaModel: "queryResult",
-      storeResults: false,
-      countries: ["GB"],
-      intents: ["cinema"],
-      apiUrl: "https://www.odeon.co.uk",
-      apiKeyEnv: null,
-      locationStyle: "coordinates",
-      params: {},
-      flattenRow: {},
-      categoryMap: {},
-      vizHintRules: { defaultHint: "table", multiMonthHint: "table" },
-    });
-
-    // flattenRow is called on the adapter config — just verify rows are returned
     const rows = await adapter.fetchData({}, "51.5,-0.1");
     expect(Array.isArray(rows)).toBe(true);
   });

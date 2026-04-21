@@ -12,7 +12,7 @@ import {
 import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
-import { getDomainForQuery, getDomainByName, DomainAdapter } from "./domains/registry";
+import { getDomainForQuery, getDomainByName, getAllAdapters, DomainAdapter } from "./domains/registry";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
 import { domainDiscovery } from "./agent/domain-discovery";
@@ -941,6 +941,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       },
       clickCounts,
       domainRelationships: mergedRelationships,
+      adapters: getAllAdapters(),
     });
 
     const cachedEmptyReason =
@@ -1168,6 +1169,7 @@ FROM (
       },
       clickCounts,
       domainRelationships: mergedRelationships,
+      adapters: getAllAdapters(),
     });
 
     const emptyReason =

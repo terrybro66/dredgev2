@@ -103,11 +103,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "weekly" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),

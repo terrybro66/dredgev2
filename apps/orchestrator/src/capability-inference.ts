@@ -9,7 +9,9 @@
  * CHIP_DISPLAY_MAX before it reaches the frontend.
  */
 
+import type { TemplateType } from "@dredge/schemas";
 import type { Capability, Chip, ResultHandle } from "./types/connected";
+import type { DomainAdapter } from "./domains/registry";
 
 // ── Row field accessors ───────────────────────────────────────────────────────
 
@@ -220,18 +222,75 @@ const DOMAIN_CHIPS: Record<string, ChipTemplate[]> = {
   ],
 };
 
+// ── Template affinity engine ──────────────────────────────────────────────────
+//
+// After generating capability-based and domain-specific chips, scan all
+// registered adapters for cross-domain affinity matches.
+//
+// Affinity matrix — edges represent "the source template type implies the
+// user might also want results from a domain of the target template type":
+//
+//   incidents   →  boundaries  (spatial context)
+//   incidents   →  places      (nearby venues)
+//   incidents   →  forecasts   (conditions at time/location)
+//   places      →  listings    (entity-level enrichment)
+//   places      →  forecasts   (weather at that location)
+//   listings    →  incidents   (area safety context)
+//   boundaries  →  incidents   (what's happening inside this zone)
+//   boundaries  →  places      (services within this zone)
+//
+// Only emit a chip if the target domain is currently registered AND is not
+// the same domain as the current result AND is not a pipeline primitive.
+
+const TEMPLATE_AFFINITY: Partial<Record<TemplateType, TemplateType[]>> = {
+  incidents:  ["boundaries", "places", "forecasts"],
+  places:     ["listings", "forecasts"],
+  listings:   ["incidents"],
+  boundaries: ["incidents", "places"],
+};
+
+/**
+ * Domains that serve as pipeline primitives rather than user-facing data
+ * sources. Excluded from cross-domain affinity chip generation.
+ */
+const PIPELINE_PRIMITIVE_DOMAINS = new Set(["geocoder", "travel-estimator"]);
+
+/**
+ * Build a human-readable label for a cross-domain affinity chip.
+ * Tone matches existing chips: action-first, short.
+ */
+function affinityLabel(adapter: DomainAdapter): string {
+  const displayName = adapter.config.identity.displayName;
+  switch (adapter.config.template.type as TemplateType) {
+    case "forecasts":   return `${displayName} forecast`;
+    case "places":      return `${displayName} nearby`;
+    case "listings":    return `${displayName} nearby`;
+    case "incidents":   return `${displayName} in this area`;
+    case "boundaries":  return `${displayName} zones`;
+    default:            return displayName;
+  }
+}
+
 // ── Public: generateChips ─────────────────────────────────────────────────────
 
 /**
- * Generate all valid chips for a ResultHandle based on its capabilities
- * and domain-specific overrides.
+ * Generate all valid chips for a ResultHandle based on its capabilities,
+ * domain-specific overrides, and cross-domain template affinity.
+ *
  * Returns an unranked list — the chip ranker (C.4) scores and trims to
  * CHIP_DISPLAY_MAX before the response is sent.
+ *
+ * Pass `adapters` (all currently registered DomainAdapters) to enable
+ * the template affinity engine. When omitted the engine is skipped and
+ * only capability-based and domain-specific chips are returned.
  *
  * Every chip carries args.ref pointing back to the handle id so tools
  * can retrieve the result when the chip is clicked.
  */
-export function generateChips(handle: ResultHandle): Chip[] {
+export function generateChips(
+  handle: ResultHandle,
+  adapters: DomainAdapter[] = [],
+): Chip[] {
   const chips: Chip[] = [];
   const seenKeys = new Set<string>();
 
@@ -256,6 +315,32 @@ export function generateChips(handle: ResultHandle): Chip[] {
 
   // 2. Domain-specific chips
   for (const tpl of DOMAIN_CHIPS[handle.domain] ?? []) push(tpl);
+
+  // 3. Template affinity chips
+  if (adapters.length > 0) {
+    const sourceAdapter = adapters.find(
+      (a) => a.config.identity.name === handle.domain,
+    );
+    const sourceTemplate = sourceAdapter?.config.template.type as
+      | TemplateType
+      | undefined;
+
+    if (sourceTemplate) {
+      const affinityTargets = TEMPLATE_AFFINITY[sourceTemplate] ?? [];
+      for (const targetAdapter of adapters) {
+        const targetName = targetAdapter.config.identity.name;
+        if (targetName === handle.domain) continue;
+        if (PIPELINE_PRIMITIVE_DOMAINS.has(targetName)) continue;
+        const targetTemplate = targetAdapter.config.template.type as TemplateType;
+        if (!affinityTargets.includes(targetTemplate)) continue;
+        push({
+          label: affinityLabel(targetAdapter),
+          action: "fetch_domain",
+          args: { domain: targetName },
+        });
+      }
+    }
+  }
 
   return chips;
 }

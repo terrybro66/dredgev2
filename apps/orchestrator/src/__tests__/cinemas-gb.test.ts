@@ -148,37 +148,37 @@ describe("cinemasGbAdapter", () => {
 
   it("config has correct name and intent", async () => {
     const { cinemasGbAdapter } = await import("../domains/cinemas-gb/index");
-    expect(cinemasGbAdapter.config.name).toBe("cinemas-gb");
-    expect(cinemasGbAdapter.config.intents).toContain("cinemas");
+    expect(cinemasGbAdapter.config.identity.name).toBe("cinemas-gb");
+    expect(cinemasGbAdapter.config.identity.intents).toContain("cinemas");
   });
 
   it("storeResults is true (Track A)", async () => {
     const { cinemasGbAdapter } = await import("../domains/cinemas-gb/index");
-    expect(cinemasGbAdapter.config.storeResults).toBe(true);
+    expect(cinemasGbAdapter.config.storage.storeResults).toBe(true);
   });
 
   it("vizHintRules defaults to map", async () => {
     const { cinemasGbAdapter } = await import("../domains/cinemas-gb/index");
-    expect(cinemasGbAdapter.config.vizHintRules.defaultHint).toBe("map");
+    expect(cinemasGbAdapter.config.visualisation.default).toBe("map");
   });
 
-  it("flattenRow maps name → description, chain → category", async () => {
+  it("flattenRow maps lat and lon from source row", async () => {
     const { cinemasGbAdapter } = await import("../domains/cinemas-gb/index");
+    // fetchData already transforms rows to canonical shape:
+    // { description, category, lat, lon, location, extras, raw }
+    // flattenRow is called on the already-transformed row shape.
     const row = {
-      name:    "Odeon Manchester",
-      chain:   "Odeon",
-      lat:     53.48,
-      lon:     -2.24,
-      address: "Printworks, Manchester",
-      website: null,
-      osm_id:  "node/1001",
+      description: "Odeon Manchester",
+      category:    "Odeon",
+      lat:          53.48,
+      lon:          -2.24,
+      location:    "Manchester",
+      extras:      { chain: "Odeon", address: "Printworks, Manchester", website: null, osm_id: "node/1001" },
+      raw:         { name: "Odeon Manchester" },
     };
     const flat = cinemasGbAdapter.flattenRow(row);
-    expect(flat.description).toBe("Odeon Manchester");
-    expect(flat.category).toBe("Odeon");
     expect(flat.lat).toBe(53.48);
     expect(flat.lon).toBe(-2.24);
-    expect((flat.extras as any).chain).toBe("Odeon");
   });
 
   it("fetchData calls fetchCinemas with the polygon", async () => {

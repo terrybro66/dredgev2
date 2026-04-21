@@ -3,7 +3,7 @@ import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
 import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
-import { createGenericAdapter } from "./generic-adapter";
+import { createPipelineAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
 import { prisma } from "../db";
@@ -152,10 +152,17 @@ export async function loadDomains(): Promise<void> {
     const storeResults = (config.storeResults as boolean) ?? true;
     const intent = (config.intent as string) ?? name;
     const country_code = (config.country_code as string) ?? "";
-    const fieldMap = (config.fieldMap as Record<string, string>) ?? {};
+    const rawFieldMap = (config.fieldMap as Record<string, string>) ?? {};
 
-    // Build a minimal DomainConfigV2 for dynamically loaded domains.
-    // These will be replaced in Phase 2 with full V2 configs.
+    // Convert flat fieldMap (source → target) to FieldDef format so
+    // createPipelineAdapter can perform proper row normalisation.
+    // All dynamically discovered fields are typed as strings; richer
+    // type inference is a future enhancement.
+    const fields: DomainConfigV2["fields"] = {};
+    for (const [source, target] of Object.entries(rawFieldMap)) {
+      fields[String(target)] = { source: String(source), type: "string", role: "label" };
+    }
+
     const dynamicConfig: DomainConfigV2 = {
       identity: {
         name,
@@ -166,7 +173,7 @@ export async function loadDomains(): Promise<void> {
       },
       source: { type: "rest", endpoint: apiUrl },
       template: { type: "listings", capabilities: {} },
-      fields: {},
+      fields,
       time: { type: "static" },
       recovery: [],
       storage: {
@@ -179,9 +186,9 @@ export async function loadDomains(): Promise<void> {
     };
 
     if (storeResults) {
-      registerDomain(
-        createGenericAdapter(dynamicConfig, fieldMap),
-      );
+      // Use createPipelineAdapter — consistent with registerPersistent() in
+      // registration.ts so restart behaviour matches first-registration behaviour.
+      registerDomain(createPipelineAdapter(dynamicConfig));
     } else {
       const url = apiUrl; // capture for closure
       registerDomain({
@@ -211,6 +218,10 @@ export async function loadDomains(): Promise<void> {
       }),
     );
   }
+}
+
+export function getAllAdapters(): DomainAdapter[] {
+  return [...registry.values()];
 }
 
 export function clearRegistry(): void {

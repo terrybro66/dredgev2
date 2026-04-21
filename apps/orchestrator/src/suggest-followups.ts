@@ -21,6 +21,7 @@ import { inferCapabilities, generateChips } from "./capability-inference";
 import { rankChips } from "./chip-ranker";
 import { DOMAIN_RELATIONSHIPS } from "./domain-relationships";
 import type { Chip, ConversationMemory, DomainRelationship, ResultHandle } from "./types/connected";
+import type { DomainAdapter } from "./domains/registry";
 
 export interface SuggestFollowupsInput {
   /** Result rows from the adapter (used for capability inference). */
@@ -45,6 +46,14 @@ export interface SuggestFollowupsInput {
    * Falls back to static DOMAIN_RELATIONSHIPS seed if omitted.
    */
   domainRelationships?: DomainRelationship[];
+  /**
+   * All currently registered domain adapters.
+   * When provided, enables the template affinity engine — cross-domain
+   * fetch_domain chips are emitted for compatible target domains.
+   * Obtain via getAllAdapters() from domains/registry.ts.
+   * Omitting disables cross-domain chip generation (safe default).
+   */
+  adapters?: DomainAdapter[];
 }
 
 /**
@@ -55,6 +64,7 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
   const {
     rows, domain, handleId, ephemeral, memory, clickCounts = {},
     domainRelationships = DOMAIN_RELATIONSHIPS as DomainRelationship[],
+    adapters = [],
   } = input;
 
   const capabilities = inferCapabilities(rows);
@@ -69,7 +79,7 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
     data:         ephemeral ? rows : null,
   };
 
-  const chips = generateChips(handle);
+  const chips = generateChips(handle, adapters);
 
   if (chips.length === 0) return [];
 

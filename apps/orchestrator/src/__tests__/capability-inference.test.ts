@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { inferCapabilities, generateChips } from "../capability-inference";
 import type { ResultHandle, Chip } from "../types/connected";
+import type { DomainAdapter } from "../domains/registry";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -337,5 +338,211 @@ describe("generateChips", () => {
     });
     const chips = generateChips(handle);
     expect(chips.map((c) => c.action)).toContain("calculate_travel");
+  });
+});
+
+// ── Template affinity engine ──────────────────────────────────────────────────
+
+function makeAdapter(
+  name: string,
+  templateType: string,
+  displayName?: string,
+): DomainAdapter {
+  return {
+    config: {
+      identity: {
+        name,
+        displayName: displayName ?? name,
+        description: "",
+        countries: [],
+        intents: [name],
+      },
+      source: { type: "rest", endpoint: `https://example.com/${name}` },
+      template: { type: templateType as any, capabilities: {} },
+      fields: {},
+      time: { type: "static" },
+      recovery: [],
+      storage: {
+        storeResults: true,
+        tableName: "query_results",
+        prismaModel: "queryResult",
+        extrasStrategy: "retain_unmapped",
+      },
+      visualisation: { default: "table", rules: [] },
+    },
+    fetchData: async () => [],
+    flattenRow: (r) => r as Record<string, unknown>,
+    storeResults: async () => {},
+  };
+}
+
+describe("generateChips — template affinity engine", () => {
+  it("emits no affinity chips when no adapters are passed (safe default)", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const chips = generateChips(handle);
+    const affinityChips = chips.filter((c) => c.action === "fetch_domain");
+    expect(affinityChips).toHaveLength(0);
+  });
+
+  it("emits a forecasts chip when incidents domain has a forecasts adapter registered", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("weather", "forecasts", "Weather"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChip = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "weather",
+    );
+    expect(affinityChip).toBeDefined();
+    expect(affinityChip!.label).toMatch(/weather/i);
+  });
+
+  it("emits a places chip when incidents domain has a places adapter registered", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("cinemas-gb", "places", "Cinemas"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChip = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "cinemas-gb",
+    );
+    expect(affinityChip).toBeDefined();
+    expect(affinityChip!.label).toMatch(/cinemas/i);
+  });
+
+  it("does NOT emit affinity chip for the same domain as the current result", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [makeAdapter("crime-uk", "incidents")];
+    const chips = generateChips(handle, adapters);
+    const selfChip = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "crime-uk",
+    );
+    expect(selfChip).toBeUndefined();
+  });
+
+  it("does NOT emit affinity chips for pipeline primitives (geocoder, travel-estimator)", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("geocoder", "places", "Geocoder"),
+      makeAdapter("travel-estimator", "places", "Travel Estimator"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const primitiveChips = chips.filter(
+      (c) =>
+        c.action === "fetch_domain" &&
+        (c.args.domain === "geocoder" || c.args.domain === "travel-estimator"),
+    );
+    expect(primitiveChips).toHaveLength(0);
+  });
+
+  it("places → listings affinity: cinemas-gb result gets food-hygiene-gb chip", () => {
+    const handle = makeHandle({
+      domain: "cinemas-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("cinemas-gb", "places"),
+      makeAdapter("food-hygiene-gb", "listings", "Food Hygiene Ratings"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChip = chips.find(
+      (c) =>
+        c.action === "fetch_domain" && c.args.domain === "food-hygiene-gb",
+    );
+    expect(affinityChip).toBeDefined();
+  });
+
+  it("listings → incidents affinity: food-hygiene result gets crime chip", () => {
+    const handle = makeHandle({
+      domain: "food-hygiene-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("food-hygiene-gb", "listings"),
+      makeAdapter("crime-uk", "incidents", "UK Crime"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChip = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "crime-uk",
+    );
+    expect(affinityChip).toBeDefined();
+  });
+
+  it("forecasts template has no outgoing affinity — no cross-domain chips for weather result", () => {
+    const handle = makeHandle({
+      domain: "weather",
+      data: [{ date: "2024-01", value: 10 }, { date: "2024-02", value: 12 }],
+      capabilities: ["has_time_series"],
+    });
+    const adapters = [
+      makeAdapter("weather", "forecasts"),
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("cinemas-gb", "places"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChips = chips.filter((c) => c.action === "fetch_domain");
+    expect(affinityChips).toHaveLength(0);
+  });
+
+  it("affinity chips carry the handle id as ref", () => {
+    const handle = makeHandle({
+      id: "qr_99",
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("weather", "forecasts", "Weather"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChip = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "weather",
+    );
+    expect(affinityChip?.args.ref).toBe("qr_99");
+  });
+
+  it("no duplicate affinity chips when same target appears twice", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk", "incidents"),
+      makeAdapter("weather", "forecasts", "Weather"),
+      makeAdapter("weather-alt", "forecasts", "Weather Alt"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const weatherChips = chips.filter(
+      (c) => c.action === "fetch_domain" && c.args.domain?.startsWith("weather"),
+    );
+    // Both are distinct domains so both chips should appear
+    expect(weatherChips).toHaveLength(2);
   });
 });

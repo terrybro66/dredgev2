@@ -21,6 +21,7 @@ vi.mock("../domains/registry", () => {
   const adapters = new Map<string, unknown>();
   return {
     getDomainByName: (name: string) => adapters.get(name),
+    getAllAdapters: () => [],
     __adapters: adapters,
   };
 });

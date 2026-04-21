@@ -125,7 +125,7 @@ vi.mock("../intent",                  () => ({ parseIntent: mockParseIntent, der
 vi.mock("../geocoder",                () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
 vi.mock("../schema",                  () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db",                      () => ({ prisma: mockPrisma }));
-vi.mock("../domains/registry",        () => ({ getDomainForQuery: mockGetDomainForQuery }));
+vi.mock("../domains/registry",        () => ({ getDomainForQuery: mockGetDomainForQuery, getAllAdapters: () => [] }));
 vi.mock("../rateLimiter",             () => ({ acquire: mockAcquire }));
 vi.mock("../execution-model",         () => ({ createSnapshot: mockCreateSnapshot }));
 vi.mock("../agent/shadow-adapter",    () => ({ shadowAdapter: mockShadowAdapter }));

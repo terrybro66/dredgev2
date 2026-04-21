@@ -81,6 +81,7 @@ vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
+  getAllAdapters: () => [],
 }));
 vi.mock("../rateLimiter", () => ({ acquire: mockAcquire }));
 vi.mock("../execution-model", () => ({ createSnapshot: mockCreateSnapshot }));

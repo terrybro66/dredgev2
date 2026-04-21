@@ -236,6 +236,7 @@ vi.mock("../schema", () => ({ evolveSchema: mockEvolveSchema }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
+  getAllAdapters: () => [],
 }));
 vi.mock("../rateLimiter", () => ({ acquire: mockAcquire }));
 vi.mock("../execution-model", () => ({ createSnapshot: mockCreateSnapshot }));
@@ -379,15 +380,14 @@ describe("query pipeline — curated source path", () => {
   it("does NOT call findCuratedSource when a registered adapter matches", async () => {
     mockGetDomainForQuery.mockReturnValue({
       config: {
-        name: "crime-uk",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        storeResults: true,
-        countries: ["GB"],
-        intents: ["crime"],
-        apiUrl: "https://data.police.uk/api",
-        cacheTtlHours: null,
-        defaultOrderBy: { date: "asc" },
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://data.police.uk/api" },
+        template: { type: "incidents", capabilities: {} },
+        fields: {},
+        time: { type: "time_series", resolution: "month" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "map", rules: [] },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       flattenRow: (r: unknown) => r,
@@ -462,15 +462,14 @@ describe("query pipeline — curated source path", () => {
     // Registered adapter exists — curated should never be consulted
     const registeredAdapter = {
       config: {
-        name: "crime-uk",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        storeResults: true,
-        countries: ["GB"],
-        intents: ["crime"],
-        apiUrl: "https://data.police.uk/api",
-        cacheTtlHours: null,
-        defaultOrderBy: { date: "asc" },
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://data.police.uk/api" },
+        template: { type: "incidents", capabilities: {} },
+        fields: {},
+        time: { type: "time_series", resolution: "month" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "map", rules: [] },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       flattenRow: (r: unknown) => r,

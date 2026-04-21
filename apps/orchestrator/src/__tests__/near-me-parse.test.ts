@@ -49,6 +49,7 @@ vi.mock("../enrichment/source-tag", () => ({ tagRows: vi.fn() }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: vi.fn().mockReturnValue(undefined),
   loadDomains: vi.fn(),
+  getAllAdapters: () => [],
 }));
 
 import express from "express";

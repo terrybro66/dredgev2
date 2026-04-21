@@ -51,6 +51,7 @@ vi.mock("../domains/registry", () => ({
   getDomainForQuery: vi.fn().mockReturnValue(undefined),
   getDomainByName: vi.fn().mockReturnValue(undefined),
   loadDomains: vi.fn(),
+  getAllAdapters: () => [],
 }));
 
 vi.mock("../curated-registry", () => ({

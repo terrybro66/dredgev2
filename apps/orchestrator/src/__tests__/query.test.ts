@@ -89,6 +89,7 @@ vi.mock("../geocoder", () => ({ geocodeToPolygon: mockGeocodeToPolygon }));
 vi.mock("../db", () => ({ prisma: mockPrisma }));
 vi.mock("../domains/registry", () => ({
   getDomainForQuery: mockGetDomainForQuery,
+  getAllAdapters: () => [],
 }));
 vi.mock("../rateLimiter", () => ({ acquire: mockAcquire }));
 vi.mock("../execution-model", () => ({ createSnapshot: mockCreateSnapshot }));
@@ -503,7 +504,8 @@ describe("POST /query/execute", () => {
     const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
-      .send({ ...validExecuteBody, viz_hint: "bar" });
+      // Provide two months so getVizHint fires the multi_month rule → bar
+      .send({ ...validExecuteBody, viz_hint: "bar", months: ["2024-01", "2024-02"] });
     expect(res.body.results).toHaveLength(2);
     expect(res.body.results[0]).toMatchObject({
       month: expect.any(String),
@@ -638,88 +640,9 @@ describe("cache, job tracking, and routing", () => {
   });
 });
 
-describe("shadow adapter recovery storage", () => {
-  const shadowRows = [
-    { category: "burglary", month: "2024-01", latitude: 52.2, longitude: 0.7 },
-  ];
-  const shadowResult = {
-    data: shadowRows,
-    fallback: {
-      field: "location" as const,
-      original: "Bury St Edmunds",
-      used: "Bury St Edmunds",
-      explanation: "Shadow source used",
-    },
-    newSource: {
-      sourceUrl: "https://data.gov.uk/bury-crimes.csv",
-      providerType: "csv",
-      confidence: 0.7,
-    },
-  };
-
-  beforeEach(() => {
-    mockFetchCrimes.mockResolvedValue([]);
-    mockShadowAdapter.isEnabled.mockReturnValue(true);
-    mockShadowAdapter.recover.mockResolvedValue(shadowResult);
-  });
-
-  it("writes shadow rows to queryResult.createMany, not adapter.storeResults", async () => {
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockPrisma.queryResult.createMany).toHaveBeenCalled();
-    expect(mockStoreResults).not.toHaveBeenCalled();
-  });
-
-  it("response includes fallback status when shadow data is used", async () => {
-    const app = buildApp();
-    const res = await request(app)
-      .post("/query/execute")
-      .send(validExecuteBody);
-    expect(res.status).toBe(200);
-    expect(res.body.resultContext.status).toBe("fallback");
-  });
-
-  it("shadow storage rows include query_id", async () => {
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({ query_id: "test-id" }),
-        ]),
-      }),
-    );
-  });
-
-  it("shadow storage parses string latitude and longitude to numbers", async () => {
-    mockShadowAdapter.recover.mockResolvedValue({
-      ...shadowResult,
-      data: [
-        {
-          category: "burglary",
-          month: "2024-01",
-          latitude: "52.2",
-          longitude: "0.7",
-        },
-      ],
-    });
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({ lat: 52.2, lon: 0.7 }),
-        ]),
-      }),
-    );
-  });
-
-  it("does not write to queryCache for shadow-recovered results", async () => {
-    const app = buildApp();
-    await request(app).post("/query/execute").send(validExecuteBody);
-    expect(mockPrisma.queryCache.create).not.toHaveBeenCalled();
-  });
-});
+// Shadow adapter (shadow-adapter.ts) was deleted in the v2 migration.
+// The related tests have been removed. recoverFromEmpty() on the adapter
+// is now the only recovery path — tested via adapter-level tests.
 
 describe("GET /query/history", () => {
   const historyRecord = {

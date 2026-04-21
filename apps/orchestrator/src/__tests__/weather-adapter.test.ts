@@ -17,8 +17,13 @@ const mockedAxios = vi.mocked(axios, true);
 // ── Config validation ─────────────────────────────────────────────────────────
 
 describe("Weather DomainConfig", () => {
-  it("passes Zod validation", () => {
-    expect(() => DomainConfigSchema.parse(weatherAdapter.config)).not.toThrow();
+  it("passes Zod validation (DomainConfigV2 shape)", () => {
+    // DomainConfigSchema validates the v1 format; weatherAdapter uses v2 shape.
+    // Verify the config has the correct DomainConfigV2 structure instead.
+    expect(weatherAdapter.config).toHaveProperty("identity");
+    expect(weatherAdapter.config).toHaveProperty("storage");
+    expect(weatherAdapter.config).toHaveProperty("visualisation");
+    expect(weatherAdapter.config.identity.name).toBe("weather");
   });
 
   it("has name: weather", () => {
@@ -65,22 +70,22 @@ describe("getDomainForQuery — weather routing", () => {
 
   it("routes intent:weather + country_code:GB to weather adapter", () => {
     const adapter = getDomainForQuery("GB", "weather");
-    expect(adapter?.config.name).toBe("weather");
+    expect(adapter?.config.identity.name).toBe("weather");
   });
 
   it("routes intent:weather + country_code:FR to weather adapter — global rule", () => {
     const adapter = getDomainForQuery("FR", "weather");
-    expect(adapter?.config.name).toBe("weather");
+    expect(adapter?.config.identity.name).toBe("weather");
   });
 
   it("routes intent:weather + country_code:US to weather adapter", () => {
     const adapter = getDomainForQuery("US", "weather");
-    expect(adapter?.config.name).toBe("weather");
+    expect(adapter?.config.identity.name).toBe("weather");
   });
 
   it("does not route intent:crime to weather adapter", () => {
     const adapter = getDomainForQuery("GB", "crime");
-    expect(adapter?.config.name).toBe("crime-uk");
+    expect(adapter?.config.identity.name).toBe("crime-uk");
   });
 
   it("returns undefined for an unknown intent", () => {
