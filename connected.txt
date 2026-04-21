@@ -79,6 +79,24 @@ Currently the fallthrough case is:
   } catch (err) {
     console.error("Chip action failed:", err);
   }
+} else if (chip.action === "fetch_domain") {
+  try {
+    const response = await fetch(`${API}/query/chip`, {
+      method: "POST",
+      headers: SESSION_HEADERS,
+      body: JSON.stringify({
+        chip,
+        sessionId: getSessionId(),
+      }),
+    });
+    const data = await response.json();
+      
+    if (data?.type === "ephemeral" && data?.results) {
+      setResultStack(prev => [...prev, data]);
+    }
+  } catch (err) {
+    console.error("Chip action failed:", err);
+  }
 } else {
   console.log("[chip]", chip.action, chip.args);
 }
