@@ -121,7 +121,7 @@ async function discoverWithBrowser(
             ),
           }),
         );
-        sources.push(...(results.sources ?? []));
+        sources.push(...(results.items ?? []));
       } catch (err) {
         log.error(`Stagehand extract failed: ${String(err)}`);
       }
