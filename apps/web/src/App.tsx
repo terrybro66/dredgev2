@@ -1931,6 +1931,7 @@ export default function App() {
   >(null);
   const [parsed, setParsed] = useState<ParsedQuery | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
+  const [resultStack, setResultStack] = useState<ExecuteResult[]>([]);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;

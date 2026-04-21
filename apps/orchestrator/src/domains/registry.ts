@@ -113,6 +113,7 @@ export async function loadDomains(): Promise<void> {
     weatherAdapter,
     cinemasGbAdapter,
     foodHygieneGbAdapter,
+    floodRiskGbAdapter,
     geocoderAdapter,
     travelEstimatorAdapter,
   ];
