@@ -1,0 +1,377 @@
+## Next Phase Plan: Connected Queries & Auto-Approval
+
+---
+
+### Phase A — Frontend Result Stack
+**Unblocks all six user stories. Every affinity chip currently fires the backend correctly but is silently dropped at `console.log` in `App.tsx`.**
+
+---
+
+**A.1 — Add result stack state to App.tsx**
+
+File: `apps/web/src/App.tsx`
+
+Add a `resultStack` array alongside the existing `result` state. Each entry in the stack is a query result — the initial query plus every chip-driven follow-up. The user sees a vertical column of result cards, newest at the bottom.
+
+```ts
+// Near existing state declarations (~line 200)
+const [resultStack, setResultStack] = useState<QueryResult[]>([]);
+
+// When a primary /execute response arrives, reset the stack:
+setResultStack([response.data]);
+
+// When a chip follow-up arrives (see A.3), append:
+setResultStack(prev => [...prev, chipResponse]);
+```
+
+The existing `result` state can stay for backwards compatibility during the transition, or you can migrate everything to `resultStack[0]` — the latter is cleaner but touches more of the render tree.
+
+---
+
+**A.2 — Add a `StackedResultView` component**
+
+File: `apps/web/src/components/StackedResultView.tsx` (new file)
+
+This is a thin wrapper that maps each entry in `resultStack` to the correct renderer. It does not know domain names — it switches on `viz_hint` and `type`:
+
+```tsx
+export function StackedResultView({ stack }: { stack: QueryResult[] }) {
+  return (
+    <div className="result-stack">
+      {stack.map((result, i) => (
+        <ResultCard
+          key={result.handle ?? i}
+          result={result}
+          index={i}
+          isLatest={i === stack.length - 1}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+`ResultCard` renders the viz (map/table/chart/dashboard) based on `result.viz_hint` and the chip strip beneath each card using `result.chips`. The existing view components (`MapView`, `TableView`, `DashboardView`, `BarChart`) are reused — no changes to renderers in this phase.
+
+---
+
+**A.3 — Wire generic `fetch_domain` chip responses**
+
+File: `apps/web/src/App.tsx`, function `handleChipAction()` (~line 2183)
+
+Currently the fallthrough case is:
+```ts
+} else {
+  console.log("[chip]", chip.action, chip.args);
+}
+```
+
+Replace with:
+```ts
+} else if (chip.action === "fetch_domain") {
+  const response = await api.post("/query/chip", {
+    chip,
+    sessionId,
+  });
+  if (response.data?.type === "ephemeral" && response.data?.rows) {
+    setResultStack(prev => [...prev, response.data]);
+  }
+}
+```
+
+The backend `/query/chip` handler (W.1) already handles this correctly — it reads `active_plan`/`active_poly` from session, calls the adapter, and returns `{ type: "ephemeral", handle, rows, viz_hint, chips }`. This single frontend change makes the entire affinity engine visible to the user.
+
+---
+
+**A.4 — Render the stack instead of the single result**
+
+File: `apps/web/src/App.tsx`, render section
+
+Replace the single result render block with `<StackedResultView stack={resultStack} />`. Each card in the stack shows:
+- The domain's `displayName` as a card header
+- The viz for that result
+- The chip strip for follow-up actions from that result
+
+The cards are visually connected — a thin line or arrow between them communicates "you arrived here from the previous result." This is the visual narrative of a connected query session.
+
+---
+
+**Test this phase works with Story 2:** Search "cinemas in Manchester" → result shows cinemas on map with chips → click "Weather forecast" affinity chip → weather card appends below cinemas → click "Food hygiene nearby" chip from either card → food hygiene table appends. Three cards, one session, clear narrative.
+
+---
+
+### Phase B — `flood-risk-gb` Adapter
+**Unlocks Stories 1, 3, 4. Uses the `boundaries` template — currently no registered domain uses this template, so it also validates the whole affinity chain for boundary-type domains.**
+
+---
+
+**B.1 — Create the adapter directory and index**
+
+File: `apps/orchestrator/src/domains/flood-risk-gb/index.ts`
+
+The EA Flood Monitoring API returns flood warning areas as GeoJSON polygons. The adapter uses the `boundaries` template.
+
+```ts
+import { DomainAdapter } from "../registry";
+
+export const floodRiskGbAdapter: DomainAdapter = {
+  config: {
+    identity: {
+      name: "flood-risk-gb",
+      displayName: "Flood Risk",
+      description: "EA flood warning areas and severity",
+      countries: ["GB"],
+      intents: ["flood risk", "flooding", "flood warnings"],
+    },
+    source: {
+      type: "rest",
+      endpoint: "https://environment.data.gov.uk/flood-monitoring/id/floodAreas",
+    },
+    template: { type: "boundaries", capabilities: { has_polygon: true } },
+    fields: {
+      name:        { source: "label",       type: "string", role: "label" },
+      description: { source: "description", type: "string", role: "label" },
+      category:    { source: "floodWatchArea", type: "string", role: "category" },
+      lat:         { source: "lat",         type: "number", role: "coordinate" },
+      lon:         { source: "long",        type: "number", role: "coordinate" },
+    },
+    time: { type: "realtime" },
+    recovery: [],
+    storage: {
+      storeResults: true,
+      tableName: "query_results",
+      prismaModel: "queryResult",
+      extrasStrategy: "retain_unmapped",
+    },
+    visualisation: { default: "map", rules: [] },
+    cache: { ttlHours: 1 },
+  },
+
+  async fetchData(plan, poly): Promise<unknown[]> {
+    // EA API: filter by lat/lon bounding box derived from poly centroid
+    // GET /flood-monitoring/id/floodAreas?lat=X&lng=Y&dist=10
+    const centroid = polyCentroid(poly); // reuse from generic-adapter or inline
+    const url = centroid
+      ? `https://environment.data.gov.uk/flood-monitoring/id/floodAreas?lat=${centroid.lat}&lng=${centroid.lon}&dist=15`
+      : "https://environment.data.gov.uk/flood-monitoring/id/floodAreas?county=England";
+    const res = await fetch(url);
+    const json = await res.json();
+    return (json.items ?? []).map(flattenRow);
+  },
+
+  flattenRow(row): Record<string, unknown> {
+    const r = row as Record<string, unknown>;
+    return {
+      name:        r.label,
+      description: r.description ?? r.riverOrSea ?? null,
+      category:    r.floodWatchArea ?? null,
+      lat:         r.lat ?? null,
+      lon:         r.long ?? null,
+      raw:         r,
+      extras:      { eaAreaCode: r.eaAreaCode, quickDialNumber: r.quickDialNumber },
+    };
+  },
+
+  async storeResults(queryId, rows, prismaClient) {
+    // Same pattern as generic-adapter storeResults
+  },
+};
+```
+
+**B.2 — Register in `loadDomains()`**
+
+File: `apps/orchestrator/src/domains/registry.ts`
+
+Add to the `adapters` array alongside the other built-in adapters:
+```ts
+import { floodRiskGbAdapter } from "./flood-risk-gb/index";
+// ...
+const adapters = [
+  crimeUkAdapter,
+  weatherAdapter,
+  cinemasGbAdapter,
+  foodHygieneGbAdapter,
+  floodRiskGbAdapter, // ← add
+  geocoderAdapter,
+  travelEstimatorAdapter,
+];
+```
+
+**B.3 — Verify affinity chips appear**
+
+With `flood-risk-gb` registered using template `boundaries`:
+- A crime query (`incidents` template) now generates a "Flood Risk zones" affinity chip automatically — no code changes needed
+- A food hygiene query (`listings` → `incidents` affinity) now chains to crime → then to flood risk
+- Story 1 (house move) becomes fully navigable via chips
+
+---
+
+### Phase C — Cross-Result Synthesis
+**Makes the experience coherent. Without this, the user sees three stacked cards but has to draw conclusions themselves. This phase adds a narrative layer above the stack.**
+
+---
+
+**C.1 — Generalise `generateInsight()` for multi-domain input**
+
+File: `apps/orchestrator/src/insight.ts`
+
+Current signature: `generateInsight(rows, domainName, location)` — produces a one-sentence summary of a single domain result.
+
+New overload: `generateInsightForStack(stack: StackEntry[], location: string)` where `StackEntry = { domainName: string, rows: unknown[], vizHint: string }`.
+
+The prompt to the LLM changes from:
+> "Summarise these crime results in one sentence"
+
+To:
+> "The user queried: [location]. They found: crime data ([N] incidents), flood risk ([N] zones), food hygiene ([N] businesses). Write one sentence that draws a conclusion across all three — what does this tell someone considering moving here?"
+
+The LLM already knows about domain combinations from CLAUDE.md context; the prompt anchors it to the specific user story pattern. Pass `domainNames` as a hint so the model knows which user story applies.
+
+**C.2 — Stack synthesis endpoint**
+
+File: `apps/orchestrator/src/query.ts`
+
+Add a new route `POST /query/synthesise`:
+```ts
+app.post("/query/synthesise", async (req, res) => {
+  const { stack, location, sessionId } = req.body;
+  // stack = [{ domainName, rows, vizHint }, ...]
+  const insight = await generateInsightForStack(stack, location);
+  res.json({ insight });
+});
+```
+
+**C.3 — Trigger synthesis from the frontend**
+
+File: `apps/web/src/components/StackedResultView.tsx`
+
+When `resultStack.length >= 2`, render a "What does this tell me?" button at the bottom of the stack. On click:
+```ts
+const response = await api.post("/query/synthesise", {
+  stack: resultStack.map(r => ({
+    domainName: r.domain_name,
+    rows: r.rows,
+    vizHint: r.viz_hint,
+  })),
+  location: activeLocation,
+  sessionId,
+});
+setSynthesisInsight(response.data.insight);
+```
+
+Display the synthesis as a highlighted card at the bottom of the stack — visually distinct from individual result cards (different background, slightly larger text). This is the "resolution" the user asked for.
+
+---
+
+### Phase D — Auto-Approval Pipeline Fixes
+**Enables new domains to be discovered and approved without code changes. Four specific breaks to fix.**
+
+---
+
+**D.1 — Fix manual approval loop**
+
+File: `apps/orchestrator/src/agent/domain-discovery.ts` (or wherever `approve()` is defined)
+
+Current broken behavior: `approve()` flips `status` to `"approved"` in the DB but never calls `registerDiscoveredDomain()`. The domain is never live.
+
+Fix — after the status update, call registration:
+```ts
+async approve(discoveryId: string): Promise<void> {
+  const record = await prisma.domainDiscovery.update({
+    where: { id: discoveryId },
+    data: { status: "registered" },
+  });
+
+  const config = record.proposed_config as Record<string, unknown>;
+  if (config) {
+    // Same logic as loadDomains() persistent branch
+    await registerPersistent(config);
+  }
+}
+```
+
+Extract the `loadDomains()` persistent-branch logic into a shared `registerPersistent(config)` function so both paths use identical code.
+
+**D.2 — Guard discovery when curated registry already matched**
+
+File: `apps/orchestrator/src/query.ts`, execute handler
+
+Current: discovery runs even when a curated adapter was found. This wastes time and can create duplicate domains.
+
+Fix — add an early exit:
+```ts
+// After curated registry check:
+if (adapter) {
+  // Use it — do not run discovery
+} else {
+  // Only now run domainDiscovery.run()
+}
+```
+
+The curated registry check is already present; the fix is ensuring the `else` branch is truly exclusive.
+
+**D.3 — Fix Stagehand extraction prompt (D11)**
+
+File: `apps/orchestrator/src/agent/workflows/domain-discovery-workflow.ts`
+
+Current broken behavior: `sampleSource()` with a Stagehand scrape returns `{"url":"null","description":"null"}` — the extraction prompt doesn't specify structure, Zod rejects the result, `sampleSource` returns empty.
+
+Fix the extraction prompt to return an array of items, not a single object:
+```ts
+const extractionPrompt = `
+Extract all data items from this page. Return them as a JSON array under the key "items".
+Each item should be a flat object with the data fields you find.
+If no structured data is found, return {"items": []}.
+Do not return null values for url or description.
+`;
+```
+
+Also add a fallback in `sampleSource`: if Stagehand returns zero items, return `[]` rather than propagating a Zod error.
+
+**D.4 — Add `templateShape` to `proposeDomainConfig`**
+
+File: `apps/orchestrator/src/agent/workflows/domain-discovery-workflow.ts`
+
+Currently auto-approved domains always get `template: { type: "listings" }`. They don't generate correct affinity chips.
+
+Add to the LLM prompt:
+```
+Also determine the template type for this data source. Choose one of:
+- "incidents" — time-stamped events with location (crimes, accidents, planning applications)
+- "places" — fixed locations with name/category (cinemas, hospitals, parks)
+- "forecasts" — time-series values at a location (weather, air quality, tidal)
+- "boundaries" — geographic zones or areas (flood zones, conservation areas)
+- "listings" — businesses or services with ratings/scores (food hygiene, reviews)
+- "regulations" — eligibility rules or licence conditions
+
+Return as: "templateType": "<one of the above>"
+```
+
+Then use it:
+```ts
+const proposed = {
+  // ...existing fields...
+  templateType: llmResponse.templateType ?? "listings",
+};
+```
+
+And in `registerPersistent()`:
+```ts
+template: { type: config.templateType ?? "listings", capabilities: {} },
+```
+
+---
+
+### Delivery Order
+
+These phases are sequenced by dependency and user value:
+
+| Phase | Effort | Unblocks |
+|-------|--------|---------|
+| **A** — Frontend result stack | ~1 day | All six stories become navigable end-to-end |
+| **B** — `flood-risk-gb` adapter | ~2 hours | Stories 1, 3, 4 get the missing domain |
+| **D.1 + D.2** — Approval loop + discovery guard | ~1 hour | Manually approved domains go live; discovery stops double-running |
+| **C** — Stack synthesis | ~half day | Stories reach a clear resolution rather than just accumulating cards |
+| **D.3 + D.4** — Stagehand + templateShape | ~1 hour | Auto-discovered domains participate in affinity; new domains don't need manual templateShape assignment |
+
+Start with A + B in parallel — A is pure frontend and B is pure backend with no shared files. D.1 and D.2 are small fixes that can be done alongside B. C depends on A being done (needs the result stack to exist). D.3 and D.4 are polish.
