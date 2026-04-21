@@ -2,7 +2,6 @@ import { DomainConfigV2, FallbackInfo } from "@dredge/schemas";
 import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
-import { huntingZonesGbAdapter } from "./hunting-zones-gb/index";
 import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
 import { createGenericAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
@@ -78,11 +77,13 @@ function getSourceEndpoint(config: DomainConfigV2): string {
 
 export async function loadDomains(): Promise<void> {
   // 1. Built-in static adapters
+  // Data domain adapters — these will be replaced by DB-seeded configs in Phase 0.5.
+  // geocoderAdapter and travelEstimatorAdapter are pipeline primitives, not data
+  // domains — they stay hardcoded permanently.
   const adapters = [
     crimeUkAdapter,
     weatherAdapter,
     cinemasGbAdapter,
-    huntingZonesGbAdapter,
     foodHygieneGbAdapter,
     geocoderAdapter,
     travelEstimatorAdapter,

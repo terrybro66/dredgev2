@@ -8,11 +8,11 @@
  * Block F — persistent path (storeResults: true): implemented.
  */
 
-import type { DomainConfigV2 } from "@dredge/schemas";
+import type { DomainConfigV2, FieldDef } from "@dredge/schemas";
 import { registerDomain, getDomainByName } from "../domains/registry";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
-import { createGenericAdapter } from "../domains/generic-adapter";
+import { createPipelineAdapter } from "../domains/generic-adapter";
 
 // ── Public interface ──────────────────────────────────────────────────────────
 
@@ -196,7 +196,16 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
     },
   });
 
-  // 3b. Register a full GenericAdapter with storage
+  // 3b. Register a full pipeline adapter with storage.
+  // Convert the flat fieldMap (source → target) from the discovery proposedConfig
+  // into the FieldDef format that createPipelineAdapter expects. All discovered
+  // fields are treated as strings; type inference is a Phase 1 enhancement.
+  const flatMap = fieldMap as Record<string, string>;
+  const fields: Record<string, FieldDef> = {};
+  for (const [source, target] of Object.entries(flatMap)) {
+    fields[String(target)] = { source: String(source), type: "string", role: "label" };
+  }
+
   const persistentConfig: DomainConfigV2 = {
     identity: {
       name,
@@ -207,7 +216,7 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
     },
     source: { type: "rest", endpoint: apiUrl },
     template: { type: "listings", capabilities: {} },
-    fields: {},
+    fields,
     time: { type: "static" },
     recovery: [],
     storage: {
@@ -218,7 +227,7 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
     },
     visualisation: { default: "table", rules: [] },
   };
-  const adapter = createGenericAdapter(persistentConfig, fieldMap as Record<string, string>);
+  const adapter = createPipelineAdapter(persistentConfig);
 
   registerDomain(adapter);
 

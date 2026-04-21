@@ -55,11 +55,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "daily" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([{ id: "1" }]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -73,11 +77,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "daily" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -110,15 +118,19 @@ describe("RefreshScheduler", () => {
     expect(mockCronSchedule).toHaveBeenCalledTimes(1);
   });
 
-  it("scheduleRefresh() does not schedule static sources", () => {
+  it("scheduleRefresh() does not schedule static sources (no cache field)", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "static" },
-        ],
+        identity: { name: "static-domain", displayName: "Static", description: "", countries: [], intents: ["test"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        // no cache field → scheduler treats as realtime → skips
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -129,15 +141,19 @@ describe("RefreshScheduler", () => {
     expect(mockCronSchedule).not.toHaveBeenCalled();
   });
 
-  it("scheduleRefresh() does not schedule realtime sources", () => {
+  it("scheduleRefresh() does not schedule realtime sources (no cache field)", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/api", refreshPolicy: "realtime" },
-        ],
+        identity: { name: "realtime-domain", displayName: "Realtime", description: "", countries: [], intents: ["test"] },
+        source: { type: "rest", endpoint: "https://example.com/api" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "realtime" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        // no cache field → skips
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -152,11 +168,15 @@ describe("RefreshScheduler", () => {
     delete process.env.REFRESH_SCHEDULER_ENABLED;
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "daily" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -173,11 +193,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "daily" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([{ id: "1" }, { id: "2" }]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -193,11 +217,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [
-          { url: "https://example.com/data.csv", refreshPolicy: "daily" },
-        ],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/data.csv" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([{ id: "1" }]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -212,13 +240,19 @@ describe("RefreshScheduler", () => {
     );
   });
 
-  it("runRefresh() falls back to apiUrl when sources is empty", async () => {
+  it("runRefresh() uses source endpoint as sourceSet", async () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com/api",
-        sources: [],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com/api" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -237,9 +271,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -258,9 +298,15 @@ describe("RefreshScheduler", () => {
     process.env.REFRESH_SCHEDULER_ENABLED = "true";
     const mockAdapter = {
       config: {
-        name: "crime-uk",
-        apiUrl: "https://example.com",
-        sources: [],
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
       },
       fetchData: vi.fn().mockResolvedValue([]),
       storeResults: vi.fn().mockResolvedValue(undefined),
@@ -285,7 +331,17 @@ describe("RefreshScheduler", () => {
   it("runRefresh() returns early without calling createSnapshot when disabled", async () => {
     delete process.env.REFRESH_SCHEDULER_ENABLED;
     const mockAdapter = {
-      config: { name: "crime-uk", apiUrl: "https://example.com", sources: [] },
+      config: {
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://example.com" },
+        template: { type: "listings", capabilities: {} },
+        fields: {},
+        time: { type: "static" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "table", rules: [] },
+        cache: { ttlHours: 168 },
+      },
       fetchData: vi.fn().mockResolvedValue([{ id: "1" }]),
       storeResults: vi.fn().mockResolvedValue(undefined),
     };

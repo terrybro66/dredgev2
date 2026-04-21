@@ -90,8 +90,8 @@ describe("WeatherQueryPlanSchema", () => {
 
 const WEATHER_DOMAIN_CONFIG = {
   name: "weather",
-  tableName: "weather_results",
-  prismaModel: "weatherResult",
+  tableName: "query_results",
+  prismaModel: "queryResult",
   countries: [],
   intents: ["weather"],
   apiUrl: "https://api.openweathermap.org",

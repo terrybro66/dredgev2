@@ -147,9 +147,14 @@ beforeEach(() => {
   mockStoreResults.mockResolvedValue(undefined);
   mockGetDomainForQuery.mockReturnValue({
     config: {
-      name: "crime-uk",
-      tableName: "crime_results",
-      prismaModel: "crimeResult",
+      identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+      source: { type: "rest", endpoint: "https://data.police.uk/api" },
+      template: { type: "incidents", capabilities: { has_coordinates: true } },
+      fields: {},
+      time: { type: "time_series", resolution: "month" },
+      recovery: [],
+      storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+      visualisation: { default: "map", rules: [{ condition: "multi_month", view: "bar" }] },
     },
     fetchData: mockFetchCrimes,
     flattenRow: (r: unknown) => r,
@@ -157,7 +162,6 @@ beforeEach(() => {
   });
   mockPrisma.query.create.mockResolvedValue({ id: "test-id", ...resolvedPlan });
   mockPrisma.query.findUnique.mockResolvedValue(null);
-  mockPrisma.crimeResult.findMany.mockResolvedValue([]);
   mockPrisma.queryCache.findUnique.mockResolvedValue(null);
   mockPrisma.queryCache.create.mockResolvedValue({});
   mockPrisma.queryJob.create.mockResolvedValue({ id: "job-id" });
@@ -273,17 +277,33 @@ describe("POST /query/parse", () => {
     expect(res.body.temporal).toBe("last month");
   });
 
-  it("uses resolveTemporalRangeForCrime when intent is crime", async () => {
-    mockClassifyIntent.mockResolvedValue({
-      confidence: 0.9,
-      domain: "crime-uk",
-      intent: "crime",
+  it("uses adapter.resolveTemporalRange when the matched domain adapter provides it", async () => {
+    // The generic temporal resolution path: if the classified adapter has
+    // resolveTemporalRange, that method is called. If not, defaultResolveTemporalRange is used.
+    const mockAdapterResolve = vi.fn().mockResolvedValue({ date_from: "2024-01", date_to: "2024-01" });
+    mockGetDomainForQuery.mockReturnValue({
+      config: {
+        identity: { name: "crime-uk", displayName: "Crime UK", description: "", countries: ["GB"], intents: ["crime"] },
+        source: { type: "rest", endpoint: "https://data.police.uk/api" },
+        template: { type: "incidents", capabilities: {} },
+        fields: {},
+        time: { type: "time_series", resolution: "month" },
+        recovery: [],
+        storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+        visualisation: { default: "map", rules: [] },
+      },
+      fetchData: mockFetchCrimes,
+      flattenRow: (r: unknown) => r,
+      storeResults: mockStoreResults,
+      resolveTemporalRange: mockAdapterResolve,
     });
+    mockClassifyIntent.mockResolvedValue({ confidence: 0.9, domain: "crime-uk", intent: "crime" });
     const app = buildApp();
     await request(app)
       .post("/query/parse")
       .send({ text: "burglaries in Cambridge" });
-    expect(mockResolveTemporalRangeForCrime).toHaveBeenCalledWith("last month");
+    expect(mockAdapterResolve).toHaveBeenCalledWith("last month");
+    expect(mockDefaultResolveTemporalRange).not.toHaveBeenCalled();
   });
 
   it("uses defaultResolveTemporalRange when intent is not crime", async () => {
@@ -479,7 +499,7 @@ describe("POST /query/execute", () => {
       month: i < 75 ? "2024-01" : "2024-02",
     }));
     mockFetchCrimes.mockResolvedValue(crimes);
-    mockPrisma.crimeResult.findMany.mockResolvedValue(crimes);
+    mockPrisma.queryResult.findMany.mockResolvedValue(crimes);
     const app = buildApp();
     const res = await request(app)
       .post("/query/execute")
@@ -567,7 +587,7 @@ describe("cache, job tracking, and routing", () => {
 
   it("writes QueryCache row on cache miss", async () => {
     mockFetchCrimes.mockResolvedValue([{ category: "burglary" }]);
-    mockPrisma.crimeResult.findMany.mockResolvedValue([{ id: "r1" }]);
+    mockPrisma.queryResult.findMany.mockResolvedValue([{ id: "r1" }]);
     const app = buildApp();
     await request(app).post("/query/execute").send(validExecuteBody);
     expect(mockPrisma.queryCache.create).toHaveBeenCalledWith(

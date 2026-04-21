@@ -33,6 +33,7 @@ import { PrismaClient } from "@prisma/client";
 import express from "express";
 import request from "supertest";
 import type { Router } from "express";
+import { makeConfig } from "@mocks/mockConfig";
 
 // ---------------------------------------------------------------------------
 // Suite 1 setup
@@ -229,14 +230,10 @@ describe("query_results table — schema shape", () => {
     expect(row.value).toBeNull();
   });
 
-  it("existing crime_results table still exists after migration", async () => {
-    // The legacy table must not be dropped during the hybrid migration.
-    const count = await prisma.crimeResult.count();
-    expect(typeof count).toBe("number"); // just checks the table is queryable
-  });
-
-  it("existing weather_results table still exists after migration", async () => {
-    const count = await prisma.weatherResult.count();
+  it("query_results table is accessible and queryable after drop_crime_weather migration", async () => {
+    // After the April 2026 migration, crime_results and weather_results were dropped.
+    // All domains write to query_results. Verify the table is accessible.
+    const count = await (prisma as any).queryResult.count();
     expect(typeof count).toBe("number");
   });
 });
@@ -387,14 +384,13 @@ beforeEach(() => {
 
   // Default adapter — uses the hybrid query_results table.
   mockGetDomainForQuery.mockReturnValue({
-    config: {
+    config: makeConfig({
       name: "cinema-listings-gb",
       tableName: "query_results",
       prismaModel: "queryResult",
-      apiUrl: "https://example.com/api",
-      sources: [{ url: "https://example.com/api" }],
+      endpoint: "https://example.com/api",
       defaultOrderBy: { date: "asc" },
-    },
+    }),
     fetchData: mockAdapterFetchData,
     flattenRow: (r: unknown) => r,
     storeResults: mockAdapterStoreResults,
@@ -467,7 +463,7 @@ describe("execute pipeline — hybrid write path", () => {
     );
   });
 
-  it("createSnapshot is called with sourceSet from adapter.config.sources", async () => {
+  it("createSnapshot is called with sourceSet from adapter.config.source.endpoint", async () => {
     mockAdapterFetchData.mockResolvedValue([{ description: "Film A" }]);
 
     const app = buildApp();
@@ -481,15 +477,13 @@ describe("execute pipeline — hybrid write path", () => {
   });
 
   it("createSnapshot is called with sourceSet from adapter.config.apiUrl when sources is absent", async () => {
-    // Adapter with no sources array — falls back to apiUrl.
+    // Adapter with single source endpoint.
     mockGetDomainForQuery.mockReturnValue({
-      config: {
+      config: makeConfig({
         name: "flood-risk-gb",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        apiUrl: "https://environment.data.gov.uk/flood-monitoring",
+        endpoint: "https://environment.data.gov.uk/flood-monitoring",
         defaultOrderBy: { date: "asc" },
-      },
+      }),
       fetchData: mockAdapterFetchData,
       flattenRow: (r: unknown) => r,
       storeResults: mockAdapterStoreResults,
@@ -583,14 +577,11 @@ describe("execute pipeline — orderBy uses defaultOrderBy from adapter config",
 
     // Weather-shaped adapter with date-based orderBy (not the broken month: asc)
     mockGetDomainForQuery.mockReturnValue({
-      config: {
+      config: makeConfig({
         name: "weather-gb",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        apiUrl: "https://api.open-meteo.com",
-        sources: [{ url: "https://api.open-meteo.com" }],
+        endpoint: "https://api.open-meteo.com",
         defaultOrderBy: { date: "asc" },
-      },
+      }),
       fetchData: mockAdapterFetchData,
       flattenRow: (r: unknown) => r,
       storeResults: mockAdapterStoreResults,
@@ -613,13 +604,11 @@ describe("execute pipeline — orderBy uses defaultOrderBy from adapter config",
     mockAdapterFetchData.mockResolvedValue([{ description: "Rainy" }]);
 
     mockGetDomainForQuery.mockReturnValue({
-      config: {
+      config: makeConfig({
         name: "weather-gb",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        apiUrl: "https://api.open-meteo.com",
+        endpoint: "https://api.open-meteo.com",
         defaultOrderBy: { date: "asc" },
-      },
+      }),
       fetchData: mockAdapterFetchData,
       flattenRow: (r: unknown) => r,
       storeResults: mockAdapterStoreResults,
@@ -640,13 +629,11 @@ describe("execute pipeline — orderBy uses defaultOrderBy from adapter config",
   it("falls back gracefully when defaultOrderBy is absent from adapter.config", async () => {
     // Adapter without defaultOrderBy — pipeline should not throw.
     mockGetDomainForQuery.mockReturnValue({
-      config: {
+      config: makeConfig({
         name: "legacy-adapter",
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        apiUrl: "https://example.com",
+        endpoint: "https://example.com",
         // no defaultOrderBy
-      },
+      }),
       fetchData: mockAdapterFetchData,
       flattenRow: (r: unknown) => r,
       storeResults: mockAdapterStoreResults,

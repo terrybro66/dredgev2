@@ -397,9 +397,9 @@ describe("pipeline executor — STORE", () => {
 // ── 4. VIZ HINT ───────────────────────────────────────────────────────────────
 
 describe("pipeline executor — viz hint", () => {
-  it("exposes visualisation.default as vizHintRules.defaultHint for query.ts compat", () => {
+  it("exposes visualisation.default on the config", () => {
     const adapter = createPipelineAdapter(placesConfig);
-    expect((adapter.config as any).vizHintRules?.defaultHint).toBe("map");
+    expect(adapter.config.visualisation.default).toBe("map");
   });
 });
 

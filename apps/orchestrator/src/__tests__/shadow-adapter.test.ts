@@ -6,6 +6,7 @@ import {
   applyFieldMap,
   checkPointInPolygon,
 } from "../agent/shadow-adapter";
+import { makeConfig } from "@mocks/mockConfig";
 
 import {
   searchAlternativeSources,
@@ -53,7 +54,7 @@ describe("ShadowAdapter", () => {
 
   describe("isValidShapeForDomain()", () => {
     it("returns false for empty array", () => {
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, [])).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), [])).toBe(
         false,
       );
     });
@@ -68,20 +69,20 @@ describe("ShadowAdapter", () => {
         },
       ];
       expect(
-        isValidShapeForDomain({ name: "crime-uk" } as any, plymouthRows),
+        isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), plymouthRows),
       ).toBe(false);
     });
 
     it("returns false when category field is present but no date field", () => {
       const rows = [{ category: "burglary", street: "High Street" }];
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), rows)).toBe(
         false,
       );
     });
 
     it("returns false when date field is present but no category field", () => {
       const rows = [{ month: "2024-01", street: "High Street" }];
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), rows)).toBe(
         false,
       );
     });
@@ -96,21 +97,21 @@ describe("ShadowAdapter", () => {
           longitude: -0.1,
         },
       ];
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), rows)).toBe(
         true,
       );
     });
 
     it("accepts 'type' as a valid substitute for 'category'", () => {
       const rows = [{ type: "burglary", date: "2024-01-15" }];
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), rows)).toBe(
         true,
       );
     });
 
     it("accepts 'offence' as a valid substitute for 'category'", () => {
       const rows = [{ offence: "burglary", month: "2024-01" }];
-      expect(isValidShapeForDomain({ name: "crime-uk" } as any, rows)).toBe(
+      expect(isValidShapeForDomain(makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }), rows)).toBe(
         true,
       );
     });
@@ -416,7 +417,7 @@ describe("ShadowAdapter", () => {
       };
 
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",
@@ -434,7 +435,7 @@ describe("ShadowAdapter", () => {
     it("returns null when disabled", async () => {
       delete process.env.SHADOW_ADAPTER_ENABLED;
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Camden",
@@ -450,7 +451,7 @@ describe("ShadowAdapter", () => {
       process.env.SHADOW_ADAPTER_ENABLED = "true";
       vi.mocked(searchAlternativeSources).mockResolvedValueOnce([]);
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Camden",
@@ -472,7 +473,7 @@ describe("ShadowAdapter", () => {
         },
       ]);
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",
@@ -506,7 +507,7 @@ describe("ShadowAdapter", () => {
         sampleSize: 1,
       });
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",
@@ -540,7 +541,7 @@ describe("ShadowAdapter", () => {
         sampleSize: 1,
       });
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",
@@ -579,7 +580,7 @@ describe("ShadowAdapter", () => {
       });
 
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",
@@ -621,7 +622,7 @@ describe("ShadowAdapter", () => {
       });
 
       const result = await shadowAdapter.recover(
-        { name: "crime-uk" } as any,
+        makeConfig({ name: "crime-uk", intents: ["crime"], countries: ["GB"] }),
         {
           intent: "crime",
           location: "Bury St Edmunds",

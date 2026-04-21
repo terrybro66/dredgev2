@@ -1755,7 +1755,21 @@ function ConditionsTimeline({ rows }: { rows: WeatherRow[] }) {
 // ── DashboardView (main export) ───────────────────────────────────────────────
 
 function DashboardView({ results }: { results: any[] }) {
-  const rows = results as WeatherRow[];
+  // After the query_results storage migration, weather fields are split:
+  //   temperature_max  → stored as `value`
+  //   temperature_min, precipitation, wind_speed → stored inside `extras` JSONB
+  // Normalise here so all sub-components can access fields directly by name.
+  const rows = results.map((r) => {
+    const extras =
+      r.extras && typeof r.extras === "object" ? (r.extras as Record<string, unknown>) : {};
+    return {
+      ...r,
+      temperature_max: (r.temperature_max as number | null) ?? (r.value as number | null) ?? null,
+      temperature_min: (r.temperature_min as number | null) ?? (extras.temperature_min as number | null) ?? null,
+      precipitation:   (r.precipitation as number | null)   ?? (extras.precipitation as number | null)   ?? null,
+      wind_speed:      (r.wind_speed as number | null)       ?? (extras.wind_speed as number | null)       ?? null,
+    } as WeatherRow;
+  });
   const isMultiDay = rows.length > 1;
 
   return (

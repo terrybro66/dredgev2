@@ -1,7 +1,6 @@
 import type { DomainConfigV2 } from "@dredge/schemas";
 import type { DomainAdapter } from "../registry";
 import { fetchCrimes, normalizeCrimeCategory } from "./fetcher";
-import { storeResults } from "./store";
 import { recoverFromEmpty } from "./recovery";
 import { resolveTemporalRangeForCrime } from "../../temporal-resolver";
 
@@ -40,10 +39,10 @@ const crimeConfig: DomainConfigV2 = {
   recovery: [],
   storage: {
     storeResults: true,
-    tableName: "crime_results",
-    prismaModel: "crimeResult",
+    tableName: "query_results",
+    prismaModel: "queryResult",
     extrasStrategy: "retain_unmapped",
-    defaultOrderBy: { month: "asc" },
+    defaultOrderBy: { date: "asc" },
   },
   visualisation: {
     default: "map",
@@ -54,16 +53,49 @@ const crimeConfig: DomainConfigV2 = {
 
 export const crimeUkAdapter: DomainAdapter = {
   config: crimeConfig,
+
   fetchData: (plan: any, poly: string) => fetchCrimes(plan, poly),
+
   flattenRow: (row: unknown) => row as Record<string, unknown>,
-  storeResults: (queryId: string, rows: unknown[], prisma: any) =>
-    storeResults(queryId, rows as any[], prisma),
+
+  async storeResults(queryId: string, rows: unknown[], prismaClient: any): Promise<void> {
+    if (rows.length === 0) return;
+    await prismaClient.queryResult.createMany({
+      data: (rows as Record<string, unknown>[]).map((row) => {
+        const loc = row.location as Record<string, unknown> | undefined;
+        const street = loc?.street as Record<string, unknown> | undefined;
+        const outcome = row.outcome_status as Record<string, unknown> | undefined;
+        return {
+          query_id: queryId,
+          domain_name: "crime-uk",
+          source_tag: "data.police.uk",
+          date: row.month ? new Date(`${row.month as string}-01`) : null,
+          lat: loc?.latitude != null ? parseFloat(String(loc.latitude)) : null,
+          lon: loc?.longitude != null ? parseFloat(String(loc.longitude)) : null,
+          location: (street?.name as string) ?? null,
+          description: (street?.name as string) ?? null,
+          category: (row.category as string) ?? null,
+          value: null,
+          raw: row as object,
+          extras: {
+            persistent_id: (row.persistent_id as string) ?? null,
+            outcome_category: (outcome?.category as string) ?? null,
+            outcome_date: (outcome?.date as string) ?? null,
+          },
+          snapshot_id: null,
+        };
+      }),
+    });
+  },
+
   recoverFromEmpty: (plan: any, poly: string, prisma: any) =>
     recoverFromEmpty(plan, poly, prisma),
+
   normalizePlan: (plan: any) => ({
     ...plan,
     category: normalizeCrimeCategory(plan.category),
   }),
+
   resolveTemporalRange: (temporal: string) =>
     resolveTemporalRangeForCrime(temporal),
 };

@@ -129,8 +129,8 @@ function rowsFromResponse(
 
   return time.map((date, i) => ({
     date,
-    latitude: geo.latitude,
-    longitude: geo.longitude,
+    lat: geo.latitude,
+    lon: geo.longitude,
     temperature_max: temperature_2m_max[i] ?? null,
     temperature_min: temperature_2m_min[i] ?? null,
     precipitation: precipitation_sum[i] ?? null,
@@ -173,8 +173,8 @@ const weatherConfig: DomainConfigV2 = {
   recovery: [],
   storage: {
     storeResults: true,
-    tableName: "weather_results",
-    prismaModel: "weatherResult",
+    tableName: "query_results",
+    prismaModel: "queryResult",
     extrasStrategy: "discard",
     defaultOrderBy: { date: "asc" },
   },
@@ -187,8 +187,6 @@ export const weatherAdapter: DomainAdapter = {
   config: weatherConfig,
 
   async fetchData(plan: any): Promise<unknown[]> {
-    // Open-Meteo is free — no API key required.
-
     const today = new Date().toISOString().slice(0, 10);
     const currentMonth = today.slice(0, 7); // "YYYY-MM"
 
@@ -232,22 +230,30 @@ export const weatherAdapter: DomainAdapter = {
   async storeResults(
     queryId: string,
     rows: unknown[],
-    prisma: any,
+    prismaClient: any,
   ): Promise<void> {
     if (rows.length === 0) return;
 
-    await prisma.weatherResult.createMany({
+    await prismaClient.queryResult.createMany({
       data: (rows as Record<string, unknown>[]).map((row) => ({
         query_id: queryId,
-        date: row.date as string,
-        latitude: row.latitude as number | null,
-        longitude: row.longitude as number | null,
-        temperature_max: row.temperature_max as number | null,
-        temperature_min: row.temperature_min as number | null,
-        precipitation: row.precipitation as number | null,
-        wind_speed: row.wind_speed as number | null,
-        description: row.description as string | null,
-        raw: row.raw ?? null,
+        domain_name: "weather",
+        source_tag: "open-meteo",
+        date: row.date ? new Date(row.date as string) : null,
+        lat: (row.lat as number) ?? null,
+        lon: (row.lon as number) ?? null,
+        location: null,
+        description: (row.description as string) ?? null,
+        category: null,
+        // Primary metric: max temperature; remaining metrics in extras
+        value: (row.temperature_max as number) ?? null,
+        raw: (row.raw as object) ?? row,
+        extras: {
+          temperature_min: (row.temperature_min as number) ?? null,
+          precipitation: (row.precipitation as number) ?? null,
+          wind_speed: (row.wind_speed as number) ?? null,
+        },
+        snapshot_id: null,
       })),
     });
   },

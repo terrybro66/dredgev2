@@ -73,15 +73,12 @@ describe("food-hygiene-gb — config shape", () => {
     expect(config.source.endpoint).toContain("ratings.food.gov.uk");
   });
 
-  // Compat — query.ts still reads these flat fields during migration
-  it("exposes name on config for registry compat", () => {
-    expect((foodHygieneGbAdapter.config as any).name).toBe("food-hygiene-gb");
+  it("exposes name via identity.name", () => {
+    expect(foodHygieneGbAdapter.config.identity.name).toBe("food-hygiene-gb");
   });
 
-  it("exposes vizHintRules.defaultHint for query.ts compat", () => {
-    expect((foodHygieneGbAdapter.config as any).vizHintRules?.defaultHint).toBe(
-      "table",
-    );
+  it("exposes default viz hint via visualisation.default", () => {
+    expect(foodHygieneGbAdapter.config.visualisation.default).toBe("table");
   });
 });
 

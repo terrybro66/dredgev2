@@ -214,7 +214,7 @@ describe("registerDiscoveredDomain — ephemeral path (storeResults: false)", ()
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter?.config?.storeResults).toBe(false);
+    expect(registeredAdapter?.config?.storage?.storeResults).toBe(false);
   });
 
   it("registered adapter config includes the correct intents and countries", async () => {
@@ -233,8 +233,8 @@ describe("registerDiscoveredDomain — ephemeral path (storeResults: false)", ()
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter?.config?.intents).toContain("cinema listings");
-    expect(registeredAdapter?.config?.countries).toContain("GB");
+    expect(registeredAdapter?.config?.identity?.intents).toContain("cinema listings");
+    expect(registeredAdapter?.config?.identity?.countries).toContain("GB");
   });
 
   it("marks the DomainDiscovery record as registered", async () => {
@@ -433,10 +433,10 @@ describe("ephemeral adapter — pipeline enforcement", () => {
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter.config.name).toBe("cinema-listings-gb");
-    expect(registeredAdapter.config.apiUrl).toBe(
+    expect(registeredAdapter.config.identity.name).toBe("cinema-listings-gb");
+    expect(registeredAdapter.config.source.endpoint).toBe(
       "https://www.odeon.co.uk/api/showtimes",
     );
-    expect(registeredAdapter.config.storeResults).toBe(false);
+    expect(registeredAdapter.config.storage.storeResults).toBe(false);
   });
 });

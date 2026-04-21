@@ -22,6 +22,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import express from "express";
 import request from "supertest";
 import type { Router } from "express";
+import { makeConfig } from "@mocks/mockConfig";
 
 // ── Hoist all mock factories ──────────────────────────────────────────────────
 beforeAll(async () => {
@@ -120,18 +121,13 @@ let mockPersistentStoreResults: ReturnType<typeof vi.fn>;
 // Ephemeral adapter — storeResults: false
 function ephemeralAdapter() {
   return {
-    config: {
+    config: makeConfig({
       name: "cinema-listings-gb",
-      tableName: "query_results",
-      prismaModel: "queryResult",
       storeResults: false,
       countries: ["GB"],
       intents: ["cinema"],
-      apiUrl: "https://www.odeon.co.uk/api/showtimes",
-      sources: [{ url: "https://www.odeon.co.uk/api/showtimes" }],
-      cacheTtlHours: null,
-      defaultOrderBy: { date: "asc" },
-    },
+      endpoint: "https://www.odeon.co.uk/api/showtimes",
+    }),
     fetchData: mockEphemeralFetchData,
     flattenRow: (r: unknown) => r,
     storeResults: mockEphemeralStoreResults,
@@ -141,18 +137,15 @@ function ephemeralAdapter() {
 // Persistent adapter — storeResults: true (default)
 function persistentAdapter() {
   return {
-    config: {
+    config: makeConfig({
       name: "crime-uk",
-      tableName: "query_results",
-      prismaModel: "queryResult",
       storeResults: true,
       countries: ["GB"],
       intents: ["crime"],
-      apiUrl: "https://data.police.uk/api",
-      sources: [{ url: "https://data.police.uk/api" }],
+      endpoint: "https://data.police.uk/api",
       cacheTtlHours: 24,
       defaultOrderBy: { date: "asc" },
-    },
+    }),
     fetchData: mockPersistentFetchData,
     flattenRow: (r: unknown) => r,
     storeResults: mockPersistentStoreResults,

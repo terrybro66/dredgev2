@@ -195,7 +195,7 @@ describe("registerDiscoveredDomain — persistent path (storeResults: true)", ()
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter?.config?.storeResults).toBe(true);
+    expect(registeredAdapter?.config?.storage?.storeResults).toBe(true);
   });
 
   it("registered adapter config includes the correct intents and countries", async () => {
@@ -211,8 +211,8 @@ describe("registerDiscoveredDomain — persistent path (storeResults: true)", ()
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter?.config?.intents).toContain("flood risk");
-    expect(registeredAdapter?.config?.countries).toContain("GB");
+    expect(registeredAdapter?.config?.identity?.intents).toContain("flood risk");
+    expect(registeredAdapter?.config?.identity?.countries).toContain("GB");
   });
 
   it("registered adapter config has tableName: query_results and prismaModel: queryResult", async () => {
@@ -228,8 +228,8 @@ describe("registerDiscoveredDomain — persistent path (storeResults: true)", ()
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter?.config?.tableName).toBe("query_results");
-    expect(registeredAdapter?.config?.prismaModel).toBe("queryResult");
+    expect(registeredAdapter?.config?.storage?.tableName).toBe("query_results");
+    expect(registeredAdapter?.config?.storage?.prismaModel).toBe("queryResult");
   });
 
   it("marks the DomainDiscovery record as registered", async () => {
@@ -442,8 +442,8 @@ describe("persistent adapter — storage behaviour", () => {
     });
 
     const registeredAdapter = mockRegisterDomain.mock.calls[0]?.[0];
-    expect(registeredAdapter.config.name).toBe("flood-risk-gb");
-    expect(registeredAdapter.config.apiUrl).toBe(
+    expect(registeredAdapter.config.identity.name).toBe("flood-risk-gb");
+    expect(registeredAdapter.config.source.endpoint).toBe(
       "https://environment.data.gov.uk/flood-monitoring/api/floodAreas",
     );
   });

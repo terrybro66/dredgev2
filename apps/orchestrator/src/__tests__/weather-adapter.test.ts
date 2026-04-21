@@ -22,27 +22,27 @@ describe("Weather DomainConfig", () => {
   });
 
   it("has name: weather", () => {
-    expect(weatherAdapter.config.name).toBe("weather");
+    expect(weatherAdapter.config.identity.name).toBe("weather");
   });
 
-  it("has tableName: weather_results", () => {
-    expect(weatherAdapter.config.tableName).toBe("weather_results");
+  it("has tableName: query_results", () => {
+    expect(weatherAdapter.config.storage.tableName).toBe("query_results");
   });
 
-  it("has prismaModel: weatherResult", () => {
-    expect(weatherAdapter.config.prismaModel).toBe("weatherResult");
+  it("has prismaModel: queryResult", () => {
+    expect(weatherAdapter.config.storage.prismaModel).toBe("queryResult");
   });
 
   it("has empty countries array — global domain", () => {
-    expect(weatherAdapter.config.countries).toEqual([]);
+    expect(weatherAdapter.config.identity.countries).toEqual([]);
   });
 
   it("has intents: [weather]", () => {
-    expect(weatherAdapter.config.intents).toContain("weather");
+    expect(weatherAdapter.config.identity.intents).toContain("weather");
   });
 
   it("has cacheTtlHours: 1", () => {
-    expect(weatherAdapter.config.cacheTtlHours).toBe(1);
+    expect(weatherAdapter.config.cache?.ttlHours).toBe(1);
   });
 
   it("has rateLimit of 60 requests per minute", () => {
@@ -194,11 +194,11 @@ describe("weatherAdapter.fetchData", () => {
     expect(row).toHaveProperty("wind_speed");
   });
 
-  it("each row has latitude and longitude", async () => {
+  it("each row has lat and lon (normalised field names)", async () => {
     const rows = (await weatherAdapter.fetchData(plan, "")) as any[];
     const row = rows[0];
-    expect(row).toHaveProperty("latitude");
-    expect(row).toHaveProperty("longitude");
+    expect(row).toHaveProperty("lat");
+    expect(row).toHaveProperty("lon");
   });
 
   it("each row has a raw field containing the original API response", async () => {
@@ -328,97 +328,104 @@ describe("weatherAdapter.recoverFromEmpty — date fallback", () => {
 });
 
 // ── storeResults ──────────────────────────────────────────────────────────────
+//
+// After the April 2026 storage migration, weather writes to query_results.
+// Field mapping:
+//   temperature_max  → value
+//   temperature_min, precipitation, wind_speed  → extras JSONB
+//   lat/lon          → lat/lon (normalised from geo.latitude/geo.longitude by rowsFromResponse)
 
 describe("weatherAdapter.storeResults", () => {
   const mockPrisma = {
-    weatherResult: { createMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    queryResult: { createMany: vi.fn().mockResolvedValue({ count: 2 }) },
   };
 
+  // Rows as produced by rowsFromResponse — use lat/lon (not latitude/longitude)
   const rows = [
     {
       date: "2024-03-01",
-      latitude: 55.9533,
-      longitude: -3.1883,
+      lat: 55.9533,
+      lon: -3.1883,
       temperature_max: 10.1,
       temperature_min: 4.1,
       precipitation: 0.0,
       wind_speed: 15.0,
       description: "Mainly clear",
-      raw: { source: "open-meteo" },
+      raw: { date: "2024-03-01", daily_index: 0, weathercode: 1, source: "open-meteo" },
     },
     {
       date: "2024-03-02",
-      latitude: 55.9533,
-      longitude: -3.1883,
+      lat: 55.9533,
+      lon: -3.1883,
       temperature_max: 11.2,
       temperature_min: 5.2,
       precipitation: 2.1,
       wind_speed: 20.0,
       description: "Slight rain",
-      raw: { source: "open-meteo" },
+      raw: { date: "2024-03-02", daily_index: 1, weathercode: 61, source: "open-meteo" },
     },
   ];
 
   beforeEach(() => {
-    mockPrisma.weatherResult.createMany.mockClear();
+    mockPrisma.queryResult.createMany.mockClear();
   });
 
-  it("calls prisma.weatherResult.createMany with all rows", async () => {
+  it("calls prisma.queryResult.createMany with all rows", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    expect(mockPrisma.weatherResult.createMany).toHaveBeenCalledOnce();
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
+    expect(mockPrisma.queryResult.createMany).toHaveBeenCalledOnce();
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
     expect(data).toHaveLength(2);
   });
 
   it("does nothing when rows array is empty", async () => {
     await weatherAdapter.storeResults("query-123", [], mockPrisma as any);
-    expect(mockPrisma.weatherResult.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.queryResult.createMany).not.toHaveBeenCalled();
   });
 
   it("domain_name is weather", async () => {
-    // weatherResult rows don't carry domain_name — domain is implicit from the table
-    // this test is satisfied by the model name itself; skip explicit field check
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    expect(mockPrisma.weatherResult.createMany).toHaveBeenCalledOnce();
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].domain_name).toBe("weather");
   });
 
   it("source_tag is open-meteo", async () => {
-    // source_tag not stored on weatherResult — covered by raw.source field
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(data[0].raw).toMatchObject({ source: "open-meteo" });
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].source_tag).toBe("open-meteo");
   });
 
-  it("lat and lon are set from latitude/longitude", async () => {
+  it("lat and lon are mapped from input row lat/lon", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(data[0].latitude).toBeCloseTo(55.9533);
-    expect(data[0].longitude).toBeCloseTo(-3.1883);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].lat).toBeCloseTo(55.9533);
+    expect(data[0].lon).toBeCloseTo(-3.1883);
   });
 
-  it("value is temperature_max", async () => {
+  it("temperature_max is stored as value", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(data[0].temperature_max).toBeCloseTo(10.1);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].value).toBeCloseTo(10.1);
   });
 
-  it("date is stored as the original string", async () => {
+  it("date is stored as a Date object", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(data[0].date).toBe("2024-03-01");
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].date).toEqual(new Date("2024-03-01"));
   });
 
   it("extras contains temperature_min, precipitation, wind_speed", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
-    expect(data[0].temperature_min).toBeCloseTo(4.1);
-    expect(data[0].precipitation).toBeCloseTo(0.0);
-    expect(data[0].wind_speed).toBeCloseTo(15.0);
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
+    expect(data[0].extras).toMatchObject({
+      temperature_min: 4.1,
+      precipitation: 0.0,
+      wind_speed: 15.0,
+    });
   });
 
   it("query_id is passed through", async () => {
     await weatherAdapter.storeResults("query-123", rows, mockPrisma as any);
-    const { data } = mockPrisma.weatherResult.createMany.mock.calls[0][0];
+    const { data } = mockPrisma.queryResult.createMany.mock.calls[0][0];
     expect(data[0].query_id).toBe("query-123");
   });
 });

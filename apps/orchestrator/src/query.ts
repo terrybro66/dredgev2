@@ -13,10 +13,8 @@ import { prisma } from "./db";
 import { geocodeToPolygon } from "./geocoder";
 import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
 import { getDomainForQuery, getDomainByName, DomainAdapter } from "./domains/registry";
-import { generateFollowUps } from "./followups";
 import { acquire } from "./rateLimiter";
 import { AggregatedBin } from "@dredge/schemas";
-import { shadowAdapter } from "./agent/shadow-adapter";
 import { domainDiscovery } from "./agent/domain-discovery";
 import { createSnapshot } from "./execution-model";
 import { classifyIntent } from "./semantic/classifier";
@@ -48,10 +46,7 @@ import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
 import { generateInsight } from "./insight";
 import { CATEGORY_TO_INTENT, normalizeToDomainSlug } from "./domain-slug";
-import {
-  defaultResolveTemporalRange,
-  resolveTemporalRangeForCrime,
-} from "./temporal-resolver";
+import { defaultResolveTemporalRange } from "./temporal-resolver";
 
 // ── DomainConfigV2 helpers ────────────────────────────────────────────────────
 
@@ -101,8 +96,6 @@ function deriveDataFreshness(rows: Record<string, unknown>[]): string | null {
 
 // ── B3: Empty state reason ────────────────────────────────────────────────────
 
-const CRIME_DATA_START = "2010-12";
-
 /**
  * Classify why a query returned 0 rows so the frontend can show
  * a meaningful message rather than a blank panel.
@@ -116,16 +109,6 @@ function deriveEmptyReason(
   },
   months: string[],
 ): { code: string; message: string; suggestion: string } {
-  const dateFrom = plan.date_from ?? "";
-
-  if (dateFrom && dateFrom < CRIME_DATA_START) {
-    return {
-      code: "date_out_of_range",
-      message: `No data available before December 2010.`,
-      suggestion: `Try a date from December 2010 onwards.`,
-    };
-  }
-
   if (months.length === 0) {
     return {
       code: "no_data_for_area",
@@ -273,16 +256,19 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     }
   }
 
-  // Phase D — resolve temporal expression to concrete date range.
-  // Crime uses the availability cache to anchor to the latest published month.
-  // All other domains use the default calendar-based resolver.
+  // Resolve temporal expression to concrete date range.
+  // Route through the matched adapter's resolveTemporalRange if it has one —
+  // this lets domains like crime-uk anchor relative expressions ("last month")
+  // to their own availability cache without domain names appearing here.
   const unresolvedTemporal = (plan as any).temporal as string;
-  let dateRange: { date_from: string; date_to: string };
-  if (intent === "crime") {
-    dateRange = await resolveTemporalRangeForCrime(unresolvedTemporal);
-  } else {
-    dateRange = defaultResolveTemporalRange(unresolvedTemporal);
-  }
+  const temporalRoutingIntent = CATEGORY_TO_INTENT[intent ?? ""] ?? intent;
+  const temporalAdapter = temporalRoutingIntent
+    ? getDomainForQuery(geocoded.country_code, temporalRoutingIntent)
+    : undefined;
+  const dateRange: { date_from: string; date_to: string } =
+    temporalAdapter?.resolveTemporalRange
+      ? await temporalAdapter.resolveTemporalRange(unresolvedTemporal)
+      : defaultResolveTemporalRange(unresolvedTemporal);
 
   const resolvedPlan = {
     category: plan.category,
@@ -939,18 +925,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       }),
     );
 
-    const followUps = generateFollowUps({
-      domain: adapter.config.identity.name,
-      plan,
-      poly,
-      viz_hint,
-      resolved_location,
-      country_code,
-      intent,
-      months,
-      resultCount: cached.result_count,
-    });
-
     const chips = suggestFollowups({
       rows: cached.results as unknown[],
       domain: adapter.config.identity.name,
@@ -977,10 +951,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         ? {
             status: "empty",
             reason: cachedEmptyReason?.message,
-            followUps,
+            followUps: [],
             confidence: "low",
           }
-        : { status: "exact", followUps, confidence: "high" };
+        : { status: "exact", followUps: [], confidence: "high" };
 
     const aggregated = viz_hint === "map" || viz_hint === "heatmap";
 
@@ -1057,7 +1031,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
     // 5. Recovery — attempt fallback strategies when fetch returned nothing
     let fallback: FallbackInfo | undefined;
-    let isShadowRecovery = false;
     let effectiveMonths =
       adapter.config.time.type === "time_series" ? months : [];
 
@@ -1072,90 +1045,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       }
     }
 
-    if (rows.length === 0 && shadowAdapter.isEnabled()) {
-      const shadow = await shadowAdapter.recover(
-        adapter.config,
-        {
-          intent,
-          location: resolved_location,
-          country_code,
-          date_range: plan.date_from,
-        },
-        prisma,
-      );
-      if (shadow) {
-        rows = shadow.data;
-        fallback = shadow.fallback;
-        isShadowRecovery = true;
-
-        if (shadow.newSource) {
-          await prisma.apiAvailability.upsert({
-            where: {
-              source: `${adapter.config.identity.name}:shadow:${shadow.newSource.sourceUrl}`,
-            },
-            update: {
-              sourceUrl: shadow.newSource.sourceUrl,
-              providerType: shadow.newSource.providerType,
-              confidence: shadow.newSource.confidence,
-              lastUsedAt: new Date(),
-            },
-            create: {
-              source: `${adapter.config.identity.name}:shadow:${shadow.newSource.sourceUrl}`,
-              months: [],
-              sourceUrl: shadow.newSource.sourceUrl,
-              providerType: shadow.newSource.providerType,
-              confidence: shadow.newSource.confidence,
-              shadowDiscovered: true,
-              lastUsedAt: new Date(),
-            },
-          });
-        }
-      }
-    }
-
     const store_start = Date.now();
 
-    if (!isEphemeral) {
-      if (isShadowRecovery) {
-        if (rows.length > 0) {
-          await (prisma as any).queryResult.createMany({
-            data: (rows as Record<string, unknown>[]).map((row) => ({
-              query_id: queryRecord.id,
-              domain_name: adapter.config.identity.name,
-              source_tag: (row._sourceTag as string) ?? adapter.config.identity.name,
-              date: row.date
-                ? new Date(row.date as string)
-                : row.month
-                  ? new Date(`${row.month as string}-01`)
-                  : null,
-              lat:
-                row.lat != null
-                  ? parseFloat(String(row.lat))
-                  : row.latitude != null
-                    ? parseFloat(String(row.latitude))
-                    : null,
-              lon:
-                row.lon != null
-                  ? parseFloat(String(row.lon))
-                  : row.longitude != null
-                    ? parseFloat(String(row.longitude))
-                    : null,
-              location: (row.location as string) ?? null,
-              description: (row.description as string) ?? null,
-              category:
-                (row.category as string) ?? (row.type as string) ?? null,
-              value: row.value != null ? parseFloat(String(row.value)) : null,
-              raw: (row.raw as object) ?? row,
-              extras: (row.extras as object) ?? null,
-              snapshot_id: null,
-            })),
-          });
-        }
-      } else {
-        if (rows.length > 0) {
-          await adapter.storeResults(queryRecord.id, rows, prisma);
-        }
-      }
+    if (!isEphemeral && rows.length > 0) {
+      await adapter.storeResults(queryRecord.id, rows, prisma);
     }
 
     const store_ms = Date.now() - store_start;
@@ -1173,7 +1066,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     let aggregated = false;
     let storedResults: unknown[];
 
-    if (isEphemeral || isShadowRecovery) {
+    if (isEphemeral) {
       storedResults = rows;
     } else if (viz_hint === "map" || viz_hint === "heatmap") {
       if (adapter.config.template.spatialAggregation) {
@@ -1209,7 +1102,7 @@ FROM (
       });
     }
 
-    if (!isEphemeral && !isShadowRecovery) {
+    if (!isEphemeral) {
       await prisma.queryCache.create({
         data: {
           query_hash,
@@ -1223,7 +1116,7 @@ FROM (
     if (viz_hint === "bar") {
       const byMonth: Record<string, number> = {};
       for (const row of storedResults as any[]) {
-        const month = row.month ?? "unknown";
+        const month = row.month ?? (row.date ? String(row.date).slice(0, 7) : "unknown");
         byMonth[month] = (byMonth[month] ?? 0) + 1;
       }
       storedResults = Object.entries(byMonth)
@@ -1259,18 +1152,6 @@ FROM (
       }),
     );
 
-    const followUps = generateFollowUps({
-      domain: adapter.config.identity.name,
-      plan,
-      poly,
-      viz_hint,
-      resolved_location,
-      country_code,
-      intent,
-      months: effectiveMonths,
-      resultCount: storedResults.length,
-    });
-
     const chips = suggestFollowups({
       rows: storedResults as unknown[],
       domain: adapter.config.identity.name,
@@ -1299,12 +1180,12 @@ FROM (
         ? {
             status: "empty",
             reason: emptyReason?.message,
-            followUps,
+            followUps: [],
             confidence: "low",
           }
         : fallback
-          ? { status: "fallback", fallback, followUps, confidence: "medium" }
-          : { status: "exact", followUps, confidence: "high" };
+          ? { status: "fallback", fallback, followUps: [], confidence: "medium" }
+          : { status: "exact", followUps: [], confidence: "high" };
 
     const data_freshness = deriveDataFreshness(
       storedResults as Record<string, unknown>[],
