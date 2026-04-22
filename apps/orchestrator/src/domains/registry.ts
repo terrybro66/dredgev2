@@ -3,6 +3,7 @@ import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
 import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
+import { floodRiskGbAdapter } from "./flood-risk-gb/index";
 import { createPipelineAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";

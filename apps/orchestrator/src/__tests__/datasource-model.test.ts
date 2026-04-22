@@ -328,6 +328,25 @@ vi.mock("../domains/weather/index", () => ({
   },
 }));
 
+vi.mock("../domains/flood-risk-gb/index", () => ({
+  floodRiskGbAdapter: {
+    config: {
+      identity: { name: "flood-risk-gb", displayName: "Flood Risk", description: "", countries: ["GB"], intents: ["flood risk"] },
+      source: { type: "rest", endpoint: "https://environment.data.gov.uk/flood-monitoring/id/floodAreas" },
+      template: { type: "boundaries", capabilities: { has_coordinates: true, has_category: true } },
+      fields: {},
+      time: { type: "realtime" },
+      recovery: [],
+      storage: { storeResults: true, tableName: "query_results", prismaModel: "queryResult", extrasStrategy: "retain_unmapped" },
+      visualisation: { default: "map", rules: [] },
+      cache: { ttlHours: 1 },
+    },
+    fetchData: vi.fn(),
+    flattenRow: vi.fn(),
+    storeResults: vi.fn(),
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockDataSourceUpsert.mockResolvedValue({});
@@ -393,11 +412,11 @@ describe("loadDomains() — DataSource seeding", () => {
 
     // upsert should be called exactly once per domain per invocation.
     // Built-in adapters with real (non-internal:) URLs:
-    //   crime-uk, weather, cinemas-gb, food-hygiene-gb, geocoder = 5 adapters
+    //   crime-uk, weather, cinemas-gb, food-hygiene-gb, flood-risk-gb, geocoder = 6 adapters
     // travel-estimator uses internal:haversine so it is skipped.
-    // 5 adapters × 2 calls = 10 upserts.
+    // 6 adapters × 2 calls = 12 upserts.
     // Crucially, NOT creates — which would cause a unique constraint error on a real DB.
-    expect(mockDataSourceUpsert).toHaveBeenCalledTimes(10);
+    expect(mockDataSourceUpsert).toHaveBeenCalledTimes(12);
   });
 
   it("calls onLoad on adapters that define it", async () => {

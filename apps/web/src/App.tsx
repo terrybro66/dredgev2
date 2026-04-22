@@ -66,16 +66,29 @@ interface ParsedQuery {
   temporal?: string;
 }
 
-interface CrimeResult {
+/** Generic row returned by any domain adapter via query_results. */
+interface QueryRow {
   id?: string;
-  category: string;
+  // canonical pipeline fields
+  date?: string | null;
+  lat?: number | null;
+  lon?: number | null;
+  location?: string | null;
+  description?: string | null;
+  category?: string | null;
+  value?: string | number | null;
+  domain_name?: string;
+  extras?: Record<string, unknown>;
+  // crime-uk carries these legacy fields (still written to query_results)
+  month?: string;
   street?: string;
-  month: string;
   outcome_category?: string;
-  latitude?: number;
-  longitude?: number;
+  // some rows carry raw lat/lon under legacy names
+  latitude?: number | null;
+  longitude?: number | null;
   [key: string]: unknown;
 }
+
 
 // v5.1 types
 interface ExecuteBody {
@@ -192,7 +205,7 @@ interface ExecuteResult {
   resolved_location: string;
   count: number;
   months_fetched: string[];
-  results: CrimeResult[] | AggregatedBin[];
+  results: QueryRow[] | AggregatedBin[];
   cache_hit: boolean;
   resultContext?: ResultContext;
   aggregated: boolean;
@@ -210,6 +223,17 @@ interface IntentError {
   understood: Partial<QueryPlan>;
   missing: string[];
   message: string;
+}
+
+// A chip follow-up response — appended to the result stack below the primary result.
+interface ChipResultEntry {
+  handle: string;
+  label: string;     // chip.label used as card heading
+  domain: string;    // chip.args.domain
+  rows: Record<string, unknown>[];
+  viz_hint: VizHint;
+  chips: Chip[];
+  count: number;
 }
 
 interface AggregatedBin {
@@ -1129,11 +1153,11 @@ function MapView({
   results,
   aggregated,
 }: {
-  results: CrimeResult[] | AggregatedBin[];
+  results: QueryRow[] | AggregatedBin[];
   aggregated: boolean;
 }) {
   const [mode, setMode] = useState<MapMode>("points");
-  const [hover, setHover] = useState<CrimeResult | null>(null);
+  const [hover, setHover] = useState<QueryRow | null>(null);
 
   const points = useMemo(
     () =>
@@ -1143,7 +1167,7 @@ function MapView({
             lat: b.lat,
             count: b.count,
           }))
-        : (results as CrimeResult[])
+        : (results as QueryRow[])
             .map((c) => ({
               ...c,
               lng: (c.lon ?? c.longitude) as number,
@@ -1251,7 +1275,7 @@ function BarChart({
   results,
   months_fetched,
 }: {
-  results: CrimeResult[];
+  results: QueryRow[];
   months_fetched: string[];
 }) {
   const dateField =
@@ -1297,7 +1321,7 @@ function TableView({
   activeFilter,
   onClearFilter,
 }: {
-  results: CrimeResult[];
+  results: QueryRow[];
   activeFilter?: { field: string; value: string };
   onClearFilter?: () => void;
 }) {
@@ -1782,6 +1806,49 @@ function DashboardView({ results }: { results: any[] }) {
   );
 }
 
+// ── StackCard — renders a single chip follow-up result in the result stack ────
+
+function StackCard({
+  entry,
+  onChipAction,
+}: {
+  entry: ChipResultEntry;
+  onChipAction: (chip: Chip) => void;
+}) {
+  const chips = (entry.chips ?? []).filter((c) => {
+    if (c.action === "show_map" && entry.viz_hint === "map") return false;
+    if (c.action === "show_table" && entry.viz_hint === "table") return false;
+    return true;
+  });
+
+  return (
+    <div className="result-panel stack-card">
+      <div className="result-header">
+        <div className="result-summary">
+          <span className="result-count">{entry.count}</span>
+          <span className="result-desc">results from {entry.label}</span>
+        </div>
+      </div>
+
+      {entry.count === 0 ? (
+        <p className="empty-hint">No data found for this area.</p>
+      ) : entry.viz_hint === "map" ? (
+        <MapView results={entry.rows as any} aggregated={false} />
+      ) : entry.viz_hint === "dashboard" ? (
+        <DashboardView results={entry.rows as any} />
+      ) : entry.viz_hint === "bar" ? (
+        <BarChart results={entry.rows as any} months_fetched={[]} />
+      ) : (
+        <TableView results={entry.rows as any} />
+      )}
+
+      {chips.length > 0 && (
+        <ActionChips chips={chips} onAction={onChipAction} />
+      )}
+    </div>
+  );
+}
+
 // ── ResultRenderer ────────────────────────────────────────────────────────────
 
 function ResultRenderer({
@@ -1862,12 +1929,12 @@ function ResultRenderer({
         <MapView results={results} aggregated={result.aggregated} />
       ) : viz_hint === "bar" ? (
         <BarChart
-          results={results as CrimeResult[]}
+          results={results as QueryRow[]}
           months_fetched={months_fetched}
         />
       ) : (
         <TableView
-          results={results as CrimeResult[]}
+          results={results as QueryRow[]}
           activeFilter={result.activeFilter}
           onClearFilter={() =>
             onChipAction({
@@ -1932,6 +1999,9 @@ export default function App() {
   const [parsed, setParsed] = useState<ParsedQuery | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
   const [resultStack, setResultStack] = useState<ExecuteResult[]>([]);
+  const [chipStack, setChipStack] = useState<ChipResultEntry[]>([]);
+  const [synthesis, setSynthesis] = useState<string | null>(null);
+  const [synthesisLoading, setSynthesisLoading] = useState(false);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
@@ -2056,6 +2126,8 @@ export default function App() {
       }
       setParsed(parseData);
       setResult(data);
+      setChipStack([]);
+      setSynthesis(null);
       setClarification(null);
       setRefineText(text);
       setStage("done");
@@ -2121,6 +2193,8 @@ export default function App() {
     setWorkflowInput(null);
     setWorkflowResult(null);
     setRefineText("");
+    setChipStack([]);
+    setSynthesis(null);
   };
 
   // Soft reset — returns to input with the last query pre-populated for editing.
@@ -2347,8 +2421,75 @@ export default function App() {
       return;
     }
 
-    // All other actions — log for now
-    console.log("[chip]", chip.action, chip.args);
+    // Generic fetch_domain — routes to any registered adapter via W.1 backend handler.
+    // The backend reads active_plan / active_poly from session context (W.2) so we
+    // don't need to pass the plan explicitly here.
+    if (chip.action === "fetch_domain") {
+      try {
+        const res = await fetch(`${API}/query/chip`, {
+          method: "POST",
+          headers: SESSION_HEADERS,
+          body: JSON.stringify({ chip }),
+        });
+        const data = await res.json();
+        if (data.type === "ephemeral" && Array.isArray(data.rows)) {
+          setChipStack((prev) => [
+            ...prev,
+            {
+              handle:   data.handle ?? crypto.randomUUID(),
+              label:    chip.label,
+              domain:   chip.args.domain ?? "unknown",
+              rows:     data.rows,
+              viz_hint: data.viz_hint ?? "table",
+              chips:    data.chips ?? [],
+              count:    data.rows.length,
+            },
+          ]);
+        }
+      } catch (err: any) {
+        console.error("[chip:fetch_domain]", err);
+      }
+      return;
+    }
+
+    console.log("[chip] unhandled action:", chip.action, chip.args);
+  };
+
+  // Phase C — synthesise across the full result stack
+  const handleSynthesise = async () => {
+    if (!result || chipStack.length === 0) return;
+    setSynthesisLoading(true);
+    setSynthesis(null);
+
+    // Build the stack payload: primary result first, then chip follow-ups
+    const stackPayload = [
+      {
+        domain: result.intent ?? "unknown",
+        rows:    (result.results ?? []) as Record<string, unknown>[],
+        vizHint: result.viz_hint,
+      },
+      ...chipStack.map((e) => ({
+        domain:  e.domain,
+        rows:    e.rows,
+        vizHint: e.viz_hint,
+      })),
+    ];
+
+    try {
+      const res = await fetch(`${API}/query/synthesise`, {
+        method: "POST",
+        headers: SESSION_HEADERS,
+        body: JSON.stringify({
+          stack:    stackPayload,
+          location: result.resolved_location ?? result.plan?.location ?? "",
+        }),
+      });
+      const data = await res.json();
+      setSynthesis(data.synthesis ?? null);
+    } catch (err: any) {
+      console.error("[synthesise]", err);
+    }
+    setSynthesisLoading(false);
   };
 
   // D.12 — submit workflow inputs → /query/workflow
@@ -2468,13 +2609,48 @@ export default function App() {
             !decisionResult &&
             !workflowInput &&
             !workflowResult && (
-              <ResultRenderer
-                result={result}
-                onRefine={handleRefine}
-                onNewQuery={handleNewQuery}
-                onFollowUp={handleFollowUp}
-                onChipAction={handleChipAction}
-              />
+              <>
+                <ResultRenderer
+                  result={result}
+                  onRefine={handleRefine}
+                  onNewQuery={handleNewQuery}
+                  onFollowUp={handleFollowUp}
+                  onChipAction={handleChipAction}
+                />
+                {chipStack.map((entry) => (
+                  <StackCard
+                    key={entry.handle}
+                    entry={entry}
+                    onChipAction={handleChipAction}
+                  />
+                ))}
+
+                {/* Phase C — synthesis trigger and output */}
+                {chipStack.length >= 1 && !synthesis && (
+                  <div className="synthesis-prompt">
+                    <button
+                      className="btn-primary synthesis-btn"
+                      onClick={handleSynthesise}
+                      disabled={synthesisLoading}
+                    >
+                      {synthesisLoading ? "Analysing…" : "What does this tell me?"}
+                    </button>
+                  </div>
+                )}
+
+                {synthesis && (
+                  <div className="synthesis-card">
+                    <div className="synthesis-icon">◎</div>
+                    <p className="synthesis-text">{synthesis}</p>
+                    <button
+                      className="btn-ghost small synthesis-dismiss"
+                      onClick={() => setSynthesis(null)}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+              </>
             )}
         </main>
 

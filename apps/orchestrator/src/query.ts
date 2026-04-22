@@ -44,7 +44,7 @@ import {
 import { QueryRouter } from "./query-router";
 import { getWorkflowById, findWorkflowsForIntent } from "./workflow-templates";
 import { executeWorkflow } from "./workflow-executor";
-import { generateInsight } from "./insight";
+import { generateInsight, synthesiseStack } from "./insight";
 import { CATEGORY_TO_INTENT, normalizeToDomainSlug } from "./domain-slug";
 import { defaultResolveTemporalRange } from "./temporal-resolver";
 
@@ -451,22 +451,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       : null;
 
     if (curatedSource) {
-      // Skip background discovery for scrape-type curated sources — the curated
-      // entry IS the definitive source, discovery would only find garbage URLs.
-      // Only trigger discovery for REST/CSV sources where a better adapter might exist.
-      if (domainDiscovery.isEnabled() && curatedSource.type !== "scrape") {
-        domainDiscovery
-          .run({ intent: routingIntent ?? plan.category, country_code }, prisma)
-          .catch((err: unknown) => {
-            console.warn(
-              JSON.stringify({
-                event: "discovery_run_failed",
-                intent: routingIntent ?? plan.category,
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
-          });
-      }
+      // Curated registry matched — do NOT run discovery. The curated entry is the
+      // authoritative source for this intent. Discovery would find the same URLs
+      // (wasted API calls) or garbage URLs (scrape-type), and could create
+      // duplicate DomainDiscovery records for an intent we already handle.
 
       // Build an on-the-fly adapter from the curated source
       const source = curatedSource; // capture for closures
@@ -1449,6 +1437,42 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
     domain: args.domain ?? null,
     message: `Chip action '${action}' (domain: ${args.domain ?? "none"}) is not yet implemented.`,
   });
+});
+
+// ── POST /synthesise — Phase C ────────────────────────────────────────────────
+//
+// Accepts the full result stack (primary + chip follow-ups) and a location,
+// produces a cross-domain synthesis sentence that directly answers the user's
+// implicit question ("is this a good place to live?", "where should I eat?").
+//
+// Body: { stack: [{ domain, rows, vizHint }], location: string }
+// Response: { synthesis: string | null }
+
+const SynthesiseBodySchema = z.object({
+  stack: z.array(
+    z.object({
+      domain:  z.string(),
+      rows:    z.array(z.record(z.unknown())),
+      vizHint: z.string().optional(),
+    }),
+  ).min(2),
+  location: z.string().min(1),
+});
+
+queryRouter.post("/synthesise", async (req: Request, res: Response) => {
+  const parsed = SynthesiseBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "invalid_body", details: parsed.error.issues });
+  }
+
+  const { stack, location } = parsed.data;
+
+  const synthesis = await synthesiseStack(
+    stack.map((e) => ({ domain: e.domain, rows: e.rows, vizHint: e.vizHint ?? "table" })),
+    location,
+  );
+
+  return res.json({ synthesis });
 });
 
 // ── POST /workflow — D.12 ─────────────────────────────────────────────────────

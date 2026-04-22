@@ -113,6 +113,7 @@ async function registerEphemeral(opts: PathOpts): Promise<RegisterResult> {
   });
 
   // 3b. Build and register fetch-and-discard adapter
+  const templateType = (proposedConfig.templateType as string) ?? "listings";
   const ephemeralConfig: DomainConfigV2 = {
     identity: {
       name,
@@ -122,7 +123,7 @@ async function registerEphemeral(opts: PathOpts): Promise<RegisterResult> {
       intents: [intent],
     },
     source: { type: "rest", endpoint: apiUrl },
-    template: { type: "listings", capabilities: {} },
+    template: { type: templateType as any, capabilities: {} },
     fields: {},
     time: { type: "static" },
     recovery: [],
@@ -206,6 +207,7 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
     fields[String(target)] = { source: String(source), type: "string", role: "label" };
   }
 
+  const templateType = (proposedConfig.templateType as string) ?? "listings";
   const persistentConfig: DomainConfigV2 = {
     identity: {
       name,
@@ -215,7 +217,7 @@ async function registerPersistent(opts: PathOpts): Promise<RegisterResult> {
       intents: [intent],
     },
     source: { type: "rest", endpoint: apiUrl },
-    template: { type: "listings", capabilities: {} },
+    template: { type: templateType as any, capabilities: {} },
     fields,
     time: { type: "static" },
     recovery: [],

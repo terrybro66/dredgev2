@@ -5,6 +5,7 @@ import type { DomainConfigV2 } from "@dredge/schemas";
 
 vi.mock("../domains/food-hygiene-gb/fetcher", () => ({
   fetchFoodEstablishments: vi.fn(),
+  fetchFoodEstablishmentsByCoord: vi.fn(),
 }));
 
 vi.mock("../db", () => ({
@@ -13,23 +14,26 @@ vi.mock("../db", () => ({
   },
 }));
 
-import { fetchFoodEstablishments } from "../domains/food-hygiene-gb/fetcher";
+import { fetchFoodEstablishments, fetchFoodEstablishmentsByCoord } from "../domains/food-hygiene-gb/fetcher";
 import { foodHygieneGbAdapter } from "../domains/food-hygiene-gb/index";
 
 const mockFetch = vi.mocked(fetchFoodEstablishments);
+const mockFetchByCoord = vi.mocked(fetchFoodEstablishmentsByCoord);
 
-// ── Raw FSA API row fixture ───────────────────────────────────────────────────
+// ── FoodEstablishment fixture (shape returned by fetcher after FSA transform) ─
+// The fetcher transforms raw FSA API response into FoodEstablishment objects.
+// flattenRow maps FoodEstablishment fields → canonical pipeline fields.
 
 const rawRow = {
-  BusinessName: "The Crown Pub",
-  BusinessType: "Pub/bar/nightclub",
-  AddressLine1: "12 High Street",
-  AddressLine3: "Birmingham",
-  PostCode: "B1 1AA",
-  LocalAuthorityName: "Birmingham City Council",
-  RatingValue: "5",
-  RatingDate: "2023-06-15",
-  geocode: { longitude: "-1.8998", latitude: "52.4862" },
+  name: "The Crown Pub",
+  businessType: "Pub/bar/nightclub",
+  address: "12 High Street, Birmingham",
+  postCode: "B1 1AA",
+  localAuthority: "Birmingham City Council",
+  rating: "5",
+  ratingDate: "2023-06-15",
+  lat: 52.4862,
+  lon: -1.8998,
 };
 
 // ── 1. Config shape ───────────────────────────────────────────────────────────
@@ -95,38 +99,37 @@ describe("food-hygiene-gb — flattenRow", () => {
     expect(row.category).toBe("Pub/bar/nightclub");
   });
 
-  it("maps geocode.latitude to lat as a number", () => {
+  it("maps lat to lat as a number", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
     expect(row.lat).toBe(52.4862);
     expect(typeof row.lat).toBe("number");
   });
 
-  it("maps geocode.longitude to lon as a number", () => {
+  it("maps lon to lon as a number", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
     expect(row.lon).toBe(-1.8998);
     expect(typeof row.lon).toBe("number");
   });
 
-  it("maps AddressLine1 or AddressLine3 to location", () => {
+  it("maps address to location", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
     expect(typeof row.location).toBe("string");
     expect((row.location as string).length).toBeGreaterThan(0);
   });
 
-  it("retains RatingValue in extras", () => {
+  it("maps rating to value field", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
-    const extras = row.extras as Record<string, unknown>;
-    expect(extras?.RatingValue ?? extras?.rating).toBeTruthy();
+    expect(row.value).toBe("5");
   });
 
-  it("retains PostCode in extras", () => {
+  it("retains postCode in extras", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
     const extras = row.extras as Record<string, unknown>;
-    expect(extras?.PostCode ?? extras?.postCode).toBeTruthy();
+    expect(extras?.postCode ?? extras?.PostCode).toBeTruthy();
   });
 
-  it("returns null for lat/lon when geocode is missing", () => {
-    const rowNoGeo = { ...rawRow, geocode: undefined };
+  it("returns null for lat/lon when coordinates are missing", () => {
+    const rowNoGeo = { ...rawRow, lat: null, lon: null };
     const row = foodHygieneGbAdapter.flattenRow(rowNoGeo);
     expect(row.lat).toBeNull();
     expect(row.lon).toBeNull();
@@ -136,24 +139,37 @@ describe("food-hygiene-gb — flattenRow", () => {
 // ── 3. fetchData ──────────────────────────────────────────────────────────────
 
 describe("food-hygiene-gb — fetchData", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("calls fetchFoodEstablishments with the first part of plan.location", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
     mockFetch.mockResolvedValue([]);
+    mockFetchByCoord.mockResolvedValue([]);
+  });
+
+  it("falls back to fetchFoodEstablishments by name when poly is empty", async () => {
     await foodHygieneGbAdapter.fetchData(
       { location: "Birmingham, West Midlands" },
       "",
     );
     expect(mockFetch).toHaveBeenCalledWith("Birmingham");
+    expect(mockFetchByCoord).not.toHaveBeenCalled();
   });
 
   it("strips county/country suffix from location before calling fetcher", async () => {
-    mockFetch.mockResolvedValue([]);
     await foodHygieneGbAdapter.fetchData(
       { location: "Leeds, West Yorkshire, England" },
       "",
     );
     expect(mockFetch).toHaveBeenCalledWith("Leeds");
+  });
+
+  it("uses fetchFoodEstablishmentsByCoord when a valid poly centroid is available", async () => {
+    // poly centroid "lat,lon" format
+    await foodHygieneGbAdapter.fetchData(
+      { location: "Manchester" },
+      "53.4808,-2.2426",
+    );
+    expect(mockFetchByCoord).toHaveBeenCalledWith(53.4808, -2.2426);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("returns canonical rows (flattenRow applied)", async () => {
@@ -167,11 +183,7 @@ describe("food-hygiene-gb — fetchData", () => {
   });
 
   it("returns empty array when fetcher returns nothing", async () => {
-    mockFetch.mockResolvedValue([]);
-    const rows = await foodHygieneGbAdapter.fetchData(
-      { location: "Nowhere" },
-      "",
-    );
+    const rows = await foodHygieneGbAdapter.fetchData({ location: "Nowhere" }, "");
     expect(rows).toEqual([]);
   });
 });
@@ -232,11 +244,9 @@ describe("food-hygiene-gb — parity with old adapter", () => {
     expect(row).toHaveProperty("extras");
   });
 
-  it("extras contains rating information", () => {
+  it("rating is mapped to the value field (not buried in extras)", () => {
     const row = foodHygieneGbAdapter.flattenRow(rawRow);
-    const extras = row.extras as Record<string, unknown>;
-    // Old adapter stored rating in extras — new adapter must too
-    const hasRating = "RatingValue" in extras || "rating" in extras;
-    expect(hasRating).toBe(true);
+    // rating is now a first-class mapped field — accessible directly as value
+    expect(row.value).toBe("5");
   });
 });

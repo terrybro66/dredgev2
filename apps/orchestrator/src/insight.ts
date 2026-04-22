@@ -57,10 +57,24 @@ function buildStats(
   };
 }
 
+// ── Domain display names for prompts ─────────────────────────────────────────
+
+const DOMAIN_DISPLAY: Record<string, string> = {
+  "crime-uk":        "crime incidents",
+  "weather":         "weather conditions",
+  "cinemas-gb":      "cinemas",
+  "food-hygiene-gb": "food hygiene ratings",
+  "flood-risk-gb":   "flood risk zones",
+};
+
+function domainDisplay(domain: string): string {
+  return DOMAIN_DISPLAY[domain] ?? domain.replace(/-/g, " ");
+}
+
 /**
- * Generate a one-sentence natural language insight for a set of crime results.
- * Returns null when rows are empty, when the domain is non-crime, or when the
- * LLM call fails — callers should treat null as "no insight available".
+ * Generate a one-sentence natural language insight for a single domain result.
+ * Works for any registered domain — not just crime.
+ * Returns null when rows are empty or the LLM call fails.
  */
 export async function generateInsight(
   rows: Record<string, unknown>[],
@@ -68,21 +82,21 @@ export async function generateInsight(
   domain: string,
 ): Promise<string | null> {
   if (rows.length === 0) return null;
-  if (!domain.startsWith("crime")) return null;
 
   const stats = buildStats(rows, plan);
+  const domainLabel = domainDisplay(domain);
 
   const trendNote =
     stats.monthlyTrend && stats.monthlyTrend.length >= 2
       ? `Monthly counts: ${stats.monthlyTrend.map((m) => `${m.month}: ${m.count}`).join(", ")}.`
       : "";
 
-  const prompt = `You are a UK crime data analyst. Write exactly one factual sentence (under 25 words) summarising these statistics. No markdown, no quotes.
+  const prompt = `You are a public data analyst. Write exactly one factual sentence (under 30 words) summarising these ${domainLabel} statistics for a UK resident. No markdown, no quotes.
 
-Total incidents: ${stats.totalCount}
+Total records: ${stats.totalCount}
 Most common category: ${stats.topCategory}
 Location: ${stats.location}
-Period: ${stats.dateFrom} to ${stats.dateTo}
+${plan.date_from !== plan.date_to ? `Period: ${stats.dateFrom} to ${stats.dateTo}` : ""}
 ${trendNote}
 
 Summary sentence:`;
@@ -106,6 +120,117 @@ Summary sentence:`;
     );
     return null;
   }
+}
+
+// ── Stack synthesis ───────────────────────────────────────────────────────────
+
+export interface StackEntry {
+  domain: string;
+  rows: Record<string, unknown>[];
+  vizHint: string;
+}
+
+/**
+ * Synthesise a cross-domain conclusion from two or more stacked results.
+ *
+ * Takes the primary domain result + all chip follow-up results, builds a
+ * concise data summary for each, then asks the LLM to draw a conclusion that
+ * directly answers the user's implicit question (is this a good area to live?
+ * where should I eat tonight? which site makes sense?).
+ *
+ * Returns null if the LLM call fails — callers should treat null as
+ * "synthesis unavailable, show individual insights instead."
+ */
+export async function synthesiseStack(
+  stack: StackEntry[],
+  location: string,
+): Promise<string | null> {
+  if (stack.length < 2) return null;
+
+  // Build a plain-English data summary for each domain in the stack
+  const domainSummaries = stack.map((entry) => {
+    const label = domainDisplay(entry.domain);
+    const count = entry.rows.length;
+    if (count === 0) return `${label}: no data found for this area`;
+
+    const byCategory: Record<string, number> = {};
+    for (const row of entry.rows) {
+      const cat = (row.category as string) ?? "unknown";
+      byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+    }
+    const topCat = Object.entries(byCategory).sort(([, a], [, b]) => b - a)[0]?.[0];
+    return topCat && topCat !== "unknown"
+      ? `${label}: ${count} records, most common category "${topCat}"`
+      : `${label}: ${count} records`;
+  });
+
+  // Infer the user's question from the domain combination
+  const domains = stack.map((e) => e.domain);
+  const question = inferUserQuestion(domains, location);
+
+  const prompt = `You are a UK public data analyst helping a resident make an informed decision about ${location}.
+
+The user has gathered data from multiple sources:
+${domainSummaries.map((s, i) => `${i + 1}. ${s}`).join("\n")}
+
+Their implicit question: ${question}
+
+Write 2–3 sentences that directly answer their question using the data above. Be specific and concrete — mention actual numbers where relevant. End with a clear recommendation or conclusion. No markdown, no bullet points.`;
+
+  try {
+    const response = await client.chat.completions.create({
+      model: "deepseek-chat",
+      max_tokens: 120,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const text = response.choices[0]?.message?.content?.trim() ?? null;
+    console.log(
+      JSON.stringify({
+        event: "synthesis_generated",
+        location,
+        domains,
+        count: stack.length,
+      }),
+    );
+    return text || null;
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "synthesis_failed",
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+    return null;
+  }
+}
+
+/**
+ * Infer the user's underlying question from the combination of domains they've
+ * navigated. This anchors the synthesis prompt to the right user story.
+ */
+function inferUserQuestion(domains: string[], location: string): string {
+  const has = (d: string) => domains.some((x) => x === d || x.startsWith(d));
+
+  if (has("crime-uk") && has("flood-risk-gb") && has("food-hygiene-gb")) {
+    return `Is ${location} a good place to live or buy property?`;
+  }
+  if (has("cinemas-gb") && has("weather") && has("food-hygiene-gb")) {
+    return `Where and when should I go out in ${location} this weekend?`;
+  }
+  if (has("crime-uk") && has("flood-risk-gb")) {
+    return `How safe is ${location} from crime and flooding?`;
+  }
+  if (has("cinemas-gb") && has("food-hygiene-gb")) {
+    return `Which venues near cinemas in ${location} are worth visiting?`;
+  }
+  if (has("crime-uk") && has("food-hygiene-gb")) {
+    return `What is the overall safety and food quality picture in ${location}?`;
+  }
+  if (has("cinemas-gb") && has("crime-uk")) {
+    return `Is it safe to go out to the cinema in ${location}?`;
+  }
+  // Generic fallback
+  return `What does the combined data tell a resident or visitor about ${location}?`;
 }
 
 /**
