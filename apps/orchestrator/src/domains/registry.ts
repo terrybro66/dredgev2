@@ -3,6 +3,7 @@ import { crimeUkAdapter } from "./crime-uk/index";
 import { weatherAdapter } from "./weather/index";
 import { cinemasGbAdapter } from "./cinemas-gb/index";
 import { foodHygieneGbAdapter } from "./food-hygiene-gb/index";
+import { floodRiskGbAdapter } from "./flood-risk-gb/index";
 import { createPipelineAdapter } from "./generic-adapter";
 import { createRestProvider } from "../providers/rest-provider";
 import { tagRows } from "../enrichment/source-tag";
@@ -38,13 +39,41 @@ export interface DomainAdapter {
   resolveTemporalRange?: (
     temporal: string,
   ) => Promise<{ date_from: string; date_to: string }>;
+  /**
+   * Whether this domain was auto‑approved during registration.
+   * Defaults to false for dynamically discovered domains; true for built‑in adapters.
+   */
+  autoApproved?: boolean;
 }
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 const registry = new Map<string, DomainAdapter>();
 
+import type { DomainValidation } from "../types/connected";
+
+function validateDomainAdapter(adapter: DomainAdapter): DomainValidation {
+  const config = adapter.config;
+  const criteria = {
+    hasRequiredFields: !!config.identity.name && !!config.source,
+    supportedCountry: config.identity.countries.length === 0 || config.identity.countries.includes("GB"),
+    safeSource: !config.source?.endpoint?.includes("localhost") && !config.source?.endpoint?.includes("127.0.0.1"),
+    hasValidEndpoint: !!config.source?.endpoint || config.source?.type === "overpass",
+  };
+  const notes: string[] = [];
+  if (!criteria.supportedCountry) notes.push("Country may not be supported.");
+  if (!criteria.safeSource) notes.push("Source endpoint may be unsafe.");
+  const status = criteria.hasRequiredFields && criteria.safeSource && criteria.hasValidEndpoint
+    ? "auto_approved"
+    : "pending";
+  return { status, criteria, notes };
+}
+
 export function registerDomain(adapter: DomainAdapter): void {
+  const validation = validateDomainAdapter(adapter);
+  if (validation.status === "auto_approved") {
+    adapter.autoApproved = true;
+  }
   registry.set(adapter.config.identity.name, adapter);
 }
 
@@ -85,10 +114,13 @@ export async function loadDomains(): Promise<void> {
     weatherAdapter,
     cinemasGbAdapter,
     foodHygieneGbAdapter,
+    floodRiskGbAdapter,
     geocoderAdapter,
     travelEstimatorAdapter,
   ];
   for (const adapter of adapters) {
+    // Mark built‑in adapters as auto‑approved
+    adapter.autoApproved = true;
     registerDomain(adapter);
 
     const domainName = adapter.config.identity.name;

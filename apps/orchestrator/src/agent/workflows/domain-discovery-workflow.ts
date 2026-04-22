@@ -22,6 +22,11 @@ export interface ProposedDomainConfig {
   storeResults: boolean;
   refreshPolicy: "realtime" | "daily" | "weekly" | "static";
   ephemeralRationale: string;
+  /**
+   * Template type — determines which capability chips and cross-domain affinity
+   * rules apply to this domain. Must be one of the six canonical templates.
+   */
+  templateType: "incidents" | "places" | "forecasts" | "boundaries" | "listings" | "regulations";
   coverage: {
     type: "national" | "regional" | "local" | "unknown";
     region: string | null;
@@ -107,21 +112,27 @@ async function discoverWithBrowser(
       log.info(`Discovering sources for: ${intent} (${country_code})`);
       try {
         const results = await page.extract(
-          `Find up to 5 public data sources that provide ${intent} data for country ${country_code}.
-           Look for government open data portals, CSV files, REST APIs, or statistical datasets.
-           Return the direct URL to the data, the likely format, and a brief description.`,
+          `Find up to 5 public data sources that provide "${intent}" data for country "${country_code}".
+           Look for government open data portals, REST APIs, CSV file downloads, or statistical datasets.
+           For each source found, return the REAL URL (not null, not placeholder), its format, and a description.
+           If you cannot find any real data sources, return an empty items array: {"items": []}.
+           Do NOT return null or placeholder values — omit entries where the URL is unknown.`,
           z.object({
-            sources: z.array(
+            items: z.array(
               z.object({
-                url: z.string(),
+                url: z.string().url(),
                 format: z.enum(["rest", "csv", "xlsx", "scrape"]),
-                description: z.string(),
+                description: z.string().min(1),
                 confidence: z.number().min(0).max(1),
               }),
             ),
           }),
         );
-        sources.push(...(results.sources ?? []));
+        // Filter out any entries that slipped through with null-like values
+        const valid = (results.items ?? []).filter(
+          (s) => s.url && s.url !== "null" && s.description && s.description !== "null",
+        );
+        sources.push(...valid);
       } catch (err) {
         log.error(`Stagehand extract failed: ${String(err)}`);
       }
@@ -266,7 +277,14 @@ Propose:
    data that benefits from caching and history (e.g. crime statistics, flood risk, planning applications).
 5. A refresh policy: "realtime" (fetch live, never cache), "daily", "weekly", or "static" (never changes).
 6. A brief rationale explaining the storeResults decision (ephemeralRationale).
-7. Geographic coverage of this data source:
+7. The template type — choose exactly one based on what this data represents:
+   - "incidents": time-stamped events with location (crimes, accidents, planning applications, complaints)
+   - "places": fixed named locations with category (cinemas, hospitals, parks, stations)
+   - "forecasts": time-series values at a point (weather, air quality, tidal levels, traffic counts)
+   - "boundaries": geographic zones or areas (flood zones, conservation areas, electoral wards)
+   - "listings": businesses or services with ratings/scores (food hygiene, reviews, company registrations)
+   - "regulations": eligibility rules or licence conditions (permits, qualifications, legal requirements)
+8. Geographic coverage of this data source:
    - "national": covers the entire country (e.g. UK-wide crime statistics)
    - "regional": covers a specific region or county — provide the region name (e.g. "East of England")
    - "local": specific to one city or small area — provide a GeoJSON Polygon if you can infer one from the URL/description
@@ -280,6 +298,7 @@ Return only JSON in this exact shape:
   "storeResults": true,
   "refreshPolicy": "weekly",
   "ephemeralRationale": "Crime statistics are stable reference data.",
+  "templateType": "incidents",
   "coverage": {
     "type": "national",
     "region": null,
@@ -307,6 +326,11 @@ Return only JSON in this exact shape:
     const text = data.choices?.[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
 
+    const validTemplateTypes = ["incidents", "places", "forecasts", "boundaries", "listings", "regulations"];
+    const templateType = validTemplateTypes.includes(parsed.templateType)
+      ? parsed.templateType
+      : "listings";
+
     return {
       name:
         parsed.name ??
@@ -321,6 +345,7 @@ Return only JSON in this exact shape:
       storeResults: parsed.storeResults ?? true,
       refreshPolicy: parsed.refreshPolicy ?? "weekly",
       ephemeralRationale: parsed.ephemeralRationale ?? "",
+      templateType,
       coverage: {
         type: parsed.coverage?.type ?? "unknown",
         region: parsed.coverage?.region ?? null,

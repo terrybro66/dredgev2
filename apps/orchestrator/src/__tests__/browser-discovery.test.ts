@@ -101,7 +101,7 @@ describe("discoverSources — search priority", () => {
     mockSearchCatalogue.mockResolvedValue([]);
     mockSearchWithSerp.mockResolvedValue([]);
     mockPageExtract.mockResolvedValue({
-      sources: [
+      items: [
         {
           url: "https://example.com/scraped.csv",
           format: "csv",

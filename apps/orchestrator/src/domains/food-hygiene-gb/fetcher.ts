@@ -44,6 +44,24 @@ interface FsaResponse {
   establishments?: FsaEstablishment[];
 }
 
+/**
+ * Fetch establishments near a lat/lon point (preferred — used when a poly
+ * centroid is available from the query context).
+ * FSA API supports ?lat=X&lng=Y&pageSize=N
+ */
+export async function fetchFoodEstablishmentsByCoord(
+  lat: number,
+  lon: number,
+): Promise<FoodEstablishment[]> {
+  const params = new URLSearchParams({
+    lat: lat.toFixed(4),
+    lng: lon.toFixed(4),
+    pageSize: String(PAGE_SIZE),
+  });
+  const url = `${BASE_URL}?${params.toString()}`;
+  return fetchFromFsaUrl(url);
+}
+
 export async function fetchFoodEstablishments(
   location: string,
 ): Promise<FoodEstablishment[]> {
@@ -53,7 +71,10 @@ export async function fetchFoodEstablishments(
   });
 
   const url = `${BASE_URL}?${params.toString()}`;
+  return fetchFromFsaUrl(url);
+}
 
+async function fetchFromFsaUrl(url: string): Promise<FoodEstablishment[]> {
   const res = await fetch(url, {
     headers: {
       "x-api-version": "2",
@@ -70,13 +91,15 @@ export async function fetchFoodEstablishments(
   const establishments = data.establishments ?? [];
 
   const withGeocode = establishments.filter(
-    (e) => e.Geocode?.Latitude != null && e.Geocode?.Longitude != null
+    (e) => e.Geocode?.Latitude != null && e.Geocode?.Longitude != null,
   ).length;
-  console.log(JSON.stringify({
-    event: "fsa_response",
-    count: establishments.length,
-    with_geocode: withGeocode,
-  }));
+  console.log(
+    JSON.stringify({
+      event: "fsa_response",
+      count: establishments.length,
+      with_geocode: withGeocode,
+    }),
+  );
 
   return establishments.map((e) => {
     const addressParts = [
@@ -86,8 +109,14 @@ export async function fetchFoodEstablishments(
       e.AddressLine4,
     ].filter(Boolean);
 
-    const lat = e.Geocode?.Latitude != null ? parseFloat(String(e.Geocode.Latitude)) : null;
-    const lon = e.Geocode?.Longitude != null ? parseFloat(String(e.Geocode.Longitude)) : null;
+    const lat =
+      e.Geocode?.Latitude != null
+        ? parseFloat(String(e.Geocode.Latitude))
+        : null;
+    const lon =
+      e.Geocode?.Longitude != null
+        ? parseFloat(String(e.Geocode.Longitude))
+        : null;
 
     return {
       name: e.BusinessName ?? "Unknown",
