@@ -49,6 +49,7 @@ describe("DomainDiscoveryPipeline", () => {
 
       const mockPrisma = {
         domainDiscovery: {
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi
             .fn()
             .mockResolvedValue({ id: "disc-1", status: "pending" }),
@@ -78,6 +79,7 @@ describe("DomainDiscoveryPipeline", () => {
 
       const mockPrisma = {
         domainDiscovery: {
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi
             .fn()
             .mockResolvedValue({ id: "disc-1", status: "pending" }),
@@ -108,6 +110,7 @@ describe("DomainDiscoveryPipeline", () => {
 
       const mockPrisma = {
         domainDiscovery: {
+          findFirst: vi.fn().mockResolvedValue(null),
           create: vi
             .fn()
             .mockResolvedValue({ id: "disc-1", status: "pending" }),
@@ -171,6 +174,7 @@ describe("DomainDiscoveryPipeline", () => {
 
     const mockPrisma = {
       domainDiscovery: {
+        findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({ id: "disc-1", status: "pending" }),
         update: vi.fn().mockResolvedValue({}),
       },

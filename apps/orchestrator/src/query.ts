@@ -26,6 +26,7 @@ import { suggestFollowups } from "./suggest-followups";
 import { getMergedRelationships } from "./relationship-discovery";
 import { buildClarificationRequest } from "./clarification";
 import { getRegulatoryAdapter } from "./regulatory-adapter";
+import type { Chip } from "./types/connected";
 import {
   updateQueryContext,
   getQueryContext,
@@ -417,9 +418,24 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       });
     }
 
+    // Attach a play_video chip so the user can watch the regulatory guide.
+    // The chip is always emitted — the frontend resolves to null gracefully
+    // if no VideoSpec exists for this domain yet.
+    const regulatoryChips: Chip[] = [
+      {
+        label: `Watch: ${regulatoryAdapter.name} guide`,
+        action: "play_video",
+        args: {
+          domain: regulatoryAdapter.name,
+          intent: regulatoryAdapter.intents[0] ?? regulatoryAdapter.name,
+          ref: `regulatory_${regulatoryAdapter.name}`,
+        },
+      },
+    ];
+
     return res.status(200).json({
       type: "decision_result",
-      decision,
+      decision: { ...decision, suggested_chips: regulatoryChips },
       intent: clarificationText,
     });
   }
@@ -686,7 +702,10 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
         },
       };
     } else {
-      // 1c. Fall through to discovery pipeline
+      // 1c. Fall through to discovery pipeline.
+      // startDiscovery() is idempotent (dedup by intent+country) and fires the
+      // pipeline in the background. It returns the discovery record ID synchronously
+      // so we can include it in the response for client-side polling.
       if (domainDiscovery.isEnabled()) {
         const discoveryIntent =
           resolvedIntent && resolvedIntent !== "unknown"
@@ -694,24 +713,28 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
             : plan.category !== "unknown"
               ? plan.category
               : `${plan.category} in ${plan.location}`;
-        // Non-blocking — don't await so the user gets a fast response
-        domainDiscovery
-          .run({ intent: discoveryIntent, country_code }, prisma)
-          .catch((err: unknown) => {
-            console.warn(
-              JSON.stringify({
-                event: "discovery_run_failed",
-                intent: discoveryIntent,
-                error: err instanceof Error ? err.message : String(err),
-              }),
-            );
+
+        const discoveryId = await domainDiscovery.startDiscovery(
+          { intent: discoveryIntent, country_code },
+          prisma,
+        );
+
+        if (discoveryId) {
+          return res.status(200).json({
+            type: "discovering",
+            discovery_id: discoveryId,
+            intent: discoveryIntent,
+            message: `Looking for a data source for "${discoveryIntent}"…`,
           });
+        }
       }
+
+      // Discovery disabled or record creation failed — fall back to not_supported
       return res.status(200).json({
         error: "not_supported",
         message:
           routingIntent && routingIntent !== "unknown"
-            ? `We don't have a data source for "${routingIntent}" yet. We've added it to our review queue.`
+            ? `We don't have a data source for "${routingIntent}" yet.`
             : `We couldn't understand that query. Try asking about crime, weather, flooding, transport, cinema listings, or population statistics.`,
         supported: [
           "crime",
@@ -721,7 +744,6 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
           "cinema listings",
           "population statistics",
         ],
-        discovery_triggered: domainDiscovery.isEnabled(),
       });
     }
   }
@@ -1545,6 +1567,46 @@ queryRouter.get("/history", async (_req: Request, res: Response) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+
+// ── GET /query/discovery/:id ──────────────────────────────────────────────────
+// Poll endpoint for client-side discovery progress tracking.
+// Returns { id, status, proposed_name? } — status transitions:
+//   pending → domain_discovery_started logged, pipeline running
+//   requires_review → pipeline complete, awaiting admin approval
+//   registered → adapter is live, client should re-execute the original query
+//   error → pipeline failed, no adapter will be created
+
+queryRouter.get("/discovery/:id", async (req: Request, res: Response) => {
+  const record = await prisma.domainDiscovery.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true,
+      status: true,
+      intent: true,
+      proposed_config: true,
+      completedAt: true,
+    },
+  });
+
+  if (!record) {
+    return res.status(404).json({ error: "not_found" });
+  }
+
+  const proposedName =
+    record.proposed_config &&
+    typeof record.proposed_config === "object" &&
+    "name" in (record.proposed_config as object)
+      ? (record.proposed_config as Record<string, unknown>)["name"]
+      : null;
+
+  return res.json({
+    id: record.id,
+    status: record.status,
+    intent: record.intent,
+    proposed_name: proposedName ?? null,
+    completed_at: record.completedAt,
+  });
+});
 
 queryRouter.get("/:id", async (req: Request, res: Response) => {
   const record = await prisma.query.findUnique({

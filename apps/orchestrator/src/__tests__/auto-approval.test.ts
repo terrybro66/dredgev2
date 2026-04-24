@@ -109,6 +109,7 @@ const nonGovConfig = {
 
 const mockPrisma = {
   domainDiscovery: {
+    findFirst: vi.fn().mockResolvedValue(null),
     create: mockDiscoveryCreate,
     update: mockDiscoveryUpdate,
   },

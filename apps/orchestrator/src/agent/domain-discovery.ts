@@ -22,24 +22,105 @@ export const domainDiscovery = {
     return process.env.DOMAIN_DISCOVERY_ENABLED === "true";
   },
 
-  async run(
+  /**
+   * _reserveSlot — dedup check + record creation.
+   * Returns the record ID (existing or newly created), or null when disabled
+   * or on DB error. Does NOT start the pipeline.
+   */
+  async _reserveSlot(
     context: DiscoveryContext,
     prisma: any,
-  ): Promise<DiscoveryResult | null> {
+  ): Promise<string | null> {
     if (!this.isEnabled()) return null;
 
-    let record: { id: string } | null = null;
+    // Dedup — reuse an in-progress or pending-review record
+    const existing = await prisma.domainDiscovery.findFirst({
+      where: {
+        intent: context.intent,
+        country_code: context.country_code,
+        status: { in: ["pending", "requires_review"] },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (existing) {
+      console.log(
+        JSON.stringify({
+          event: "domain_discovery_dedup",
+          intent: context.intent,
+          id: existing.id,
+          status: existing.status,
+        }),
+      );
+      return existing.id;
+    }
 
     try {
-      record = await prisma.domainDiscovery.create({
+      const record = await prisma.domainDiscovery.create({
         data: {
           intent: context.intent,
           country_code: context.country_code,
           status: "pending",
         },
       });
-      if (!record) return null;
+      return record.id;
+    } catch (err: any) {
+      console.error(
+        JSON.stringify({
+          event: "domain_discovery_record_create_failed",
+          error: err.message,
+        }),
+      );
+      return null;
+    }
+  },
 
+  /**
+   * startDiscovery — reserves a slot and fires the pipeline in the background.
+   * Returns the record ID immediately so the HTTP handler can include it in
+   * the response for client-side polling. Non-blocking.
+   */
+  async startDiscovery(
+    context: DiscoveryContext,
+    prisma: any,
+  ): Promise<string | null> {
+    const id = await this._reserveSlot(context, prisma);
+    if (!id) return null;
+
+    this._runPipeline(id, context, prisma).catch((err: unknown) => {
+      console.error(
+        JSON.stringify({
+          event: "domain_discovery_pipeline_error",
+          id,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    });
+
+    return id;
+  },
+
+  /**
+   * run — reserves a slot and awaits the pipeline to completion.
+   * Used by tests and any call site that needs synchronous pipeline execution.
+   */
+  async run(
+    context: DiscoveryContext,
+    prisma: any,
+  ): Promise<DiscoveryResult | null> {
+    const id = await this._reserveSlot(context, prisma);
+    if (!id) return null;
+    await this._runPipeline(id, context, prisma);
+    return null;
+  },
+
+  async _runPipeline(
+    recordId: string,
+    context: DiscoveryContext,
+    prisma: any,
+  ): Promise<void> {
+    const record = { id: recordId };
+
+    try {
       console.log(
         JSON.stringify({
           event: "domain_discovery_started",
@@ -72,7 +153,7 @@ export const domainDiscovery = {
 
       if (candidates.length === 0) {
         await requiresReview("No candidate sources found");
-        return null;
+        return;
       }
 
       // Step 2 — sample the most confident candidate
@@ -84,7 +165,7 @@ export const domainDiscovery = {
           JSON.stringify({ event: "discovery_sample_failed", url: top.url }),
         );
         await requiresReview("Could not sample source — may need manual config", top.url);
-        return null;
+        return;
       }
 
       // Step 3 — propose domain config
@@ -100,7 +181,7 @@ export const domainDiscovery = {
           JSON.stringify({ event: "discovery_propose_failed", url: top.url }),
         );
         await requiresReview("LLM failed to propose config", top.url);
-        return null;
+        return;
       }
 
       // Step 4 — check auto-approval criteria
@@ -149,7 +230,7 @@ export const domainDiscovery = {
             }),
           );
 
-          return null;
+          return;
         } catch (err: any) {
           console.warn(
             JSON.stringify({
@@ -202,7 +283,6 @@ export const domainDiscovery = {
           `  -H "Content-Type: application/json" -d '{}'`,
       );
 
-      return null;
     } catch (err: any) {
       console.error(
         JSON.stringify({
@@ -212,17 +292,14 @@ export const domainDiscovery = {
           error: err.message,
         }),
       );
-      if (record) {
-        await prisma.domainDiscovery.update({
-          where: { id: record.id },
-          data: {
-            status: "error",
-            error_message: err.message,
-            completedAt: new Date(),
-          },
-        });
-      }
-      return null;
+      await prisma.domainDiscovery.update({
+        where: { id: record.id },
+        data: {
+          status: "error",
+          error_message: err.message,
+          completedAt: new Date(),
+        },
+      });
     }
   },
 

@@ -6,10 +6,16 @@ import {
   VizHint,
 } from "@dredge/schemas";
 
-const client = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    _client = new OpenAI({
+      apiKey: process.env.DEEPSEEK_API_KEY,
+      baseURL: "https://api.deepseek.com",
+    });
+  }
+  return _client;
+}
 
 function buildSystemPrompt(): string {
   return `You are a structured data extraction assistant. Extract the user's query intent and return ONLY a valid JSON object — no prose, no markdown fences.
@@ -115,7 +121,7 @@ export async function parseIntent(
     throw new Error("Query text must not be empty");
   }
 
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: "deepseek-chat",
     max_tokens: 256,
     messages: [
