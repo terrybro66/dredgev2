@@ -6,6 +6,8 @@ const GOVERNMENT_DOMAINS = [
   "api.tfl.gov.uk",
   "data.police.uk",
   "opendata.bristol.gov.uk",
+  // FSA (Food Standards Agency) open data — official UK government body
+  "fsaopendata.blob.core.windows.net",
 ];
 
 const AUTO_APPROVAL_CONFIDENCE_THRESHOLD = 0.9;

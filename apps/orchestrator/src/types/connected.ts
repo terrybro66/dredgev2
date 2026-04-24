@@ -141,13 +141,15 @@ export type ChipAction =
   | "fetch_domain"
   | "show_map"
   | "show_chart"
-  | "clarify";
+  | "clarify"
+  | "play_video";      // opens the in-browser VideoPlayer with a generated VideoSpec
 
 export interface ChipArgs {
   ref?: string;                          // ResultHandle id, e.g. "qr_456"
-  domain?: string;                       // target domain for fetch_domain
+  domain?: string;                       // target domain for fetch_domain / play_video
+  intent?: string;                       // for play_video: intent string for spec resolution
   filters?: Record<string, unknown>;     // for filter_by
-  location?: string;                     // for compare_location
+  location?: string;                     // for compare_location / play_video context
   field?: string;                        // for filter_by and clarify
   constraint?: string;                   // for filter_by: "no_overlap", etc.
   value?: unknown;                       // for filter_by: pre-bound filter value

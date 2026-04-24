@@ -203,7 +203,7 @@ const { mockShadowAdapter } = vi.hoisted(() => ({
   mockShadowAdapter: { isEnabled: vi.fn(), recover: vi.fn() },
 }));
 const { mockDomainDiscovery } = vi.hoisted(() => ({
-  mockDomainDiscovery: { isEnabled: vi.fn(), run: vi.fn() },
+  mockDomainDiscovery: { isEnabled: vi.fn(), run: vi.fn(), startDiscovery: vi.fn().mockResolvedValue("disc-1") },
 }));
 const { mockClassifyIntent } = vi.hoisted(() => ({
   mockClassifyIntent: vi.fn(),
@@ -337,6 +337,7 @@ beforeEach(() => {
   mockShadowAdapter.recover.mockResolvedValue(null);
   mockDomainDiscovery.isEnabled.mockReturnValue(false);
   mockDomainDiscovery.run.mockResolvedValue(undefined);
+  mockDomainDiscovery.startDiscovery.mockResolvedValue("disc-1");
   mockClassifyIntent.mockResolvedValue({
     confidence: 0,
     domain: null,
@@ -443,7 +444,7 @@ describe("query pipeline — curated source path", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(executeBody);
 
-    expect(mockDomainDiscovery.run).toHaveBeenCalledOnce();
+    expect(mockDomainDiscovery.startDiscovery).toHaveBeenCalledOnce();
   });
 
   it("does NOT trigger discovery when curated registry already matched", async () => {
@@ -456,7 +457,7 @@ describe("query pipeline — curated source path", () => {
     const app = buildApp();
     await request(app).post("/query/execute").send(executeBody);
 
-    expect(mockDomainDiscovery.run).not.toHaveBeenCalled();
+    expect(mockDomainDiscovery.startDiscovery).not.toHaveBeenCalled();
   });
 
   it("registered adapter takes priority over curated registry", async () => {

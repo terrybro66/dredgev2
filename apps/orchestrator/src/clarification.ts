@@ -57,10 +57,12 @@ const CLARIFICATION_RULES: ClarificationRule[] = [
   },
   {
     patterns: [
+      "food registration",
       "food business registration",
       "food business licence",
       "start a food business",
       "register a food business",
+      "register food",
       "food hygiene rating",
       "food premises registration",
     ],

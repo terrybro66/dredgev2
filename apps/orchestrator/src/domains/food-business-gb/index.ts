@@ -101,10 +101,12 @@ function buildConditions(foodType: string): string[] {
 export const foodBusinessGbAdapter: RegulatoryAdapter = {
   name:               "food-business-gb",
   intents:            [
+    "food registration",
     "food business registration",
     "food business licence",
     "start a food business",
     "register a food business",
+    "register food",
     "food hygiene rating",
     "food premises registration",
   ],

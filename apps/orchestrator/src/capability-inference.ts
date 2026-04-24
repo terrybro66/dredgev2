@@ -316,7 +316,26 @@ export function generateChips(
   // 2. Domain-specific chips
   for (const tpl of DOMAIN_CHIPS[handle.domain] ?? []) push(tpl);
 
-  // 3. Template affinity chips
+  // 3. Video guide chip — emitted for regulations template domains
+  //    The frontend resolves a VideoSpec from chip.args.domain via mockSpecs,
+  //    and later from a real spec builder when that is implemented.
+  if (adapters.length > 0) {
+    const sourceAdapter = adapters.find(
+      (a) => a.config.identity.name === handle.domain,
+    );
+    if (sourceAdapter?.config.template.type === "regulations") {
+      push({
+        label: `Watch: ${sourceAdapter.config.identity.displayName} guide`,
+        action: "play_video",
+        args: {
+          domain: handle.domain,
+          intent: sourceAdapter.config.identity.intents[0] ?? handle.domain,
+        },
+      });
+    }
+  }
+
+  // 5. Template affinity chips
   if (adapters.length > 0) {
     const sourceAdapter = adapters.find(
       (a) => a.config.identity.name === handle.domain,
