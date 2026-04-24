@@ -1,22 +1,17 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import Map from "react-map-gl/maplibre";
-import maplibregl from "maplibre-gl";
-import { MapboxOverlay } from "@deck.gl/mapbox";
-import { useControl } from "react-map-gl/maplibre";
-import { ScatterplotLayer } from "@deck.gl/layers";
-import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
-import * as d3Scale from "d3-scale";
-import * as d3Shape from "d3-shape";
-import * as d3Axis from "d3-axis";
-import * as d3Selection from "d3-selection";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { useState, useEffect, useRef } from "react";
+import { VideoPlayer } from "./components/video/VideoPlayer";
+import { resolveSpec } from "./components/video/mockSpecs";
+import type { VideoSpec } from "./components/video/types";
 import { WorkspacesPanel } from "./components/WorkspacesPanel";
 import {
   QueryHistoryCarousel,
   CAROUSEL_CSS,
 } from "./components/QueryHistoryCarousel";
+import { VizRenderer } from "./components/VizRenderer";
 import { useDredgeStore } from "./store";
 import { API } from "./api";
+import { buildVizSpec } from "./types";
+import type { QueryRow, AggregatedBin, VizHint } from "./types";
 
 // ── Session ──────────────────────────────────────────────────────────────────
 
@@ -36,8 +31,6 @@ const SESSION_HEADERS: Record<string, string> = {
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type VizHint = "map" | "bar" | "table" | "dashboard";
 
 interface QueryPlan {
   category: string;
@@ -65,30 +58,6 @@ interface ParsedQuery {
   suggested_workflow?: SuggestedWorkflow;
   temporal?: string;
 }
-
-/** Generic row returned by any domain adapter via query_results. */
-interface QueryRow {
-  id?: string;
-  // canonical pipeline fields
-  date?: string | null;
-  lat?: number | null;
-  lon?: number | null;
-  location?: string | null;
-  description?: string | null;
-  category?: string | null;
-  value?: string | number | null;
-  domain_name?: string;
-  extras?: Record<string, unknown>;
-  // crime-uk carries these legacy fields (still written to query_results)
-  month?: string;
-  street?: string;
-  outcome_category?: string;
-  // some rows carry raw lat/lon under legacy names
-  latitude?: number | null;
-  longitude?: number | null;
-  [key: string]: unknown;
-}
-
 
 // v5.1 types
 interface ExecuteBody {
@@ -123,11 +92,13 @@ type ChipAction =
   | "show_map"
   | "show_chart"
   | "show_table"
-  | "clarify";
+  | "clarify"
+  | "play_video";
 
 interface ChipArgs {
   ref?: string;
   domain?: string;
+  intent?: string;
   filters?: Record<string, unknown>;
   location?: string;
   field?: string;
@@ -234,22 +205,6 @@ interface ChipResultEntry {
   viz_hint: VizHint;
   chips: Chip[];
   count: number;
-}
-
-interface AggregatedBin {
-  lat: number;
-  lon: number;
-  count: number;
-}
-
-interface WeatherRow {
-  id: string;
-  date: string;
-  temperature_max: number | null;
-  temperature_min: number | null;
-  precipitation: number | null;
-  wind_speed: number | null;
-  description: string | null;
 }
 
 type Stage = "idle" | "loading" | "done" | "error";
@@ -472,11 +427,12 @@ const ACTION_ICONS: Partial<Record<ChipAction, string>> = {
   show_chart:       "▲",
   show_table:       "☰",
   calculate_travel: "→",
-  fetch_domain: "⊕",
-  filter_by: "⊘",
-  overlay_spatial: "⊞",
+  fetch_domain:     "⊕",
+  filter_by:        "⊘",
+  overlay_spatial:  "⊞",
   compare_location: "⇄",
-  clarify: "?",
+  play_video:       "▶",
+  clarify:          "?",
 };
 
 export function ActionChips({
@@ -592,6 +548,45 @@ export function ClarificationPanel({
   );
 }
 
+// ── DiscoveringCard — shown while domain auto-discovery pipeline is running ───
+
+function DiscoveringCard({
+  intent,
+  message,
+  status,
+  onDismiss,
+}: {
+  intent: string;
+  message: string;
+  status: "searching" | "review" | "error";
+  onDismiss: () => void;
+}) {
+  const statusLine =
+    status === "review"
+      ? "Source found — waiting for admin review"
+      : status === "error"
+      ? "Discovery failed — no source found"
+      : message;
+
+  return (
+    <div style={{ border: "1px solid rgba(232,184,75,0.3)", borderRadius: 6, padding: "20px 24px", background: "rgba(232,184,75,0.04)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: "#e8b84b", fontFamily: "monospace" }}>
+          {status === "searching" ? "⟳ Discovering" : status === "review" ? "⏸ Under Review" : "✕ Not Found"}
+        </div>
+        <button className="btn-ghost small" onClick={onDismiss}>✕ Dismiss</button>
+      </div>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{intent}</div>
+      <div style={{ fontSize: 13, color: "rgba(240,237,232,0.6)", lineHeight: 1.5 }}>{statusLine}</div>
+      {status === "searching" && (
+        <div style={{ marginTop: 14, height: 2, background: "rgba(232,184,75,0.15)", borderRadius: 1, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: "40%", background: "#e8b84b", borderRadius: 1, animation: "slide 1.4s ease-in-out infinite" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── DecisionResultPanel — Phase D.3 ──────────────────────────────────────────
 
 export function DecisionResultPanel({
@@ -603,7 +598,7 @@ export function DecisionResultPanel({
   intent: string;
   decision: DecisionResult;
   onDismiss: () => void;
-  onChipAction?: (label: string) => void;
+  onChipAction?: (chip: Chip) => void;
 }) {
   const isEligible = decision.eligibility === "eligible";
   const isConditional = decision.eligibility === "conditional";
@@ -713,7 +708,7 @@ export function DecisionResultPanel({
                   className="chip"
                   onClick={() => {
                     onDismiss();
-                    onChipAction(chip.label);
+                    onChipAction(chip);
                   }}
                 >
                   {chip.label}
@@ -1137,674 +1132,9 @@ export function EmptyResults({
   );
 }
 
-// ── DeckGL Overlay ────────────────────────────────────────────────────────────
-
-function DeckGLOverlay(props: any) {
-  const overlay = useControl(() => new MapboxOverlay(props));
-  overlay.setProps(props);
-  return null;
-}
-
-// ── MapView ───────────────────────────────────────────────────────────────────
-
-type MapMode = "points" | "clusters" | "heatmap";
-
-function MapView({
-  results,
-  aggregated,
-}: {
-  results: QueryRow[] | AggregatedBin[];
-  aggregated: boolean;
-}) {
-  const [mode, setMode] = useState<MapMode>("points");
-  const [hover, setHover] = useState<QueryRow | null>(null);
-
-  const points = useMemo(
-    () =>
-      aggregated
-        ? (results as AggregatedBin[]).map((b) => ({
-            lng: b.lon,
-            lat: b.lat,
-            count: b.count,
-          }))
-        : (results as QueryRow[])
-            .map((c) => ({
-              ...c,
-              lng: (c.lon ?? c.longitude) as number,
-              lat: (c.lat ?? c.latitude) as number,
-            }))
-            .filter(
-              (c) =>
-                c.lng != null &&
-                c.lat != null &&
-                Number.isFinite(c.lng) &&
-                Number.isFinite(c.lat),
-            ),
-    [results, aggregated],
-  );
-
-  const first = points[0];
-
-  const layers = useMemo(() => {
-    if (mode === "points")
-      return [
-        new ScatterplotLayer({
-          id: "crime-points",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          getRadius: 30,
-          radiusUnits: "meters",
-          getFillColor: [245, 166, 35, 200],
-          pickable: true,
-          onHover: (info: any) => setHover(info.object ?? null),
-        }),
-      ];
-    if (mode === "clusters")
-      return [
-        new HexagonLayer({
-          id: "crime-clusters",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          radius: 200,
-          elevationScale: 30,
-          extruded: true,
-          pickable: true,
-        }),
-      ];
-    if (mode === "heatmap")
-      return [
-        new HeatmapLayer({
-          id: "crime-heat",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          radiusPixels: 60,
-        }),
-      ];
-    return [];
-  }, [points, mode]);
-
-  return (
-    <div className="map-container">
-      <div className="map-mode-bar">
-        {(["points", "clusters", "heatmap"] as MapMode[]).map((m) => (
-          <button
-            key={m}
-            className={`map-mode-btn ${mode === m ? "active" : ""}`}
-            onClick={() => setMode(m)}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-      <Map
-        mapLib={maplibregl}
-        initialViewState={{
-          longitude: first?.lng ?? -0.1276,
-          latitude: first?.lat ?? 51.5074,
-          zoom: 12,
-          pitch: 40,
-        }}
-        style={{ width: "100%", height: "100%" }}
-        mapStyle="https://tiles.openfreemap.org/styles/liberty"
-      >
-        <DeckGLOverlay layers={layers} />
-      </Map>
-      {hover && !aggregated && (
-        <div className="map-tooltip">
-          <strong>
-            {(hover as any).description ??
-              formatCategory((hover as any).category ?? "") ??
-              "—"}
-          </strong>
-          {(hover as any).street && <span>{(hover as any).street}</span>}
-          {((hover as any).month || (hover as any).date) && (
-            <span>{(hover as any).month ?? (hover as any).date}</span>
-          )}
-          {(hover as any).outcome_category && (
-            <em>{(hover as any).outcome_category}</em>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── BarChart ──────────────────────────────────────────────────────────────────
-
-function BarChart({
-  results,
-  months_fetched,
-}: {
-  results: QueryRow[];
-  months_fetched: string[];
-}) {
-  const dateField =
-    results.length > 0 && "month" in results[0] ? "month" : "date";
-  const counts: Record<string, number> = {};
-  for (const m of months_fetched) counts[m] = 0;
-  for (const r of results) {
-    const key = (r as any)[dateField];
-    if (typeof key === "string") {
-      const ym = key.slice(0, 7);
-      if (ym in counts) counts[ym]++;
-    }
-  }
-  const max = Math.max(...Object.values(counts), 1);
-
-  return (
-    <div className="bar-chart">
-      {months_fetched.map((month) => {
-        const count = counts[month] ?? 0;
-        return (
-          <div key={month} className="bar-col">
-            <div className="bar-count">{count}</div>
-            <div className="bar-track">
-              <div
-                className="bar-fill"
-                style={{ height: `${(count / max) * 100}%` }}
-              />
-            </div>
-            <div className="bar-label">
-              {month.slice(5)}/{month.slice(2, 4)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── TableView ─────────────────────────────────────────────────────────────────
-
-function TableView({
-  results,
-  activeFilter,
-  onClearFilter,
-}: {
-  results: QueryRow[];
-  activeFilter?: { field: string; value: string };
-  onClearFilter?: () => void;
-}) {
-  const filtered = activeFilter
-    ? (results as unknown as Record<string, unknown>[]).filter(
-        (r) => String(r[activeFilter.field] ?? "") === activeFilter.value,
-      )
-    : (results as unknown as Record<string, unknown>[]);
-
-  const capped = filtered.slice(0, 50);
-  const columns =
-    capped.length > 0
-      ? Object.keys(capped[0])
-          .filter((k) => k !== "raw" && k !== "extras")
-          .slice(0, 6)
-      : [];
-
-  return (
-    <div className="table-wrapper">
-      {activeFilter && (
-        <div className="filter-bar">
-          <span className="filter-label">
-            Filtered: <strong>{activeFilter.field}</strong> ={" "}
-            <strong>{activeFilter.value}</strong> ({filtered.length} of{" "}
-            {results.length})
-          </span>
-          {onClearFilter && (
-            <button className="btn-ghost small" onClick={onClearFilter}>
-              ✕ Clear filter
-            </button>
-          )}
-        </div>
-      )}
-      <table className="result-table">
-        <thead>
-          <tr>
-            {columns.map((col) => (
-              <th key={col}>{col.replace(/_/g, " ")}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {capped.map((r, i) => (
-            <tr key={(r.id as string) ?? i}>
-              {columns.map((col) => (
-                <td key={col}>{r[col] != null ? String(r[col]) : "—"}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {filtered.length > 50 && (
-        <div className="table-cap-note">
-          Showing 50 of {filtered.length} results
-          {activeFilter ? " (filtered)" : ""}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Metric cards ──────────────────────────────────────────────────────────────
-
-function MetricCards({ rows }: { rows: WeatherRow[] }) {
-  const validRows = rows.filter(
-    (r) => r.temperature_max != null && r.temperature_min != null,
-  );
-
-  const avgTemp =
-    validRows.length > 0
-      ? validRows.reduce(
-          (sum, r) => sum + (r.temperature_max! + r.temperature_min!) / 2,
-          0,
-        ) / validRows.length
-      : null;
-
-  const totalPrecip = rows.reduce((sum, r) => sum + (r.precipitation ?? 0), 0);
-
-  const avgWind =
-    rows.filter((r) => r.wind_speed != null).length > 0
-      ? rows.reduce((sum, r) => sum + (r.wind_speed ?? 0), 0) /
-        rows.filter((r) => r.wind_speed != null).length
-      : null;
-
-  const descCounts: Record<string, number> = {};
-  rows.forEach((r) => {
-    if (r.description)
-      descCounts[r.description] = (descCounts[r.description] ?? 0) + 1;
-  });
-  const dominantDesc =
-    Object.entries(descCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "—";
-
-  const cards = [
-    {
-      label: "Avg Temperature",
-      value: avgTemp != null ? `${avgTemp.toFixed(1)}°C` : "—",
-    },
-    { label: "Total Precipitation", value: `${totalPrecip.toFixed(1)} mm` },
-    {
-      label: "Avg Wind Speed",
-      value: avgWind != null ? `${avgWind.toFixed(1)} km/h` : "—",
-    },
-    { label: "Dominant Conditions", value: dominantDesc },
-  ];
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(4, 1fr)",
-        gap: "0.75rem",
-        marginBottom: "1.5rem",
-      }}
-    >
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          style={{
-            background: "var(--bg-card, #1a1a2e)",
-            border: "1px solid var(--border, #2a2a4a)",
-            borderRadius: "8px",
-            padding: "1rem",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.75rem",
-              color: "var(--text-muted, #888)",
-              marginBottom: "0.4rem",
-            }}
-          >
-            {c.label}
-          </div>
-          <div
-            style={{
-              fontSize: "1.2rem",
-              fontWeight: 600,
-              color: "var(--text, #fff)",
-            }}
-          >
-            {c.value}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ── Temperature band chart ────────────────────────────────────────────────────
-
-function TemperatureChart({ rows }: { rows: WeatherRow[] }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const W = 800,
-    H = 240,
-    mt = 20,
-    mr = 20,
-    mb = 40,
-    ml = 50;
-  const iW = W - ml - mr;
-  const iH = H - mt - mb;
-
-  useEffect(() => {
-    if (!svgRef.current || rows.length === 0) return;
-
-    const svg = d3Selection.select(svgRef.current);
-    svg.selectAll("*").remove();
-
-    const g = svg.append("g").attr("transform", `translate(${ml},${mt})`);
-
-    const dates = rows.map((r) => new Date(r.date));
-    const allTemps = rows.flatMap((r) => [
-      r.temperature_max ?? 0,
-      r.temperature_min ?? 0,
-    ]);
-    const tempMin = Math.min(...allTemps);
-    const tempMax = Math.max(...allTemps);
-    const padding = (tempMax - tempMin) * 0.1 || 2;
-
-    const xScale = d3Scale
-      .scaleTime()
-      .domain([dates[0], dates[dates.length - 1]])
-      .range([0, iW]);
-
-    const yScale = d3Scale
-      .scaleLinear()
-      .domain([tempMin - padding, tempMax + padding])
-      .range([iH, 0]);
-
-    // Gridlines
-    g.append("g")
-      .attr("class", "grid")
-      .call(
-        d3Axis
-          .axisLeft(yScale)
-          .tickSize(-iW)
-          .tickFormat(() => ""),
-      )
-      .call((g) => g.select(".domain").remove())
-      .call((g) =>
-        g
-          .selectAll(".tick line")
-          .attr("stroke", "var(--border, #2a2a4a)")
-          .attr("stroke-opacity", 0.5),
-      );
-
-    // Temperature band area
-    const area = d3Shape
-      .area<WeatherRow>()
-      .x((d) => xScale(new Date(d.date)))
-      .y0((d) => yScale(d.temperature_min ?? 0))
-      .y1((d) => yScale(d.temperature_max ?? 0))
-      .curve(d3Shape.curveCatmullRom);
-
-    g.append("path")
-      .datum(rows)
-      .attr("fill", "rgba(251, 191, 36, 0.25)")
-      .attr("stroke", "none")
-      .attr("d", area);
-
-    // Centre midpoint line
-    const midLine = d3Shape
-      .line<WeatherRow>()
-      .x((d) => xScale(new Date(d.date)))
-      .y((d) =>
-        yScale(((d.temperature_max ?? 0) + (d.temperature_min ?? 0)) / 2),
-      )
-      .curve(d3Shape.curveCatmullRom);
-
-    g.append("path")
-      .datum(rows)
-      .attr("fill", "none")
-      .attr("stroke", "rgba(251, 191, 36, 0.8)")
-      .attr("stroke-width", 1.5)
-      .attr("d", midLine);
-
-    // Axes
-    const tickCount =
-      rows.length <= 14 ? rows.length : Math.ceil(rows.length / 7);
-    g.append("g")
-      .attr("transform", `translate(0,${iH})`)
-      .call(
-        d3Axis
-          .axisBottom(xScale)
-          .ticks(tickCount)
-          .tickFormat((d) => {
-            const date = d as Date;
-            return `${date.getDate()} ${date.toLocaleString("en-GB", { month: "short" })}`;
-          }),
-      )
-      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
-      .call((g) =>
-        g
-          .selectAll("text")
-          .attr("fill", "var(--text-muted, #888)")
-          .attr("font-size", "11px"),
-      );
-
-    g.append("g")
-      .call(d3Axis.axisLeft(yScale).tickFormat((d) => `${d}°C`))
-      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
-      .call((g) =>
-        g
-          .selectAll("text")
-          .attr("fill", "var(--text-muted, #888)")
-          .attr("font-size", "11px"),
-      );
-
-    // Y axis label
-    g.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -iH / 2)
-      .attr("y", -38)
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--text-muted, #888)")
-      .attr("font-size", "11px")
-      .text("°C");
-  }, [rows]);
-
-  return (
-    <div style={{ marginBottom: "1.5rem" }}>
-      <div
-        style={{
-          fontSize: "0.8rem",
-          color: "var(--text-muted, #888)",
-          marginBottom: "0.5rem",
-          fontWeight: 500,
-        }}
-      >
-        TEMPERATURE RANGE
-      </div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        style={{ display: "block" }}
-      />
-    </div>
-  );
-}
-
-// ── Precipitation bar chart ───────────────────────────────────────────────────
-
-function PrecipitationChart({ rows }: { rows: WeatherRow[] }) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  const W = 800,
-    H = 240,
-    mt = 20,
-    mr = 20,
-    mb = 40,
-    ml = 50;
-  const iW = W - ml - mr;
-  const iH = H - mt - mb;
-
-  useEffect(() => {
-    if (!svgRef.current || rows.length === 0) return;
-
-    const svg = d3Selection.select(svgRef.current);
-    svg.selectAll("*").remove();
-
-    const g = svg.append("g").attr("transform", `translate(${ml},${mt})`);
-
-    const xScale = d3Scale
-      .scaleBand()
-      .domain(rows.map((r) => r.date))
-      .range([0, iW])
-      .padding(0.15);
-
-    const maxPrecip = Math.max(...rows.map((r) => r.precipitation ?? 0));
-    const yScale = d3Scale
-      .scaleLinear()
-      .domain([0, maxPrecip * 1.1 || 1])
-      .range([iH, 0]);
-
-    // Bars
-    g.selectAll(".bar")
-      .data(rows)
-      .join("rect")
-      .attr("class", "bar")
-      .attr("x", (d) => xScale(d.date) ?? 0)
-      .attr("y", (d) => yScale(d.precipitation ?? 0))
-      .attr("width", xScale.bandwidth())
-      .attr("height", (d) => Math.max(1, iH - yScale(d.precipitation ?? 0)))
-      .attr("fill", "rgba(59, 130, 246, 0.7)")
-      .attr("rx", 2);
-
-    // Axes
-    const tickCount =
-      rows.length <= 14 ? rows.length : Math.ceil(rows.length / 7);
-    const tickDates = rows
-      .filter((_, i) => i % Math.ceil(rows.length / tickCount) === 0)
-      .map((r) => r.date);
-
-    g.append("g")
-      .attr("transform", `translate(0,${iH})`)
-      .call(
-        d3Axis
-          .axisBottom(xScale)
-          .tickValues(tickDates)
-          .tickFormat((d) => {
-            const date = new Date(d);
-            return `${date.getDate()} ${date.toLocaleString("en-GB", { month: "short" })}`;
-          }),
-      )
-      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
-      .call((g) =>
-        g
-          .selectAll("text")
-          .attr("fill", "var(--text-muted, #888)")
-          .attr("font-size", "11px"),
-      );
-
-    g.append("g")
-      .call(d3Axis.axisLeft(yScale).tickFormat((d) => `${d}mm`))
-      .call((g) => g.select(".domain").attr("stroke", "var(--border, #2a2a4a)"))
-      .call((g) =>
-        g
-          .selectAll("text")
-          .attr("fill", "var(--text-muted, #888)")
-          .attr("font-size", "11px"),
-      );
-
-    g.append("text")
-      .attr("transform", "rotate(-90)")
-      .attr("x", -iH / 2)
-      .attr("y", -38)
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--text-muted, #888)")
-      .attr("font-size", "11px")
-      .text("mm");
-  }, [rows]);
-
-  return (
-    <div style={{ marginBottom: "1.5rem" }}>
-      <div
-        style={{
-          fontSize: "0.8rem",
-          color: "var(--text-muted, #888)",
-          marginBottom: "0.5rem",
-          fontWeight: 500,
-        }}
-      >
-        PRECIPITATION
-      </div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        style={{ display: "block" }}
-      />
-    </div>
-  );
-}
-
-// ── Conditions timeline ───────────────────────────────────────────────────────
-
-function ConditionsTimeline({ rows }: { rows: WeatherRow[] }) {
-  return (
-    <div style={{ marginBottom: "1rem" }}>
-      <div
-        style={{
-          fontSize: "0.8rem",
-          color: "var(--text-muted, #888)",
-          marginBottom: "0.5rem",
-          fontWeight: 500,
-        }}
-      >
-        CONDITIONS
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-        {rows.map((r) => (
-          <div
-            key={r.id}
-            style={{
-              background: "var(--bg-card, #1a1a2e)",
-              border: "1px solid var(--border, #2a2a4a)",
-              borderRadius: "6px",
-              padding: "0.35rem 0.6rem",
-              fontSize: "0.75rem",
-              color: "var(--text-muted, #888)",
-            }}
-          >
-            <span style={{ color: "var(--text, #fff)", fontWeight: 500 }}>
-              {new Date(r.date).getDate()}{" "}
-              {new Date(r.date).toLocaleString("en-GB", { month: "short" })}
-            </span>
-            {" · "}
-            {r.description ?? "—"}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── DashboardView (main export) ───────────────────────────────────────────────
-
-function DashboardView({ results }: { results: any[] }) {
-  // After the query_results storage migration, weather fields are split:
-  //   temperature_max  → stored as `value`
-  //   temperature_min, precipitation, wind_speed → stored inside `extras` JSONB
-  // Normalise here so all sub-components can access fields directly by name.
-  const rows = results.map((r) => {
-    const extras =
-      r.extras && typeof r.extras === "object" ? (r.extras as Record<string, unknown>) : {};
-    return {
-      ...r,
-      temperature_max: (r.temperature_max as number | null) ?? (r.value as number | null) ?? null,
-      temperature_min: (r.temperature_min as number | null) ?? (extras.temperature_min as number | null) ?? null,
-      precipitation:   (r.precipitation as number | null)   ?? (extras.precipitation as number | null)   ?? null,
-      wind_speed:      (r.wind_speed as number | null)       ?? (extras.wind_speed as number | null)       ?? null,
-    } as WeatherRow;
-  });
-  const isMultiDay = rows.length > 1;
-
-  return (
-    <div style={{ padding: "1rem 0" }}>
-      <MetricCards rows={rows} />
-      {isMultiDay && <TemperatureChart rows={rows} />}
-      {isMultiDay && <PrecipitationChart rows={rows} />}
-      <ConditionsTimeline rows={rows} />
-    </div>
-  );
-}
+// ── MapView / BarChart / TableView / DashboardView ────────────────────────────
+// Extracted to src/components/{MapView,BarChart,TableView,DashboardView}.tsx
+// and composed via VizRenderer — see src/components/VizRenderer.tsx.
 
 // ── StackCard — renders a single chip follow-up result in the result stack ────
 
@@ -1832,14 +1162,10 @@ function StackCard({
 
       {entry.count === 0 ? (
         <p className="empty-hint">No data found for this area.</p>
-      ) : entry.viz_hint === "map" ? (
-        <MapView results={entry.rows as any} aggregated={false} />
-      ) : entry.viz_hint === "dashboard" ? (
-        <DashboardView results={entry.rows as any} />
-      ) : entry.viz_hint === "bar" ? (
-        <BarChart results={entry.rows as any} months_fetched={[]} />
       ) : (
-        <TableView results={entry.rows as any} />
+        <VizRenderer
+          spec={buildVizSpec(entry.viz_hint, entry.rows as QueryRow[])}
+        />
       )}
 
       {chips.length > 0 && (
@@ -1923,26 +1249,19 @@ function ResultRenderer({
           onFollowUp={onFollowUp}
           suggestion={empty_suggestion}
         />
-      ) : viz_hint === "dashboard" ? (
-        <DashboardView results={results} />
-      ) : viz_hint === "map" ? (
-        <MapView results={results} aggregated={result.aggregated} />
-      ) : viz_hint === "bar" ? (
-        <BarChart
-          results={results as QueryRow[]}
-          months_fetched={months_fetched}
-        />
       ) : (
-        <TableView
-          results={results as QueryRow[]}
-          activeFilter={result.activeFilter}
-          onClearFilter={() =>
-            onChipAction({
-              label: "Clear filter",
-              action: "filter_by",
-              args: { field: "__clear__" },
-            })
-          }
+        <VizRenderer
+          spec={buildVizSpec(viz_hint, results, {
+            aggregated: result.aggregated,
+            months: months_fetched,
+            activeFilter: result.activeFilter,
+            onClearFilter: () =>
+              onChipAction({
+                label: "Clear filter",
+                action: "filter_by",
+                args: { field: "__clear__" },
+              }),
+          })}
         />
       )}
 
@@ -2002,6 +1321,7 @@ export default function App() {
   const [chipStack, setChipStack] = useState<ChipResultEntry[]>([]);
   const [synthesis, setSynthesis] = useState<string | null>(null);
   const [synthesisLoading, setSynthesisLoading] = useState(false);
+  const [videoSpec, setVideoSpec] = useState<VideoSpec | null>(null);
   const [intentError, setIntentError] = useState<IntentError | null>(null);
   const [clarification, setClarification] = useState<{
     request: ClarificationRequest;
@@ -2025,6 +1345,67 @@ export default function App() {
   const [lastQueryId, setLastQueryId] = useState<string | null>(null);
   const [lastSnapshotId, setLastSnapshotId] = useState<string | null>(null);
   const [pinTarget, setPinTarget] = useState<string | null>(null);
+  const [discovering, setDiscovering] = useState<{
+    discovery_id: string;
+    intent: string;
+    message: string;
+    /** Body to re-execute once the adapter is registered */
+    executeBody: ExecuteBody;
+  } | null>(null);
+
+  // Poll discovery status while a discovery is in progress.
+  // On "registered" → auto-re-execute the original query.
+  // On "requires_review" | "error" → stop polling, leave card visible.
+  useEffect(() => {
+    if (!discovering) return;
+    const { discovery_id, executeBody } = discovering;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API}/query/discovery/${discovery_id}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+
+        if (data.status === "registered") {
+          if (!cancelled) {
+            setDiscovering(null);
+            // Re-execute the original query now that the adapter is live
+            const execRes = await fetch(`${API}/query/execute`, {
+              method: "POST",
+              headers: SESSION_HEADERS,
+              body: JSON.stringify(executeBody),
+            });
+            const execData = await execRes.json();
+            handleExecuteResponse(execData, executeBody);
+          }
+          return; // stop polling
+        }
+
+        if (data.status === "requires_review") {
+          setDiscovering((prev) =>
+            prev ? { ...prev, message: "Source found — awaiting admin review before it goes live." } : prev
+          );
+          return;
+        }
+        if (data.status === "error") {
+          setDiscovering((prev) =>
+            prev ? { ...prev, message: "Discovery failed — no public data source found for this query." } : prev
+          );
+          return;
+        }
+
+        // Still pending — poll again after 4 s
+        if (!cancelled) setTimeout(poll, 4000);
+      } catch {
+        if (!cancelled) setTimeout(poll, 8000);
+      }
+    };
+
+    setTimeout(poll, 3000);
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discovering?.discovery_id]);
 
   const handleQuery = async (text: string) => {
     setStage("loading");
@@ -2111,6 +1492,19 @@ export default function App() {
         return;
       }
 
+      // Discovery in progress — show status card and begin polling
+      if (data.type === "discovering") {
+        setDiscovering({
+          discovery_id: data.discovery_id,
+          intent: data.intent ?? text,
+          message: data.message ?? `Searching for a source for "${text}"…`,
+          executeBody: { ...(parseData as ExecuteBody), rawText: text },
+        });
+        setStage("done");
+        setLoadingStage(null);
+        return;
+      }
+
       if (!res.ok || data.error) {
         setIntentError({
           error: data.error ?? "execute_error",
@@ -2141,6 +1535,39 @@ export default function App() {
       setStage("error");
     }
     setLoadingStage(null);
+  };
+
+  /**
+   * handleExecuteResponse — shared handler for /execute JSON responses.
+   * Called from the poll effect when auto-retrying after a domain registers.
+   */
+  const handleExecuteResponse = (data: any, executeBody: ExecuteBody) => {
+    if (data.type === "decision_result") {
+      setDecisionResult({ decision: data.decision, intent: data.intent ?? "" });
+      setStage("done");
+      return;
+    }
+    if (data.type === "discovering") {
+      setDiscovering({
+        discovery_id: data.discovery_id,
+        intent: data.intent ?? "",
+        message: data.message ?? "Searching for a source…",
+        executeBody,
+      });
+      setStage("done");
+      return;
+    }
+    if (data.error) {
+      setIntentError({ error: data.error, understood: {}, missing: [], message: data.message ?? "" });
+      setStage("error");
+      return;
+    }
+    setParsed(executeBody);
+    setResult(data);
+    setChipStack([]);
+    setSynthesis(null);
+    setDiscovering(null);
+    setStage("done");
   };
 
   // Follow-up chips call /execute directly — no /parse round-trip
@@ -2195,6 +1622,7 @@ export default function App() {
     setRefineText("");
     setChipStack([]);
     setSynthesis(null);
+    setDiscovering(null);
   };
 
   // Soft reset — returns to input with the last query pre-populated for editing.
@@ -2256,6 +1684,13 @@ export default function App() {
 
   // C.7 / C.11 — action chip dispatch
   const handleChipAction = async (chip: Chip) => {
+    // play_video doesn't need a result — handle it before the guard
+    if (chip.action === "play_video") {
+      const spec = resolveSpec({ intent: chip.args.intent, domain: chip.args.domain });
+      if (spec) setVideoSpec(spec);
+      return;
+    }
+
     if (!result) return;
 
     if (chip.action === "show_map") {
@@ -2582,7 +2017,20 @@ export default function App() {
               intent={decisionResult.intent}
               decision={decisionResult.decision}
               onDismiss={handleNewQuery}
-              onChipAction={handleQuery}
+              onChipAction={handleChipAction}
+            />
+          )}
+
+          {stage === "done" && discovering && !decisionResult && !clarification && (
+            <DiscoveringCard
+              intent={discovering.intent}
+              message={discovering.message}
+              status={
+                discovering.message.includes("awaiting admin") ? "review" :
+                discovering.message.includes("failed") ? "error" :
+                "searching"
+              }
+              onDismiss={handleNewQuery}
             />
           )}
 
@@ -2700,6 +2148,10 @@ export default function App() {
           </div>
         )}
       </div>
+      {/* Video guide modal — sits above everything, closed by videoSpec → null */}
+      {videoSpec && (
+        <VideoPlayer spec={videoSpec} onClose={() => setVideoSpec(null)} />
+      )}
     </>
   );
 }

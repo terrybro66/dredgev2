@@ -1,52 +1,17 @@
-import { useMemo, useState } from "react";
-import Map from "react-map-gl/maplibre";
-import maplibregl from "maplibre-gl";
-import { MapboxOverlay } from "@deck.gl/mapbox";
-import { useControl } from "react-map-gl/maplibre";
-import { ScatterplotLayer } from "@deck.gl/layers";
-import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
-import "maplibre-gl/dist/maplibre-gl.css";
+/**
+ * ResultRenderer — standalone result display component.
+ *
+ * Validates the raw API response with Zod, then delegates all viz rendering
+ * to VizRenderer via VizSpec. Import this if you want a self-contained result
+ * card outside of App.tsx (e.g. in a separate route or embedded widget).
+ */
 import { z } from "zod";
+import { buildVizSpec } from "../types";
+import { VizRenderer } from "./VizRenderer";
 
-// ── Schemas ────────────────────────────────────────────────────────────────────
-
-const AggregatedBinSchema = z.object({
-  lat: z.number(),
-  lon: z.number(),
-  count: z.number(),
-});
-
-const CrimeResultSchema = z.object({
-  id: z.string().optional(),
-  category: z.string(),
-  street: z.string().optional(),
-  month: z.string(),
-  outcome_category: z.string().optional(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-});
+// ── Zod schema ────────────────────────────────────────────────────────────────
 
 const VizHintSchema = z.enum(["map", "bar", "table", "dashboard"]);
-
-const FallbackInfoSchema = z.object({
-  field: z.enum(["date", "location", "category", "radius"]),
-  original: z.string(),
-  used: z.string(),
-  explanation: z.string(),
-});
-
-const FollowUpSchema = z.object({
-  label: z.string(),
-  query: z.any(),
-});
-
-const ResultContextSchema = z.object({
-  status: z.enum(["exact", "fallback", "empty"]),
-  reason: z.string().optional(),
-  fallback: FallbackInfoSchema.optional(),
-  followUps: z.array(FollowUpSchema),
-  confidence: z.enum(["high", "medium", "low"]),
-});
 
 const ExecuteResultSchema = z.object({
   query_id: z.string(),
@@ -57,30 +22,27 @@ const ExecuteResultSchema = z.object({
     location: z.string(),
   }),
   ephemeral: z.boolean().optional().default(false),
-  poly: z.string(),
   viz_hint: VizHintSchema,
   resolved_location: z.string(),
   count: z.number(),
   months_fetched: z.array(z.string()),
-  results: z.union([
-    z.array(AggregatedBinSchema),
-    z.array(CrimeResultSchema),
-    z.array(z.record(z.string(), z.unknown())), // catch-all for non-crime results
-  ]),
+  results: z.array(z.record(z.string(), z.unknown())),
   cache_hit: z.boolean(),
-  resultContext: ResultContextSchema.optional(),
   aggregated: z.boolean().optional().default(false),
+  resultContext: z
+    .object({
+      status: z.enum(["exact", "fallback", "empty"]),
+      reason: z.string().optional(),
+      followUps: z.array(z.object({ label: z.string(), query: z.any() })),
+      confidence: z.enum(["high", "medium", "low"]),
+    })
+    .optional(),
+  insight: z.string().nullable().optional(),
 });
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-type AggregatedBin = z.infer<typeof AggregatedBinSchema>;
-type CrimeResult = z.infer<typeof CrimeResultSchema>;
-type ExecuteResult = z.infer<typeof ExecuteResultSchema>;
+type ValidatedResult = z.infer<typeof ExecuteResultSchema>;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const API = "http://localhost:3001";
 
 function formatCategory(slug: string): string {
   return slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -94,126 +56,24 @@ function formatMonth(ym: string): string {
   });
 }
 
-function isAggregatedBins(
-  results: AggregatedBin[] | CrimeResult[],
-): results is AggregatedBin[] {
-  return (
-    results.length > 0 &&
-    "lon" in results[0] &&
-    "count" in results[0] &&
-    !("category" in results[0])
-  );
-}
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-// ── DownloadToolbar ───────────────────────────────────────────────────────────
-
-function DownloadToolbar({ queryId }: { queryId: string }) {
-  function triggerDownload(format: "csv" | "geojson") {
-    const url = `${API}/query/${encodeURIComponent(queryId)}/export?format=${format}`;
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `dredge-${queryId}.${format === "geojson" ? "geojson" : "csv"}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-
-  return (
-    <div className="download-toolbar">
-      <button
-        className="download-btn"
-        onClick={() => triggerDownload("csv")}
-        title="Download all results as CSV"
-      >
-        ↓ Download CSV
-      </button>
-      <button
-        className="download-btn"
-        onClick={() => triggerDownload("geojson")}
-        title="Download all results as GeoJSON"
-      >
-        ↓ Download GeoJSON
-      </button>
-    </div>
-  );
-}
-
-// ── AggregatedMapView ─────────────────────────────────────────────────────────
-// Renders pre-aggregated bins from the server as a heatmap using deck.gl.
-// Imported lazily to avoid breaking non-map paths if the map bundle is absent.
-// Falls back to a static count badge if deck.gl is unavailable.
-
-function DeckOverlay(props: any) {
-  const overlay = useControl(() => new MapboxOverlay(props));
-  overlay.setProps(props);
-  return null;
-}
-
-function AggregatedMapView({ bins }: { bins: AggregatedBin[] }) {
-  const first = bins[0];
-
-  const heatLayer = new HeatmapLayer({
-    id: "agg-heat",
-    data: bins,
-    getPosition: (d: AggregatedBin) => [d.lon, d.lat],
-    getWeight: (d: AggregatedBin) => d.count,
-    radiusPixels: 60,
-  });
-
-  return (
-    <div className="map-container">
-      <div className="map-agg-badge">aggregated · {bins.length} cells</div>
-      <Map
-        mapLib={maplibregl}
-        initialViewState={{
-          longitude: first?.lon ?? -0.1276,
-          latitude: first?.lat ?? 51.5074,
-          zoom: 11,
-        }}
-        style={{ width: "100%", height: "100%" }}
-        mapStyle="https://tiles.openfreemap.org/styles/liberty"
-      >
-        <DeckOverlay layers={[heatLayer]} />
-      </Map>
-    </div>
-  );
-}
-
-// ── SummaryLine ───────────────────────────────────────────────────────────────
-
-function SummaryLine({ result }: { result: ExecuteResult }) {
-  const {
-    count,
-    plan,
-    viz_hint,
-    resolved_location,
-    months_fetched,
-    aggregated,
-    cache_hit,
-    ephemeral,
-  } = result;
-
+function SummaryLine({ data }: { data: ValidatedResult }) {
+  const { count, plan, viz_hint, resolved_location, months_fetched, aggregated, cache_hit, ephemeral } = data;
   const dateRange =
     plan.date_from === plan.date_to
       ? formatMonth(plan.date_from)
       : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`;
 
-  const isDashboard = viz_hint === "dashboard";
-
-  // For dashboard (weather) — show location + date range, no count
-  if (isDashboard) {
+  if (viz_hint === "dashboard") {
     return (
       <div className="summary-line">
         <span className="summary-desc">
-          <strong>{resolved_location}</strong>
-          {" · "}
-          {dateRange}
+          <strong>{resolved_location}</strong> · {dateRange}
           {months_fetched.length > 1 && ` · ${months_fetched.length} months`}
         </span>
         <div className="summary-badges">
-          {ephemeral && (
-            <span className="badge badge-green">Live data · not saved</span>
-          )}
+          {ephemeral && <span className="badge badge-green">Live · not saved</span>}
           {cache_hit && <span className="badge badge-amber">cached</span>}
         </div>
       </div>
@@ -225,103 +85,14 @@ function SummaryLine({ result }: { result: ExecuteResult }) {
       <span className="summary-count">{count}</span>
       <span className="summary-desc">
         {formatCategory(plan.category).toLowerCase()} in{" "}
-        <strong>{resolved_location}</strong>
-        {" · "}
-        {dateRange}
+        <strong>{resolved_location}</strong> · {dateRange}
         {months_fetched.length > 1 && ` · ${months_fetched.length} months`}
       </span>
       <div className="summary-badges">
         {aggregated && <span className="badge badge-blue">aggregated</span>}
-        {ephemeral && (
-          <span className="badge badge-green">Live data · not saved</span>
-        )}
+        {ephemeral && <span className="badge badge-green">Live · not saved</span>}
         {cache_hit && <span className="badge badge-amber">cached</span>}
       </div>
-    </div>
-  );
-}
-
-// ── BarChart ──────────────────────────────────────────────────────────────────
-
-function BarChart({
-  results,
-  months_fetched,
-}: {
-  results: Record<string, unknown>[];
-  months_fetched: string[];
-}) {
-  // Detect whether rows use 'month' (crime) or 'date' (all other domains)
-  const dateField =
-    results.length > 0 && "month" in results[0] ? "month" : "date";
-
-  const counts: Record<string, number> = {};
-  for (const m of months_fetched) counts[m] = 0;
-  for (const r of results) {
-    const key = r[dateField];
-    if (typeof key === "string") {
-      // date fields may be full ISO strings — normalise to YYYY-MM
-      const ym = key.slice(0, 7);
-      if (ym in counts) counts[ym]++;
-    }
-  }
-  const max = Math.max(...Object.values(counts), 1);
-
-  return (
-    <div className="bar-chart">
-      {months_fetched.map((month) => {
-        const count = counts[month] ?? 0;
-        return (
-          <div key={month} className="bar-col">
-            <div className="bar-count">{count}</div>
-            <div className="bar-track">
-              <div
-                className="bar-fill"
-                style={{ height: `${(count / max) * 100}%` }}
-              />
-            </div>
-            <div className="bar-label">
-              {month.slice(5)}/{month.slice(2, 4)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── TableView ─────────────────────────────────────────────────────────────────
-
-function TableView({ results }: { results: Record<string, unknown>[] }) {
-  const capped = results.slice(0, 50);
-
-  // Derive columns from the first row
-  const columns = capped.length > 0 ? Object.keys(capped[0]).slice(0, 6) : [];
-
-  return (
-    <div className="table-wrapper">
-      <table className="result-table">
-        <thead>
-          <tr>
-            {columns.map((col) => (
-              <th key={col}>{col}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {capped.map((r, i) => (
-            <tr key={(r.id as string) ?? i}>
-              {columns.map((col) => (
-                <td key={col}>{r[col] != null ? String(r[col]) : "—"}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {results.length > 50 && (
-        <div className="table-cap-note">
-          Showing 50 of {results.length} results — download CSV for full data
-        </div>
-      )}
     </div>
   );
 }
@@ -329,13 +100,12 @@ function TableView({ results }: { results: Record<string, unknown>[] }) {
 // ── ResultRenderer ────────────────────────────────────────────────────────────
 
 interface Props {
-  result: unknown; // validated at this boundary
+  result: unknown;
   onRefine?: () => void;
   onFollowUp?: (query: unknown) => void;
 }
 
 export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
-  // ── Zod validation ──
   const parsed = ExecuteResultSchema.safeParse(result);
 
   if (!parsed.success) {
@@ -352,96 +122,60 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
   }
 
   const data = parsed.data;
-  const {
-    query_id,
-    plan,
-    viz_hint,
-    count,
-    months_fetched,
-    results,
-    aggregated,
-    resultContext,
-  } = data;
-
-  const safeContext = resultContext ?? {
-    status: "exact" as const,
-    followUps: [],
-    confidence: "high" as const,
-  };
-
+  const { query_id, viz_hint, count, months_fetched, results, aggregated, resultContext, insight } = data;
+  const safeContext = resultContext ?? { status: "exact" as const, followUps: [], confidence: "high" as const };
   const followUps = safeContext.followUps ?? [];
-  const isDashboard = viz_hint === "dashboard";
 
-  // ── Visualisation selection ──
+  return (
+    <div className="result-panel">
+      <SummaryLine data={data} />
 
-  function renderViz() {
-    if (count === 0) {
-      return (
+      {safeContext.status === "fallback" && safeContext.reason && (
+        <div className="fallback-banner">
+          <span className="fallback-icon">⚠</span>
+          <span className="fallback-text">{safeContext.reason}</span>
+        </div>
+      )}
+
+      {insight && <p className="result-insight">{insight}</p>}
+
+      {count === 0 ? (
         <div className="empty-panel">
           <div className="empty-icon">○</div>
           <div className="empty-title">No results found</div>
           <p className="empty-message">
-            No results found for{" "}
-            <strong>{formatCategory(plan.category)}</strong> in{" "}
-            {plan.date_from === plan.date_to
-              ? formatMonth(plan.date_from)
-              : `${formatMonth(plan.date_from)} – ${formatMonth(plan.date_to)}`}
-            .
+            No results for <strong>{formatCategory(data.plan.category)}</strong>.
           </p>
-          {safeContext.reason && (
-            <p className="empty-reason">{safeContext.reason}</p>
-          )}
+          {safeContext.reason && <p className="empty-reason">{safeContext.reason}</p>}
         </div>
-      );
-    }
-
-    if (viz_hint === "map") {
-      if (aggregated && isAggregatedBins(results)) {
-        // Server pre-aggregated — render heatmap from bins using count as weight
-        return <AggregatedMapView bins={results} />;
-      }
-      // Raw points — existing MapView path (rendered from parent via prop-pass
-      // or inline below with the full MapView implementation from App.tsx)
-      return <LegacyMapView results={results as Record<string, unknown>[]} />;
-    }
-
-    if (viz_hint === "bar") {
-      return (
-        <BarChart
-          results={results as Record<string, unknown>[]}
-          months_fetched={months_fetched}
+      ) : (
+        <VizRenderer
+          spec={buildVizSpec(viz_hint, results, {
+            aggregated,
+            months: months_fetched,
+          })}
         />
-      );
-    }
+      )}
 
-    // "table" (and any unrecognised hint)
-    return <TableView results={results as Record<string, unknown>[]} />;
-  }
-
-  return (
-    <div className="result-panel">
-      {/* Summary line */}
-      <SummaryLine result={data} />
-
-      {/* Fallback banner */}
-      {safeContext.fallback && (
-        <div className="fallback-banner">
-          <span className="fallback-icon">⚠</span>
-          <span className="fallback-text">
-            {safeContext.fallback.explanation}
-          </span>
+      {count > 0 && viz_hint !== "dashboard" && !data.ephemeral && (
+        <div className="download-toolbar">
+          <a
+            href={`/api/query/${query_id}/export?format=csv`}
+            download="dredge-export.csv"
+            className="btn-ghost small"
+          >
+            Download CSV
+          </a>
+          <a
+            href={`/api/query/${query_id}/export?format=geojson`}
+            download="dredge-export.geojson"
+            className="btn-ghost small"
+          >
+            Download GeoJSON
+          </a>
         </div>
       )}
 
-      {/* Visualisation */}
-      {renderViz()}
-
-      {/* Download toolbar — only for non-empty, non-dashboard results */}
-      {count > 0 && !isDashboard && <DownloadToolbar queryId={query_id} />}
-      {count > 0 && !isDashboard && !data.ephemeral && (
-        <DownloadToolbar queryId={query_id} />
-      )}
-      {/* Follow-up chips */}
       {count > 0 && followUps.length > 0 && (
         <div className="followup-chips">
           {followUps.slice(0, 4).map((f) => (
@@ -456,7 +190,6 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
         </div>
       )}
 
-      {/* Refine */}
       {onRefine && (
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button className="btn-ghost small" onClick={onRefine}>
@@ -466,260 +199,4 @@ export function ResultRenderer({ result, onRefine, onFollowUp }: Props) {
       )}
     </div>
   );
-}
-
-// ── LegacyMapView (inline, no additional deps) ────────────────────────────────
-// Mirrors the MapView in App.tsx so ResultRenderer is self-contained.
-// If your build already imports MapView from App.tsx you can delete this and
-// replace the reference above with your shared component.
-
-type MapMode = "points" | "clusters" | "heatmap";
-
-function LegacyMapView({ results }: { results: Record<string, unknown>[] }) {
-  const [mode, setMode] = useState<MapMode>("points");
-  const [hover, setHover] = useState<Record<string, unknown> | null>(null);
-
-  const points = useMemo(
-    () =>
-      results
-        .map((c) => ({ ...c, lng: (c.lon ?? c.longitude) as number, lat: (c.lat ?? c.latitude) as number }))
-        .filter(
-          (c) =>
-            c.lng != null &&
-            c.lat != null &&
-            Number.isFinite(c.lng) &&
-            Number.isFinite(c.lat),
-        ),
-    [results],
-  );
-
-  const first = points[0];
-
-  const layers = useMemo(() => {
-    if (mode === "points")
-      return [
-        new ScatterplotLayer({
-          id: "crime-points",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          getRadius: 30,
-          radiusUnits: "meters",
-          getFillColor: [245, 166, 35, 200],
-          pickable: true,
-          onHover: (info: any) => setHover(info.object ?? null),
-        }),
-      ];
-    if (mode === "clusters")
-      return [
-        new HexagonLayer({
-          id: "crime-clusters",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          radius: 200,
-          elevationScale: 30,
-          extruded: true,
-          pickable: true,
-        }),
-      ];
-    if (mode === "heatmap")
-      return [
-        new HeatmapLayer({
-          id: "crime-heat",
-          data: points,
-          getPosition: (d: any) => [d.lng, d.lat],
-          radiusPixels: 60,
-        }),
-      ];
-    return [];
-  }, [points, mode]);
-
-  return (
-    <div className="map-container">
-      <div className="map-mode-bar">
-        {(["points", "clusters", "heatmap"] as MapMode[]).map((m) => (
-          <button
-            key={m}
-            className={`map-mode-btn ${mode === m ? "active" : ""}`}
-            onClick={() => setMode(m)}
-          >
-            {m}
-          </button>
-        ))}
-      </div>
-      <Map
-        mapLib={maplibregl}
-        initialViewState={{
-          longitude: first?.lng ?? -0.1276,
-          latitude: first?.lat ?? 51.5074,
-          zoom: 12,
-          pitch: 40,
-        }}
-        style={{ width: "100%", height: "100%" }}
-        mapStyle="https://tiles.openfreemap.org/styles/liberty"
-      >
-        <DeckOverlay layers={layers} />
-      </Map>
-      {hover && (
-        <div className="map-tooltip">
-          <strong>
-            {(hover as any).description ??
-              formatCategory((hover as any).category ?? "") ??
-              "—"}
-          </strong>
-          {(hover as any).street && <span>{(hover as any).street}</span>}
-          {((hover as any).month || (hover as any).date) && (
-            <span>{(hover as any).month ?? (hover as any).date}</span>
-          )}
-          {(hover as any).outcome_category && (
-            <em>{(hover as any).outcome_category}</em>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── CSS ───────────────────────────────────────────────────────────────────────
-// Inject styles for the new elements added in Step 7. The existing styles from
-// App.tsx cover .result-panel, .map-container, .bar-chart, etc. — these rules
-// only cover the new pieces: download toolbar, summary line, badges, zod error.
-
-const styles = `
-  /* ── Summary line ── */
-  .summary-line {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 14px;
-    flex-wrap: wrap;
-  }
-  .summary-count {
-    font-family: var(--display);
-    font-size: 40px;
-    font-weight: 800;
-    color: var(--amber);
-    line-height: 1;
-    flex-shrink: 0;
-  }
-  .summary-desc {
-    color: var(--text-mid);
-    font-size: 12px;
-    flex: 1;
-  }
-  .summary-badges {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    margin-left: auto;
-  }
-
-  /* ── Badges ── */
-  .badge {
-    font-family: var(--mono);
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    padding: 2px 7px;
-    border-radius: 2px;
-    border: 1px solid;
-    text-transform: uppercase;
-  }
-  .badge-amber { color: var(--amber); border-color: var(--amber-dim); background: rgba(245,166,35,0.08); }
-  .badge-blue  { color: #60a5fa;     border-color: rgba(96,165,250,0.3); background: rgba(96,165,250,0.06); }
-
-  /* ── Download toolbar ── */
-  .download-toolbar {
-    display: flex;
-    gap: 8px;
-    padding-top: 4px;
-  }
-  .download-btn {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-dim);
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    padding: 6px 14px;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .download-btn:hover { color: var(--text); border-color: var(--text-mid); }
-
-  /* ── Aggregated map badge ── */
-  .map-agg-badge {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 10;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    color: #60a5fa;
-    font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    padding: 4px 10px;
-  }
-
-  /* ── Aggregated fallback (no map) ── */
-  .agg-fallback {
-    border: 1px solid var(--border);
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    align-items: center;
-    background: var(--bg2);
-  }
-  .agg-fallback-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    max-width: 400px;
-    justify-content: center;
-  }
-  .agg-cell {
-    width: 12px;
-    height: 12px;
-    background: var(--amber);
-    border-radius: 1px;
-  }
-  .agg-fallback-note { font-size: 11px; color: var(--text-dim); }
-
-  /* ── Zod validation error ── */
-  .zod-error {
-    border: 1px solid var(--red);
-    background: #110a0a;
-    padding: 16px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    animation: fadeIn 0.2s ease;
-  }
-  .zod-error-label {
-    font-size: 10px;
-    letter-spacing: 0.12em;
-    color: var(--red);
-    text-transform: uppercase;
-  }
-  .zod-error-detail {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: #f87171;
-    white-space: pre-wrap;
-    margin: 0;
-    line-height: 1.7;
-  }
-    .badge-green { color: #4ade80; border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.06); }
-`;
-
-// Inject styles once on module load
-if (typeof document !== "undefined") {
-  const id = "result-renderer-styles";
-  if (!document.getElementById(id)) {
-    const el = document.createElement("style");
-    el.id = id;
-    el.textContent = styles;
-    document.head.appendChild(el);
-  }
 }
