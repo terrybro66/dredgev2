@@ -104,6 +104,49 @@ async function fetchPolygon(
   return rows[0].poly;
 }
 
+// ── Nominatim reverse geocode ─────────────────────────────────────────────────
+
+async function reverseGeocodeToDisplay(
+  lat: number,
+  lon: number,
+): Promise<{ display_name: string; country_code: string }> {
+  const response = await axios.get(
+    "https://nominatim.openstreetmap.org/reverse",
+    {
+      params: { lat, lon, format: "json", zoom: 10, addressdetails: 1 },
+      headers: { "User-Agent": "dredge/1.0" },
+      timeout: 10000,
+    },
+  );
+  const hit = response.data as {
+    display_name?: string;
+    address?: { country_code?: string };
+    country_code?: string;
+  };
+  const country_code = (
+    hit.address?.country_code ?? hit.country_code ?? ""
+  ).toUpperCase();
+  return {
+    display_name: hit.display_name ?? `${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+    country_code,
+  };
+}
+
+/**
+ * Build a PolygonResult directly from browser/IP coordinates.
+ * Reverse-geocodes to get a display name, then generates a 5 km polygon.
+ * Used when the client provides GPS coords instead of a place name.
+ */
+export async function geocodeFromCoords(
+  lat: number,
+  lon: number,
+  prisma: GeocoderPrisma,
+): Promise<PolygonResult> {
+  const { display_name, country_code } = await reverseGeocodeToDisplay(lat, lon);
+  const poly = await fetchPolygon(prisma, lat, lon);
+  return { lat, lon, display_name, country_code, poly };
+}
+
 // ── geocodeToCoordinates ──────────────────────────────────────────────────────
 
 export async function geocodeToCoordinates(

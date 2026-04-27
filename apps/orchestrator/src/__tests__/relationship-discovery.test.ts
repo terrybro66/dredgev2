@@ -110,10 +110,10 @@ describe("getMergedRelationships", () => {
   });
 
   it("preserves seeded relationshipType when merging", async () => {
-    // flood-risk → transport is seeded as "complements"
+    // cinemas-gb → food-hygiene-gb is seeded as "complements"
     const merged = await getMergedRelationships();
     const seeded = merged.find(
-      (r) => r.fromDomain === "flood-risk" && r.toDomain === "transport",
+      (r) => r.fromDomain === "cinemas-gb" && r.toDomain === "food-hygiene-gb",
     );
     expect(seeded?.relationshipType).toBe("complements");
   });
@@ -130,13 +130,13 @@ describe("getMergedRelationships", () => {
   });
 
   it("keeps seeded weight when it is higher than learned", async () => {
-    // flood-risk → transport is seeded at 0.9 (very high)
-    mockCounts = [{ pair: "flood-risk:transport", count: 5 }]; // 0.1
+    // cinemas-gb → food-hygiene-gb is seeded at 0.8 (high)
+    mockCounts = [{ pair: "cinemas-gb:food-hygiene-gb", count: 5 }]; // 0.1
     const merged = await getMergedRelationships();
     const rel = merged.find(
-      (r) => r.fromDomain === "flood-risk" && r.toDomain === "transport",
+      (r) => r.fromDomain === "cinemas-gb" && r.toDomain === "food-hygiene-gb",
     );
-    expect(rel!.weight).toBeCloseTo(0.9);
+    expect(rel!.weight).toBeCloseTo(0.8);
   });
 
   it("adds a new pair not present in seeded entries", async () => {
@@ -171,9 +171,9 @@ describe("getMergedRelationships", () => {
 
 describe("getRelationshipWeight", () => {
   it("returns the seeded weight for a known pair", async () => {
-    // flood-risk → transport seeded at 0.9
-    const weight = await getRelationshipWeight("flood-risk", "transport");
-    expect(weight).toBeCloseTo(0.9);
+    // cinemas-gb → food-hygiene-gb seeded at 0.8
+    const weight = await getRelationshipWeight("cinemas-gb", "food-hygiene-gb");
+    expect(weight).toBeCloseTo(0.8);
   });
 
   it("returns 0 for an unknown pair", async () => {
@@ -188,9 +188,10 @@ describe("getRelationshipWeight", () => {
   });
 
   it("is directional — (A→B) and (B→A) may differ", async () => {
-    const atob = await getRelationshipWeight("flood-risk", "transport");
-    const btoa = await getRelationshipWeight("transport", "flood-risk");
-    // seeded entries only have flood-risk→transport at 0.9, not the reverse
+    // cinemas-gb → food-hygiene-gb seeded at 0.8
+    // food-hygiene-gb → cinemas-gb seeded at 0.6 (different direction, different weight)
+    const atob = await getRelationshipWeight("cinemas-gb", "food-hygiene-gb");
+    const btoa = await getRelationshipWeight("food-hygiene-gb", "cinemas-gb");
     expect(atob).not.toBe(btoa);
   });
 });

@@ -66,6 +66,11 @@ export interface ResultHandle {
   ephemeral: boolean;
   rowCount: number;
   data: unknown[] | null;  // non-null only when ephemeral: true
+  // Origin context — stored on the handle so chips can navigate back to the
+  // original query area even after active_plan / active_poly have been
+  // overwritten by a subsequent query.
+  plan?: Record<string, unknown>;
+  poly?: string;
 }
 
 export const MAX_EPHEMERAL_ROWS = 100;

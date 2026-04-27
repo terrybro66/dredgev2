@@ -10,7 +10,7 @@ import {
   VizHint,
 } from "@dredge/schemas";
 import { prisma } from "./db";
-import { geocodeToPolygon } from "./geocoder";
+import { geocodeToPolygon, geocodeFromCoords } from "./geocoder";
 import { parseIntent, deriveVizHint, expandDateRange } from "./intent";
 import { getDomainForQuery, getDomainByName, getAllAdapters, DomainAdapter } from "./domains/registry";
 import { acquire } from "./rateLimiter";
@@ -24,6 +24,7 @@ import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
 import { getMergedRelationships } from "./relationship-discovery";
+import { cacheDomainBbox, getDomainBboxes } from "./spatial-coverage";
 import { buildClarificationRequest } from "./clarification";
 import { getRegulatoryAdapter } from "./regulatory-adapter";
 import type { Chip } from "./types/connected";
@@ -32,6 +33,7 @@ import {
   getQueryContext,
   getResultHandle,
   pushResultHandle,
+  storeResultHandle,
   createEphemeralHandle,
   loadMemory,
 } from "./conversation-memory";
@@ -163,7 +165,13 @@ async function recordDomainCoOccurrence(
 
 export const queryRouter = Router();
 
-const ParseBodySchema = z.object({ text: z.string().min(1) });
+const ParseBodySchema = z.object({
+  text: z.string().min(1),
+  /** Browser or IP geolocation coordinates — used when query implies "near me" */
+  coords: z
+    .object({ lat: z.number(), lon: z.number() })
+    .optional(),
+});
 
 const ExecuteBodySchema = z.object({
   plan: QueryPlanSchema,
@@ -187,7 +195,7 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
       .status(400)
       .json({ error: "validation_error", details: bodyResult.error.errors });
   }
-  const { text } = bodyResult.data;
+  const { text, coords } = bodyResult.data;
 
   let plan;
   try {
@@ -198,19 +206,65 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
 
   const sessionId = (req.headers["x-session-id"] as string | undefined) ?? null;
 
-  // Detect "near me" — if the LLM returned a near-me placeholder, substitute
-  // the location stored from the user's last real query.
+  // "Near me" detection — covers explicit phrases and implicit local intent.
+  // If matched, attempt resolution in priority order:
+  //   1. Session memory  — location stored from a prior query this session
+  //   2. Client coords   — GPS or IP coordinates sent with the request
+  //   3. location_required — ask the user inline (all fallbacks exhausted)
   const NEAR_ME_PATTERN =
-    /\bnear\s+me\b|\bmy\s+location\b|\bmy\s+area\b|\bnearby\b/i;
-  if (NEAR_ME_PATTERN.test(plan.location) || NEAR_ME_PATTERN.test(text)) {
-    if (sessionId) {
-      const stored = await getUserLocation(sessionId);
-      if (stored) {
-        plan = {
-          ...plan,
-          location: stored.display_name,
-        };
+    /\bnear\s+me\b|\bmy\s+location\b|\bmy\s+area\b|\bnearby\b|\blocal\b|\bhere\b/i;
+
+  // isNearMe is true only when the LLM echoed a near-me placeholder back.
+  // If the LLM already resolved to a real place name (e.g. "Cambridge, UK"),
+  // treat that as the location and skip the fallback chain — the LLM either
+  // used session context it was given, or the user's text contained the place.
+  const llmReturnedPlaceholder = NEAR_ME_PATTERN.test(plan.location ?? "");
+  const isNearMe = llmReturnedPlaceholder || NEAR_ME_PATTERN.test(text);
+
+  if (isNearMe && llmReturnedPlaceholder) {
+    // 1 — session memory
+    const stored = sessionId ? await getUserLocation(sessionId) : null;
+    if (stored) {
+      plan = { ...plan, location: stored.display_name };
+    } else if (coords) {
+      // 2 — client-supplied coordinates (browser geolocation / IP)
+      let geocodedFromCoords;
+      try {
+        geocodedFromCoords = await geocodeFromCoords(coords.lat, coords.lon, prisma);
+      } catch {
+        // reverse geocode failed — fall through to location_required
       }
+      if (geocodedFromCoords) {
+        if (sessionId) {
+          await setUserLocation(sessionId, {
+            lat: geocodedFromCoords.lat,
+            lon: geocodedFromCoords.lon,
+            display_name: geocodedFromCoords.display_name,
+            country_code: geocodedFromCoords.country_code,
+          });
+        }
+        return res.json({
+          plan: {
+            category: plan.category,
+            location: geocodedFromCoords.display_name,
+            date_from: "",
+            date_to: "",
+          },
+          poly: geocodedFromCoords.poly,
+          viz_hint: deriveVizHint(plan, text, ""),
+          resolved_location: geocodedFromCoords.display_name,
+          country_code: geocodedFromCoords.country_code,
+          intent: "",
+          months: [],
+        });
+      }
+    } else {
+      // 3 — no location available — ask the user inline
+      return res.status(200).json({
+        type: "location_required",
+        intent: plan.category ?? text,
+        message: "Where are you searching? Type a place name or share your location.",
+      });
     }
   }
 
@@ -221,8 +275,10 @@ queryRouter.post("/parse", async (req: Request, res: Response) => {
     return res.status(400).json(err);
   }
 
-  // Store resolved location for future "near me" queries
-  if (sessionId && !NEAR_ME_PATTERN.test(text)) {
+  // Store resolved location for future "near me" queries.
+  // Always store when the LLM returned a real place name — that's new signal
+  // regardless of whether the text contained "near me".
+  if (sessionId && !llmReturnedPlaceholder) {
     await setUserLocation(sessionId, {
       lat: geocoded.lat,
       lon: geocoded.lon,
@@ -935,6 +991,12 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       }),
     );
 
+    const registeredAdapters = getAllAdapters();
+    const domainBboxes = await getDomainBboxes(
+      registeredAdapters.map((a) => a.config.identity.name),
+    );
+    const queryBbox = poly ? parsePoly(poly).toBbox() : undefined;
+
     const chips = suggestFollowups({
       rows: cached.results as unknown[],
       domain: adapter.config.identity.name,
@@ -951,7 +1013,9 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       },
       clickCounts,
       domainRelationships: mergedRelationships,
-      adapters: getAllAdapters(),
+      adapters: registeredAdapters,
+      domainBboxes,
+      queryBbox,
     });
 
     const cachedEmptyReason =
@@ -978,6 +1042,19 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
     recordDomainCoOccurrence(sessionId, adapter.config.identity.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
+      // Store thin handle so chip clicks on this result can resolve the original
+      // plan/poly even after active_plan has been overwritten by a later query.
+      storeResultHandle(sessionId, {
+        id: `qr_${queryRecord.id}`,
+        type: adapter.config.identity.name,
+        domain: adapter.config.identity.name,
+        capabilities: [],
+        ephemeral: false,
+        rowCount: cached.result_count,
+        data: null,
+        plan: plan as Record<string, unknown>,
+        poly: poly ?? "",
+      }).catch(() => {});
     }
 
     return res.json({
@@ -1163,6 +1240,16 @@ FROM (
       }),
     );
 
+    // Cache this domain's spatial coverage so future chip generation can
+    // suppress affinity chips for areas where the domain has no data.
+    cacheDomainBbox(adapter.config.identity.name, storedResults as unknown[]).catch(() => {});
+
+    const registeredAdapters = getAllAdapters();
+    const domainBboxes = await getDomainBboxes(
+      registeredAdapters.map((a) => a.config.identity.name),
+    );
+    const queryBbox = poly ? parsePoly(poly).toBbox() : undefined;
+
     const chips = suggestFollowups({
       rows: storedResults as unknown[],
       domain: adapter.config.identity.name,
@@ -1179,7 +1266,9 @@ FROM (
       },
       clickCounts,
       domainRelationships: mergedRelationships,
-      adapters: getAllAdapters(),
+      adapters: registeredAdapters,
+      domainBboxes,
+      queryBbox,
     });
 
     const emptyReason =
@@ -1213,6 +1302,19 @@ FROM (
     recordDomainCoOccurrence(sessionId, adapter.config.identity.name).catch(() => {});
     if (sessionId) {
       updateQueryContext(sessionId, { active_plan: plan, active_poly: poly }).catch(() => {});
+      // Store thin handle so chip clicks can resolve the original plan/poly
+      // even after active_plan has been overwritten by a later query.
+      storeResultHandle(sessionId, {
+        id: `qr_${queryRecord.id}`,
+        type: adapter.config.identity.name,
+        domain: adapter.config.identity.name,
+        capabilities: [],
+        ephemeral: false,
+        rowCount: storedResults.length,
+        data: null,
+        plan: plan as Record<string, unknown>,
+        poly: poly ?? "",
+      }).catch(() => {});
     }
 
     return res.json({
@@ -1285,7 +1387,13 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
       .json({ error: "validation_error", details: parsed.error.errors });
   }
 
-  const { action, args, sessionId } = parsed.data;
+  const { action, args } = parsed.data;
+  // Session ID comes from the x-session-id header (consistent with /parse and /execute).
+  // Body sessionId is accepted as a fallback for backwards-compatibility.
+  const sessionId =
+    (req.headers["x-session-id"] as string | undefined) ??
+    parsed.data.sessionId ??
+    null;
 
   // C.8 — record this chip click so chip ranking improves over the session
   if (sessionId) {
@@ -1385,7 +1493,13 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
         // Future phases can use the handle's capabilities for richer context.
         if (args.ref) {
           const handle = await getResultHandle(sessionId, args.ref);
-          if (!handle) {
+          if (handle) {
+            // Prefer the handle's original plan/poly over the session's
+            // active_plan/active_poly, which may have been overwritten by a
+            // later query.
+            if (handle.plan) plan = { ...handle.plan };
+            if (handle.poly !== undefined) poly = handle.poly;
+          } else {
             console.warn(
               JSON.stringify({
                 event: "chip_stale_reference",

@@ -20,6 +20,8 @@
 import { inferCapabilities, generateChips } from "./capability-inference";
 import { rankChips } from "./chip-ranker";
 import { DOMAIN_RELATIONSHIPS } from "./domain-relationships";
+import { bboxOverlaps } from "./spatial-coverage";
+import type { Bbox } from "./poly";
 import type { Chip, ConversationMemory, DomainRelationship, ResultHandle } from "./types/connected";
 import type { DomainAdapter } from "./domains/registry";
 
@@ -54,6 +56,19 @@ export interface SuggestFollowupsInput {
    * Omitting disables cross-domain chip generation (safe default).
    */
   adapters?: DomainAdapter[];
+  /**
+   * Cached bounding boxes for registered domains, keyed by domain name.
+   * Obtained via getDomainBboxes() from spatial-coverage.ts.
+   * Used to suppress affinity chips for domains with no data in the current
+   * area. If a domain has no entry, its chip is always shown (bootstrap).
+   */
+  domainBboxes?: Map<string, Bbox>;
+  /**
+   * Bounding box of the current query polygon.
+   * Used alongside domainBboxes to filter out-of-area affinity chips.
+   * Obtained via parsePoly(poly).toBbox().
+   */
+  queryBbox?: Bbox;
 }
 
 /**
@@ -65,6 +80,8 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
     rows, domain, handleId, ephemeral, memory, clickCounts = {},
     domainRelationships = DOMAIN_RELATIONSHIPS as DomainRelationship[],
     adapters = [],
+    domainBboxes,
+    queryBbox,
   } = input;
 
   const capabilities = inferCapabilities(rows);
@@ -79,7 +96,21 @@ export function suggestFollowups(input: SuggestFollowupsInput): Chip[] {
     data:         ephemeral ? rows : null,
   };
 
-  const chips = generateChips(handle, adapters);
+  let allChips = generateChips(handle, adapters);
+
+  // Spatial coverage filter: suppress fetch_domain affinity chips for domains
+  // whose cached bbox doesn't overlap the current query area. Domains with no
+  // cached bbox are kept (bootstrap — chip shown, may return empty).
+  if (domainBboxes && queryBbox && domainBboxes.size > 0) {
+    allChips = allChips.filter((chip) => {
+      if (chip.action !== "fetch_domain" || !chip.args.domain) return true;
+      const targetBbox = domainBboxes.get(chip.args.domain);
+      if (!targetBbox) return true; // no cache entry → show the chip
+      return bboxOverlaps(targetBbox, queryBbox);
+    });
+  }
+
+  const chips = allChips;
 
   if (chips.length === 0) return [];
 

@@ -15,6 +15,7 @@ vi.mock("../intent", () => ({
 
 vi.mock("../geocoder", () => ({
   geocodeToPolygon: vi.fn(),
+  geocodeFromCoords: vi.fn(),
 }));
 
 vi.mock("../semantic/classifier", () => ({
@@ -111,7 +112,7 @@ describe("POST /query/parse — near-me session substitution", () => {
     );
   });
 
-  it("uses LLM location as-is when no session location is stored", async () => {
+  it("returns location_required when near-me detected and no session location or coords", async () => {
     (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...basePlan,
       location: "near me",
@@ -124,8 +125,36 @@ describe("POST /query/parse — near-me session substitution", () => {
       .send({ text: "crime near me last month" });
 
     expect(res.status).toBe(200);
-    // Falls through to geocode whatever the LLM returned
-    expect(geocodeToPolygon).toHaveBeenCalledWith("near me", expect.anything());
+    expect(res.body.type).toBe("location_required");
+    expect(res.body.intent).toBeTruthy();
+    // Geocoder must NOT be called — we returned early
+    expect(geocodeToPolygon).not.toHaveBeenCalled();
+  });
+
+  it("resolves via client coords when no session location is stored", async () => {
+    const { geocodeFromCoords } = await import("../geocoder");
+    (parseIntent as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...basePlan,
+      location: "near me",
+    });
+    (getUserLocation as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (geocodeFromCoords as ReturnType<typeof vi.fn>).mockResolvedValue({
+      lat: 53.48,
+      lon: -2.24,
+      display_name: "Manchester, Greater Manchester, England",
+      country_code: "GB",
+      poly: "53.48,-2.24:53.49,-2.25",
+    });
+
+    const res = await request(app)
+      .post("/query/parse")
+      .set("x-session-id", "sess-abc")
+      .send({ text: "crime near me last month", coords: { lat: 53.48, lon: -2.24 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.type).not.toBe("location_required");
+    expect(res.body.resolved_location).toContain("Manchester");
+    expect(geocodeToPolygon).not.toHaveBeenCalled();
   });
 
   it("stores location after resolving a real place name", async () => {

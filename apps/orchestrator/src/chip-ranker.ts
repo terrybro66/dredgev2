@@ -42,16 +42,16 @@ function computeFrequency(
 }
 
 /**
- * Spatial relevance: 1.0 for chips that operate on the result directly;
- * 0.5 for chips that need the user's current location and none is stored.
+ * Spatial relevance: 1.0 for chips that operate on the result or carry their
+ * own spatial context (fetch_domain affinity chips use the active_poly, not
+ * the user's GPS location); 0.5 for calculate_travel which genuinely needs
+ * the user's current physical location to compute a route.
  */
 function computeSpatialRelevance(
   chip: Chip,
   memory: ConversationMemory,
 ): number {
-  const needsLocation =
-    chip.action === "calculate_travel" || chip.action === "fetch_domain";
-  if (needsLocation) {
+  if (chip.action === "calculate_travel") {
     return memory.context.location != null ? 1.0 : 0.5;
   }
   return 1.0;

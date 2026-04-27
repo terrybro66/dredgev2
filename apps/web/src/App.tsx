@@ -1352,6 +1352,29 @@ export default function App() {
     /** Body to re-execute once the adapter is registered */
     executeBody: ExecuteBody;
   } | null>(null);
+  const [locationPrompt, setLocationPrompt] = useState<{
+    /** The original query text — used to re-run once location is provided */
+    originalText: string;
+    intent: string;
+  } | null>(null);
+  const [locationInput, setLocationInput] = useState("");
+
+  /** Browser geolocation — requested silently on first load, used for near-me queries */
+  const coordsRef = useRef<{ lat: number; lon: number } | null>(null);
+
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        coordsRef.current = {
+          lat: pos.coords.latitude,
+          lon: pos.coords.longitude,
+        };
+      },
+      () => { /* permission denied or unavailable — silently degrade */ },
+      { timeout: 5000, maximumAge: 5 * 60 * 1000 },
+    );
+  }, []);
 
   // Poll discovery status while a discovery is in progress.
   // On "registered" → auto-re-execute the original query.
@@ -1420,9 +1443,22 @@ export default function App() {
       const res = await fetch(`${API}/query/parse`, {
         method: "POST",
         headers: SESSION_HEADERS,
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          ...(coordsRef.current ? { coords: coordsRef.current } : {}),
+        }),
       });
       const data = await res.json();
+
+      // Server needs a location and no fallback was available
+      if (data.type === "location_required") {
+        setLocationPrompt({ originalText: text, intent: data.intent ?? text });
+        setLocationInput("");
+        setStage("done");
+        setLoadingStage(null);
+        return;
+      }
+
       if (!res.ok) {
         setIntentError(data);
         setStage("error");
@@ -1623,6 +1659,17 @@ export default function App() {
     setChipStack([]);
     setSynthesis(null);
     setDiscovering(null);
+    setLocationPrompt(null);
+    setLocationInput("");
+  };
+
+  const handleLocationSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!locationPrompt || !locationInput.trim()) return;
+    const refined = `${locationPrompt.originalText} in ${locationInput.trim()}`;
+    setLocationPrompt(null);
+    setLocationInput("");
+    handleQuery(refined);
   };
 
   // Soft reset — returns to input with the last query pre-populated for editing.
@@ -1864,7 +1911,7 @@ export default function App() {
         const res = await fetch(`${API}/query/chip`, {
           method: "POST",
           headers: SESSION_HEADERS,
-          body: JSON.stringify({ chip }),
+          body: JSON.stringify({ action: chip.action, args: chip.args }),
         });
         const data = await res.json();
         if (data.type === "ephemeral" && Array.isArray(data.rows)) {
@@ -2032,6 +2079,34 @@ export default function App() {
               }
               onDismiss={handleNewQuery}
             />
+          )}
+
+          {stage === "done" && locationPrompt && (
+            <div className="location-prompt">
+              <p className="location-prompt__message">
+                Where are you searching for <strong>{locationPrompt.intent}</strong>?
+              </p>
+              <form className="location-prompt__form" onSubmit={handleLocationSubmit}>
+                <input
+                  autoFocus
+                  className="location-prompt__input"
+                  type="text"
+                  placeholder="e.g. Manchester, Leeds, Bristol…"
+                  value={locationInput}
+                  onChange={(e) => setLocationInput(e.target.value)}
+                />
+                <button
+                  className="location-prompt__submit"
+                  type="submit"
+                  disabled={!locationInput.trim()}
+                >
+                  Search
+                </button>
+              </form>
+              <button className="location-prompt__dismiss" onClick={handleNewQuery}>
+                Cancel
+              </button>
+            </div>
           )}
 
           {stage === "done" && workflowInput && (
@@ -3045,5 +3120,81 @@ const CSS = `
 @keyframes slideIn {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
+}
+
+/* ── Location prompt — inline, no modal ─────────────────────────────────── */
+
+.location-prompt {
+  border: 1px solid rgba(255, 200, 80, 0.3);
+  background: rgba(255, 200, 80, 0.04);
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: fadeIn 0.15s ease;
+}
+
+.location-prompt__message {
+  font-size: 13px;
+  color: var(--text-mid);
+  margin: 0;
+}
+
+.location-prompt__message strong {
+  color: var(--text);
+}
+
+.location-prompt__form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.location-prompt__input {
+  flex: 1;
+  max-width: 320px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+}
+
+.location-prompt__input:focus {
+  border-color: rgba(255, 200, 80, 0.5);
+}
+
+.location-prompt__submit {
+  background: rgba(255, 200, 80, 0.15);
+  border: 1px solid rgba(255, 200, 80, 0.4);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 8px 16px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+}
+
+.location-prompt__submit:hover:not(:disabled) {
+  background: rgba(255, 200, 80, 0.25);
+}
+
+.location-prompt__submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.location-prompt__dismiss {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  align-self: flex-start;
 }
 `;

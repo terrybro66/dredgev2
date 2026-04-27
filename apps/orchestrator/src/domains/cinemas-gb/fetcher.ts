@@ -15,7 +15,14 @@
 
 import { parsePoly } from "../../poly";
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// Public Overpass instances in priority order.
+// Verified working: private.coffee and osm.ch respond reliably.
+// If the primary returns 403/406/429/5xx we try the next in order.
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass.osm.ch/api/interpreter",
+];
 
 // Known chain name normalisations (lowercase match → display name)
 const CHAIN_MAP: Record<string, string> = {
@@ -75,18 +82,62 @@ out center tags;
 `.trim();
 }
 
-export async function fetchCinemas(poly: string | null): Promise<CinemaRow[]> {
-  const query = buildQuery(poly);
-
-  const res = await fetch(OVERPASS_URL, {
+/**
+ * POST to one Overpass endpoint; returns the raw Response or throws.
+ */
+async function postToOverpass(
+  endpoint: string,
+  query: string,
+): Promise<Response> {
+  const res = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
+      "User-Agent": "dredge/1.0 (https://github.com/dredge)",
+    },
     body: `data=${encodeURIComponent(query)}`,
     signal: AbortSignal.timeout(35_000),
   });
+  return res;
+}
 
-  if (!res.ok) {
-    throw new Error(`Overpass API error: ${res.status} ${res.statusText}`);
+const RETRY_DELAY_MS = 300;
+
+export async function fetchCinemas(poly: string | null): Promise<CinemaRow[]> {
+  const query = buildQuery(poly);
+
+  let lastError: Error | null = null;
+  let res: Response | null = null;
+
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i++) {
+    const endpoint = OVERPASS_ENDPOINTS[i];
+    if (i > 0) await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    try {
+      const r = await postToOverpass(endpoint, query);
+      // 429 = rate limited, 5xx = server error → try next mirror
+      if (r.status === 400) {
+        // Bad Overpass QL syntax — will fail on every mirror, don't retry
+        throw new Error(`Overpass API error: ${r.status} ${r.statusText}`);
+      }
+      if (!r.ok) {
+        // 403 (IP block), 406 (busy), 429 (rate limit), 5xx — try next mirror
+        lastError = new Error(`Overpass ${endpoint}: ${r.status} ${r.statusText}`);
+        continue;
+      }
+      res = r;
+      break;
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Overpass API error")) {
+        throw err; // fatal 4xx — don't retry
+      }
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // network error or timeout — try next mirror
+    }
+  }
+
+  if (!res) {
+    throw lastError ?? new Error("All Overpass endpoints failed");
   }
 
   const data = (await res.json()) as {

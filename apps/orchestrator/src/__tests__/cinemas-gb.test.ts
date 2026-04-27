@@ -132,10 +132,37 @@ describe("fetchCinemas", () => {
     );
   });
 
-  it("throws when Overpass returns non-ok response", async () => {
-    mockFetch.mockResolvedValueOnce({ ok: false, status: 429, statusText: "Too Many Requests" });
+  it("throws when all Overpass mirrors return 429", async () => {
+    // Three mirrors, each returns 429 — should exhaust all and throw
+    const rateLimited = { ok: false, status: 429, statusText: "Too Many Requests" };
+    mockFetch
+      .mockResolvedValueOnce(rateLimited)
+      .mockResolvedValueOnce(rateLimited)
+      .mockResolvedValueOnce(rateLimited);
     const { fetchCinemas } = await import("../domains/cinemas-gb/fetcher");
-    await expect(fetchCinemas(null)).rejects.toThrow("429");
+    await expect(fetchCinemas(null)).rejects.toThrow(/overpass|429/i);
+  });
+
+  it.each([
+    [406, "Not Acceptable"],
+    [403, "Forbidden"],
+    [429, "Too Many Requests"],
+    [503, "Service Unavailable"],
+  ])("retries mirrors when primary returns %i", async (status, statusText) => {
+    mockFetch
+      .mockResolvedValueOnce({ ok: false, status, statusText })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ elements: [] }) });
+    const { fetchCinemas } = await import("../domains/cinemas-gb/fetcher");
+    const rows = await fetchCinemas(null);
+    expect(rows).toHaveLength(0);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws immediately on 400 without trying mirrors (bad query syntax)", async () => {
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 400, statusText: "Bad Request" });
+    const { fetchCinemas } = await import("../domains/cinemas-gb/fetcher");
+    await expect(fetchCinemas(null)).rejects.toThrow("400");
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
 

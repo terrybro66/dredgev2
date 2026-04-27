@@ -78,7 +78,8 @@ async function fetchFromFsaUrl(url: string): Promise<FoodEstablishment[]> {
   const res = await fetch(url, {
     headers: {
       "x-api-version": "2",
-      accept: "application/json",
+      "Accept": "application/json",
+      "User-Agent": "dredge/1.0 (https://github.com/dredge; data research tool)",
     },
     signal: AbortSignal.timeout(15_000),
   });

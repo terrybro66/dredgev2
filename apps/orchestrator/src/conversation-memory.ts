@@ -188,7 +188,9 @@ export function emptyContext(): QueryContext {
 
 /**
  * Store a ResultHandle in the session handles hash.
- * Ephemeral handles only — persistent handles are referenced by id only.
+ * Used for both ephemeral handles (full data) and thin persistent handle
+ * records (plan + poly only, data: null) so chip clicks can resolve the
+ * original query context even after active_plan has been overwritten.
  */
 export async function storeResultHandle(
   sessionId: string,
