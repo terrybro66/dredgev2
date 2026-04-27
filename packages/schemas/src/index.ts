@@ -475,6 +475,17 @@ export type DomainConfigV2 = {
     type: TemplateType;
     capabilities: Partial<Record<Capability, boolean>>;
     spatialAggregation?: boolean;
+    /**
+     * Positive declaration of which template types this domain connects to.
+     * When present, only the listed template types are considered for
+     * cross-domain affinity chips — the global TEMPLATE_AFFINITY matrix is
+     * ignored for this domain. When absent, the global matrix fires as a
+     * fallback (the correct behaviour for auto-discovered domains).
+     *
+     * Set to [] to declare that this domain has no template affinity (all
+     * follow-ups are handled by domain-specific chips in DOMAIN_CHIPS).
+     */
+    affinityInto?: TemplateType[];
   };
 
   // 4. Field Semantics — keyed by canonical field name
