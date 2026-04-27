@@ -160,6 +160,9 @@ const weatherConfig: DomainConfigV2 = {
   template: {
     type: "forecasts",
     capabilities: { has_time_series: true },
+    // Weather is usually the destination of a query, not the launchpad.
+    // No template affinity chips — forecasts results stand alone.
+    affinityInto: [],
   },
   fields: {
     date: { source: "date", type: "time", role: "time", format: "YYYY-MM-DD" },

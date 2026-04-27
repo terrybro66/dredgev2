@@ -199,24 +199,6 @@ const SUPPRESSED_ACTIONS: Record<string, Set<string>> = {
   "crime-uk": new Set(["calculate_travel"]),
 };
 
-// ── Per-domain affinity target suppressions ──────────────────────────────────
-//
-// Prevents the template affinity engine from emitting cross-domain chips
-// whose structural relationship is valid but contextually wrong for this
-// domain.  The map key is the *source* domain; the set lists template types
-// that should NOT appear as affinity targets for it.
-//
-// Rule of thumb: suppress when the user's follow-up mental model is vertical
-// (go deeper into this domain's data) rather than horizontal (jump to a
-// related domain).  Keep the global TEMPLATE_AFFINITY matrix intact so other
-// domains that share the same template type can still benefit from the rule.
-
-const SUPPRESSED_AFFINITY_TARGETS: Record<string, Set<TemplateType>> = {
-  // Cinema queries → vertical intent (showtimes, directions, reviews).
-  // places→listings would surface food hygiene; places→forecasts would surface
-  // weather — neither is a natural follow-up when browsing for a film.
-  "cinemas-gb": new Set<TemplateType>(["listings", "forecasts"]),
-};
 
 // ── Domain-specific chip overrides ───────────────────────────────────────────
 //
@@ -364,15 +346,18 @@ export function generateChips(
       | undefined;
 
     if (sourceTemplate) {
-      const affinityTargets = TEMPLATE_AFFINITY[sourceTemplate] ?? [];
-      const suppressedForSource = SUPPRESSED_AFFINITY_TARGETS[handle.domain];
+      // Prefer the domain's own positive declaration; fall back to the global
+      // matrix for domains that have no explicit config (auto-discovered).
+      const affinityTargets =
+        sourceAdapter?.config.template.affinityInto
+        ?? TEMPLATE_AFFINITY[sourceTemplate]
+        ?? [];
       for (const targetAdapter of adapters) {
         const targetName = targetAdapter.config.identity.name;
         if (targetName === handle.domain) continue;
         if (PIPELINE_PRIMITIVE_DOMAINS.has(targetName)) continue;
         const targetTemplate = targetAdapter.config.template.type as TemplateType;
         if (!affinityTargets.includes(targetTemplate)) continue;
-        if (suppressedForSource?.has(targetTemplate)) continue;
         push({
           label: affinityLabel(targetAdapter),
           action: "fetch_domain",

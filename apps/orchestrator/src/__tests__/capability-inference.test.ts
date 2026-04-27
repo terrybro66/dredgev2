@@ -19,6 +19,40 @@ function makeHandle(
   };
 }
 
+function makeAdapter(
+  name: string,
+  templateType: string,
+  displayName?: string,
+  templateExtras?: { affinityInto?: string[] },
+): DomainAdapter {
+  return {
+    config: {
+      identity: {
+        name,
+        displayName: displayName ?? name,
+        description: "",
+        countries: [],
+        intents: [name],
+      },
+      source: { type: "rest", endpoint: `https://example.com/${name}` },
+      template: { type: templateType as any, capabilities: {}, ...templateExtras },
+      fields: {},
+      time: { type: "static" },
+      recovery: [],
+      storage: {
+        storeResults: true,
+        tableName: "query_results",
+        prismaModel: "queryResult",
+        extrasStrategy: "retain_unmapped",
+      },
+      visualisation: { default: "table", rules: [] },
+    },
+    fetchData: async () => [],
+    flattenRow: (r) => r as Record<string, unknown>,
+    storeResults: async () => {},
+  };
+}
+
 // ── inferCapabilities ─────────────────────────────────────────────────────────
 
 describe("inferCapabilities", () => {
@@ -343,39 +377,6 @@ describe("generateChips", () => {
 
 // ── Template affinity engine ──────────────────────────────────────────────────
 
-function makeAdapter(
-  name: string,
-  templateType: string,
-  displayName?: string,
-): DomainAdapter {
-  return {
-    config: {
-      identity: {
-        name,
-        displayName: displayName ?? name,
-        description: "",
-        countries: [],
-        intents: [name],
-      },
-      source: { type: "rest", endpoint: `https://example.com/${name}` },
-      template: { type: templateType as any, capabilities: {} },
-      fields: {},
-      time: { type: "static" },
-      recovery: [],
-      storage: {
-        storeResults: true,
-        tableName: "query_results",
-        prismaModel: "queryResult",
-        extrasStrategy: "retain_unmapped",
-      },
-      visualisation: { default: "table", rules: [] },
-    },
-    fetchData: async () => [],
-    flattenRow: (r) => r as Record<string, unknown>,
-    storeResults: async () => {},
-  };
-}
-
 describe("generateChips — template affinity engine", () => {
   it("emits no affinity chips when no adapters are passed (safe default)", () => {
     const handle = makeHandle({
@@ -458,14 +459,16 @@ describe("generateChips — template affinity engine", () => {
     expect(primitiveChips).toHaveLength(0);
   });
 
-  it("places → listings affinity: cinemas-gb result gets food-hygiene-gb chip", () => {
+  it("places → listings affinity: places stub without affinityInto gets listings chip (global matrix fallback)", () => {
+    // This test documents the auto-discovered domain path: a places-template
+    // domain with no affinityInto declared inherits the global matrix rules.
     const handle = makeHandle({
       domain: "cinemas-gb",
       data: [{ lat: 51.5, lon: -0.1 }],
       capabilities: ["has_coordinates"],
     });
     const adapters = [
-      makeAdapter("cinemas-gb", "places"),
+      makeAdapter("cinemas-gb", "places"),   // no affinityInto → global matrix
       makeAdapter("food-hygiene-gb", "listings", "Food Hygiene Ratings"),
     ];
     const chips = generateChips(handle, adapters);
@@ -544,5 +547,196 @@ describe("generateChips — template affinity engine", () => {
     );
     // Both are distinct domains so both chips should appear
     expect(weatherChips).toHaveLength(2);
+  });
+});
+
+// ── affinityInto positive selection ──────────────────────────────────────────
+
+describe("generateChips — affinityInto positive selection", () => {
+
+  // ── absent: falls back to global matrix ──────────────────────────────────
+
+  it("absent affinityInto falls back to global TEMPLATE_AFFINITY matrix", () => {
+    // Explicit proof that the existing matrix still fires when the field is
+    // omitted — the auto-discovered domain path must not regress.
+    const handle = makeHandle({
+      domain: "new-places-domain",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("new-places-domain", "places"),   // no affinityInto
+      makeAdapter("food-hygiene-gb",   "listings"),
+      makeAdapter("weather",           "forecasts"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).toContain("food-hygiene-gb");
+    expect(affinityDomains).toContain("weather");
+  });
+
+  // ── affinityInto: [] — no affinity chips ─────────────────────────────────
+
+  it("affinityInto: [] emits no template affinity chips", () => {
+    const handle = makeHandle({
+      domain: "cinemas-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("cinemas-gb",     "places", "Cinemas", { affinityInto: [] }),
+      makeAdapter("food-hygiene-gb","listings"),
+      makeAdapter("weather",        "forecasts"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityChips = chips.filter(
+      (c) => c.action === "fetch_domain" && c.args.domain !== "cinema-showtimes",
+    );
+    expect(affinityChips).toHaveLength(0);
+  });
+
+  it("affinityInto: [] does not affect capability chips", () => {
+    const handle = makeHandle({
+      domain: "cinemas-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("cinemas-gb", "places", "Cinemas", { affinityInto: [] }),
+      makeAdapter("weather",    "forecasts"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const actions = chips.map((c) => c.action);
+    expect(actions).toContain("show_map");
+    expect(actions).toContain("calculate_travel");
+  });
+
+  it("affinityInto: [] does not affect domain-specific chips", () => {
+    const handle = makeHandle({
+      domain: "cinemas-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("cinemas-gb", "places", "Cinemas", { affinityInto: [] }),
+    ];
+    const chips = generateChips(handle, adapters);
+    const showtimes = chips.find(
+      (c) => c.action === "fetch_domain" && c.args.domain === "cinema-showtimes",
+    );
+    expect(showtimes).toBeDefined();
+  });
+
+  // ── affinityInto: partial list ────────────────────────────────────────────
+
+  it("affinityInto: ['boundaries'] emits only boundaries chips, not forecasts or places", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk",     "incidents", "Crime", { affinityInto: ["boundaries"] }),
+      makeAdapter("flood-risk-gb","boundaries"),
+      makeAdapter("weather",      "forecasts"),   // not in affinityInto
+      makeAdapter("cinemas-gb",   "places"),      // not in affinityInto
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).toContain("flood-risk-gb");
+    expect(affinityDomains).not.toContain("weather");
+    expect(affinityDomains).not.toContain("cinemas-gb");
+  });
+
+  it("affinityInto: ['incidents', 'places'] emits both, not forecasts", () => {
+    const handle = makeHandle({
+      domain: "flood-risk-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("flood-risk-gb","boundaries", "Flood Risk", { affinityInto: ["incidents", "places"] }),
+      makeAdapter("crime-uk",     "incidents"),
+      makeAdapter("cinemas-gb",   "places"),
+      makeAdapter("weather",      "forecasts"),  // not in affinityInto
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).toContain("crime-uk");
+    expect(affinityDomains).toContain("cinemas-gb");
+    expect(affinityDomains).not.toContain("weather");
+  });
+
+  it("all registered domains matching a declared template type get a chip", () => {
+    // Two boundaries domains registered — both should appear
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk",       "incidents", "Crime",        { affinityInto: ["boundaries"] }),
+      makeAdapter("flood-risk-gb",  "boundaries"),
+      makeAdapter("conservation-gb","boundaries"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).toContain("flood-risk-gb");
+    expect(affinityDomains).toContain("conservation-gb");
+  });
+
+  // ── affinityInto does not bypass existing exclusion rules ─────────────────
+
+  it("pipeline primitives are still excluded even if affinityInto names their template type", () => {
+    const handle = makeHandle({
+      domain: "crime-uk",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("crime-uk",        "incidents", "Crime", { affinityInto: ["places"] }),
+      makeAdapter("geocoder",        "places"),    // pipeline primitive — must be excluded
+      makeAdapter("travel-estimator","places"),    // pipeline primitive — must be excluded
+      makeAdapter("cinemas-gb",      "places"),    // real domain — must appear
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).not.toContain("geocoder");
+    expect(affinityDomains).not.toContain("travel-estimator");
+    expect(affinityDomains).toContain("cinemas-gb");
+  });
+
+  it("source domain is still excluded from its own affinity chips with affinityInto set", () => {
+    const handle = makeHandle({
+      domain: "food-hygiene-gb",
+      data: [{ lat: 51.5, lon: -0.1 }],
+      capabilities: ["has_coordinates"],
+    });
+    const adapters = [
+      makeAdapter("food-hygiene-gb","listings", "Food Hygiene", { affinityInto: ["listings"] }),
+      makeAdapter("other-listings", "listings"),
+    ];
+    const chips = generateChips(handle, adapters);
+    const affinityDomains = chips
+      .filter((c) => c.action === "fetch_domain")
+      .map((c) => c.args.domain);
+
+    expect(affinityDomains).not.toContain("food-hygiene-gb");
+    expect(affinityDomains).toContain("other-listings");
   });
 });

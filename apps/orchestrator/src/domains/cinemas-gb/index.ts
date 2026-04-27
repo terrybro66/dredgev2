@@ -34,6 +34,9 @@ const config: DomainConfigV2 = {
   template: {
     type: "places",
     capabilities: { has_coordinates: true, has_category: true },
+    // Vertical intent: users want showtimes, directions, and reviews —
+    // not food hygiene or weather. DOMAIN_CHIPS handles all follow-ups.
+    affinityInto: [],
   },
   fields: {
     description: { source: "tags.name", type: "string", role: "label" },
