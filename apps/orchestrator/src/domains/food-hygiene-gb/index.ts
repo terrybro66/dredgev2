@@ -45,6 +45,8 @@ const config: DomainConfigV2 = {
       has_coordinates: true,
       has_category: true,
     },
+    // Area safety context is the natural follow-up for food hygiene results.
+    affinityInto: ["incidents"],
   },
 
   // Fields map to FoodEstablishment property names (the shape returned by the

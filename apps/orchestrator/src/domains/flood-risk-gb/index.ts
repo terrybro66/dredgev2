@@ -50,6 +50,9 @@ const config: DomainConfigV2 = {
       has_coordinates: true,
       has_category: true,
     },
+    // What incidents occurred inside this zone (incidents);
+    // what services or venues are at risk within it (places).
+    affinityInto: ["incidents", "places"],
   },
 
   fields: {
