@@ -25,9 +25,11 @@ const crimeConfig: DomainConfigV2 = {
       has_category: true,
     },
     spatialAggregation: true,
-    // Flood risk zones (boundaries) give spatial safety context;
-    // weather (forecasts) correlates conditions with crime periods.
-    affinityInto: ["boundaries", "forecasts"],
+    // No top-down affinity declared — real follow-up paths will be learned
+    // from directed template transitions in the engagement graph.
+    // (Previous declaration ["boundaries", "forecasts"] was based on user
+    // story structure, not observed behaviour.)
+    affinityInto: [],
   },
   fields: {
     description: { source: "location.street.name", type: "string", role: "label" },

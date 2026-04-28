@@ -24,6 +24,7 @@ import { createRestProvider } from "./providers/rest-provider";
 import { tagRows } from "./enrichment/source-tag";
 import { suggestFollowups } from "./suggest-followups";
 import { getMergedRelationships } from "./relationship-discovery";
+import { getTemplateTransitionWeights, recordTemplateTransition } from "./engagement-graph";
 import { cacheDomainBbox, getDomainBboxes } from "./spatial-coverage";
 import { buildClarificationRequest } from "./clarification";
 import { getRegulatoryAdapter } from "./regulatory-adapter";
@@ -936,7 +937,11 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
 
   // Resolve merged domain relationships (static seed + Redis co-occurrence)
   // once per request so both the cache-hit and live paths use learned weights.
-  const mergedRelationships = await getMergedRelationships().catch(() => []);
+  // Also fetch engagement graph transition weights (Layer 3) in parallel.
+  const [mergedRelationships, templateTransitionWeights] = await Promise.all([
+    getMergedRelationships().catch(() => []),
+    getTemplateTransitionWeights().catch(() => new Map<string, number>()),
+  ]);
 
   let cached = await prisma.queryCache.findUnique({ where: { query_hash } });
 
@@ -1016,6 +1021,7 @@ queryRouter.post("/execute", async (req: Request, res: Response) => {
       adapters: registeredAdapters,
       domainBboxes,
       queryBbox,
+      templateTransitionWeights,
     });
 
     const cachedEmptyReason =
@@ -1269,6 +1275,7 @@ FROM (
       adapters: registeredAdapters,
       domainBboxes,
       queryBbox,
+      templateTransitionWeights,
     });
 
     const emptyReason =
@@ -1540,6 +1547,30 @@ queryRouter.post("/chip", async (req: Request, res: Response) => {
 
       if (sessionId) {
         await pushResultHandle(sessionId, handle);
+      }
+
+      // Layer 3: record the directed template transition so the engagement
+      // graph can learn which cross-domain paths users actually follow.
+      // Fire-and-forget — never blocks or throws.
+      if (args.ref && sessionId) {
+        (async () => {
+          try {
+            const parentHandle = await getResultHandle(sessionId, args.ref!);
+            if (parentHandle?.domain) {
+              const sourceAdapter = getDomainByName(parentHandle.domain);
+              const sourceTemplate = sourceAdapter?.config.template.type;
+              const targetTemplate = adapter.config.template.type;
+              if (sourceTemplate && targetTemplate) {
+                await recordTemplateTransition(
+                  sourceTemplate as string,
+                  targetTemplate as string,
+                );
+              }
+            }
+          } catch {
+            // non-critical — ignore all errors
+          }
+        })();
       }
 
       const viz_hint =
