@@ -104,14 +104,44 @@ export interface RankChipsInput {
   domainRelationships?: DomainRelationship[];
   /** Per-action click counts from the session's chip_clicks Redis hash (C.8). */
   clickCounts?: Record<string, number>;
+  /**
+   * Layer 3 engagement graph multipliers, keyed by chip dedupe key
+   * ("action:domain::").  When present, the chip's base score is multiplied
+   * by this value before sorting.
+   *
+   * Range:
+   *   1.0 — unobserved pair (key absent from map) → no change
+   *   [0.5, 1.5] — observed pair; low-clicked edges penalised, popular boosted
+   *
+   * Obtain via computeEngagementMultipliers() from suggest-followups.ts.
+   */
+  engagementMultipliers?: Map<string, number>;
+}
+
+/**
+ * Canonical chip dedupe key — matches the format used in generateChips().
+ * Used here to look up per-chip engagement multipliers.
+ */
+function chipKey(chip: Chip): string {
+  return `${chip.action}:${chip.args.domain ?? ""}:${chip.args.constraint ?? ""}:${chip.args.field ?? ""}`;
 }
 
 /**
  * Score every chip, annotate with scoreBreakdown, and return the top
  * CHIP_DISPLAY_MAX chips sorted by score descending.
+ *
+ * When engagementMultipliers is supplied (Layer 3), each chip's base score is
+ * scaled by the multiplier for its (source template → target template) pair:
+ *   - Key absent from map → multiplier 1.0 (unobserved, no change)
+ *   - Key present → value in [0.5, 1.5] (penalise ignored / boost popular)
  */
 export function rankChips(input: RankChipsInput): Chip[] {
-  const { chips, handle, memory, domainRelationships = [], clickCounts = {} } = input;
+  const {
+    chips, handle, memory,
+    domainRelationships = [],
+    clickCounts = {},
+    engagementMultipliers,
+  } = input;
 
   const scored: Chip[] = chips.map((chip) => {
     const scoreBreakdown: ChipScore = {
@@ -120,9 +150,11 @@ export function rankChips(input: RankChipsInput): Chip[] {
       recency:            computeRecency(chip, memory),
       relationshipWeight: computeRelationshipWeight(chip, handle, domainRelationships),
     };
+    const baseScore = computeChipScore(scoreBreakdown);
+    const multiplier = engagementMultipliers?.get(chipKey(chip)) ?? 1.0;
     return {
       ...chip,
-      score:          computeChipScore(scoreBreakdown),
+      score:          baseScore * multiplier,
       scoreBreakdown,
     };
   });
